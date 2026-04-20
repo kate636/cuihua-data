@@ -1,0 +1,55 @@
+# ========== 凭证（绝不入库）==========
+.env
+*.env
+!.env.example
+
+# ========== 数据文件 ==========
+data/
+*.duckdb
+*.duckdb.wal
+*.parquet
+
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ========== 输出产物 ==========
+fm_etl_v3/output/
+fm_etl_v2/output/
+legacy_scripts/**/output/
+output/
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.html
+
+# ========== IDE / 系统 ==========
+.vscode/
+.idea/
+.cursor/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ========== 日志 ==========
+*.log
+logs/
+
+# ========== 临时文件 ==========
+*.tmp
+*.bak
+*~
