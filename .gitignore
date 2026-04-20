@@ -1,3 +1,14 @@
+# ========== 仓库范围限定 ==========
+# 这是 cuihua-data（ETL 专用仓库），只保留 ETL 流程相关内容
+# 以下历史/旁系目录不入库（保留本地，用于开发参考）
+/fm_etl_v2/
+/legacy_scripts/
+/monitoring/
+/upstream/
+/底表/
+/docs/
+/fm_etl_pipeline/
+
 # ========== 凭证（绝不入库）==========
 .env
 *.env

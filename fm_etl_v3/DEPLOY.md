@@ -154,7 +154,7 @@ duckdb /opt/fm/data/fm.duckdb "SELECT COUNT(*) FROM atomic_sales"
 #### 2.6 安装 daily_run.sh + crontab
 
 ```bash
-cp /opt/fm/etl/cuihua-data/deploy/daily_run.sh /opt/fm/etl/daily_run.sh
+cp /opt/fm/etl/cuihua-data/fm_etl_v3/deploy/daily_run.sh /opt/fm/etl/daily_run.sh
 chmod +x /opt/fm/etl/daily_run.sh
 
 # 追加 cron（不动现有行）
@@ -169,7 +169,7 @@ crontab -l | grep daily_run
 #### 3.1 装 systemd 单元
 
 ```bash
-cp /opt/fm/etl/cuihua-data/deploy/fm-query-api.service /etc/systemd/system/
+cp /opt/fm/etl/cuihua-data/fm_etl_v3/deploy/fm-query-api.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable fm-query-api
 systemctl start fm-query-api
@@ -182,7 +182,7 @@ ss -tlnp | grep 5003                   # 确认只监听 127.0.0.1:5003
 找到现有 nginx 监听 8080 的 server block（常见位置 `/etc/nginx/conf.d/reports.conf` 或 `/etc/nginx/nginx.conf`），在 `server { listen 8080; ... }` 块内追加一整段：
 
 ```nginx
-# 从 /opt/fm/etl/cuihua-data/deploy/nginx-api.conf 复制
+# 从 /opt/fm/etl/cuihua-data/fm_etl_v3/deploy/nginx-api.conf 复制
 location /api/ {
     proxy_pass http://127.0.0.1:5003;
     proxy_http_version 1.1;
