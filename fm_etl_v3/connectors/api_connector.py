@@ -22,7 +22,7 @@ import pandas as pd
 import requests
 
 from ..config import get_settings
-from ..utils import get_logger, with_retry
+from ..utils import get_logger, retry_on_exception
 
 _log = get_logger("api_connector")
 
@@ -39,7 +39,7 @@ class ApiConnector:
         self._version    = cfg.version
 
     # ── 公开接口（与原 StarRocksConnector.query 签名一致）───────────────────
-    @with_retry(max_attempts=3, delay=5.0)
+    @retry_on_exception(max_attempts=3, wait_seconds=5.0)
     def query(self, sql: str, params=None) -> pd.DataFrame:
         """执行 SELECT SQL，返回 DataFrame。自动处理分页，最多重试 3 次。"""
         _log.debug(f"query: {sql[:120].strip()} ...")
