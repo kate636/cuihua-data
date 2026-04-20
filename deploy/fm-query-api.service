@@ -1,0 +1,36 @@
+[Unit]
+Description=FM Query API (DuckDB read-only HTTP service)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+WorkingDirectory=/opt/fm/etl/cuihua-data
+EnvironmentFile=/opt/fm/etl/cuihua-data/.env
+
+# 仅监听 127.0.0.1:5003，不暴露公网；对外通过 nginx location /api/ 反代
+ExecStart=/opt/fm/etl/cuihua-data/.venv/bin/uvicorn \
+    fm_etl_v3.query_api.app:app \
+    --host 127.0.0.1 \
+    --port 5003 \
+    --workers 2 \
+    --access-log \
+    --log-level info
+
+Restart=on-failure
+RestartSec=5
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/fm/logs
+
+StandardOutput=append:/opt/fm/logs/query-api.log
+StandardError=append:/opt/fm/logs/query-api.log
+
+[Install]
+WantedBy=multi-user.target
