@@ -2,7 +2,7 @@
 FM 客数底表构建器
 
 粒度: 门店 × 日期 × day_clear × level_description × level_id
-结果留在 DuckDB/MotherDuck t_fm_cust。
+结果落到 DuckDB 的 t_fm_cust。
 
 客数来源: 线下+线上订单明细（两张 hive 表 UNION ALL）
 按多个层级聚合客数，level_description 取值：
@@ -35,7 +35,7 @@ class CustBuilder:
         self._log  = get_logger("CustBuilder")
 
     def build(self, start: str, end: str, yesterday: str) -> None:
-        """从 API 拉取订单明细，在 DuckDB 计算客数，结果留在 DuckDB/MotherDuck。"""
+        """从 API 拉取订单明细，在 DuckDB 计算客数并落到 t_fm_cust。"""
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
         self._extract_orders(start, end, yesterday)
         self._compute_cust()

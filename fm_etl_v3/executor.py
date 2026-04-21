@@ -8,11 +8,9 @@ FM ETL v3.0 主执行器
     QDM_ACCESS_KEY      QDM BI API access key
     QDM_SECRET_KEY      QDM BI API secret key
     QDM_API_ID          API ID（默认 i_fjl10g687-790）
-    MOTHERDUCK_TOKEN    MotherDuck token（空则使用本地 DuckDB）
-    MOTHERDUCK_DB       MotherDuck 数据库名（默认 fm_etl_v3）
-    FM_DUCKDB_PATH      本地 DuckDB 路径（MOTHERDUCK_TOKEN 为空时生效）
+    FM_DUCKDB_PATH      DuckDB 文件路径（云端: /opt/fm/data/fm.duckdb）
 
-Pipeline 顺序：
+Pipeline 顺序（所有写入都落到同一个 DuckDB 文件）：
   Step 1  提取维度表 (一次性快照)
   Step 2  提取 9 个原子域 (分批)
   Step 3  合并原子宽表
@@ -20,10 +18,10 @@ Pipeline 顺序：
   Step 5  均价计算
   Step 6  金额计算
   Step 7  毛利计算
-  Step 8  构建 FM 商品维度底表 → DuckDB/MotherDuck
-  Step 9  构建 FM 客数底表     → DuckDB/MotherDuck
-  Step 10 构建 FM 分类汇总     → DuckDB/MotherDuck
-  Step 11 构建 FM 结果层       → DuckDB/MotherDuck
+  Step 8  构建 FM 商品维度底表
+  Step 9  构建 FM 客数底表
+  Step 10 构建 FM 分类汇总
+  Step 11 构建 FM 结果层
 """
 
 from __future__ import annotations
@@ -103,19 +101,19 @@ def run(start: str, end: str) -> None:
         ProfitCalculator(duck).run()
 
         # ── Step 8: FM 商品维度底表 ───────────────────────────────────────────
-        _step("Step 8: FM 商品维度底表")
+        _step("Step 8: FM 商品维度底表 → t_fm_sku_dim")
         SkuDimBuilder(duck).build(start=start, end=end)
 
         # ── Step 9: FM 客数底表 ───────────────────────────────────────────────
-        _step("Step 9: FM 客数底表")
+        _step("Step 9: FM 客数底表 → t_fm_cust")
         CustBuilder(duck, api).build(start=start, end=end, yesterday=yesterday)
 
         # ── Step 10: FM 分类汇总 ──────────────────────────────────────────────
-        _step("Step 10: FM 分类汇总")
+        _step("Step 10: FM 分类汇总 → t_fm_levels_sum")
         LevelsSumBuilder(duck).build(start=start, end=end)
 
         # ── Step 11: FM 结果层 ────────────────────────────────────────────────
-        _step("Step 11: FM 结果层")
+        _step("Step 11: FM 结果层 → t_fm_levels_result")
         LevelsResultBuilder(duck).build(start=start, end=end)
 
     finally:

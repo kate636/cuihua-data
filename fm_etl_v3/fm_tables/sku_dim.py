@@ -22,7 +22,7 @@ class SkuDimBuilder:
         self._log = get_logger("SkuDimBuilder")
 
     def build(self, start: str, end: str) -> None:
-        """构建 SKU 维度底表，结果留在 DuckDB/MotherDuck。"""
+        """构建 SKU 维度底表，结果落到 DuckDB 的 t_fm_sku_dim。"""
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
         self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
         self._duck.execute(f"CREATE TABLE {TARGET_DUCK_TABLE} AS\n{self._build_sql(start, end)}")

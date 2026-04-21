@@ -2,7 +2,7 @@
 全局配置管理
 
 数据源: bdapp.qdama.cn HTTP API（只读）
-计算层: 本地 DuckDB 或 MotherDuck（云）
+计算层: 本地 DuckDB 单文件（云端 /opt/fm/data/fm.duckdb）
 
 凭证通过环境变量或 .env 文件加载（python-dotenv）。
 """
@@ -35,11 +35,9 @@ class ApiConfig:
 class Settings:
     api: ApiConfig = field(default_factory=ApiConfig)
 
-    # MotherDuck 连接 token（空 = 使用本地 DuckDB 文件）
-    motherduck_token: str = ""
-    motherduck_db:    str = "fm_etl_v3"
-
-    # 本地 DuckDB 回退路径（仅 motherduck_token 为空时使用）
+    # DuckDB 文件路径
+    # - 本地开发：默认 <repo>/data/fm_etl_v3.duckdb
+    # - 云端生产：/opt/fm/data/fm.duckdb（由 .env 指定）
     duckdb_path: Path = field(default_factory=lambda: _DATA_DIR / "fm_etl_v3.duckdb")
 
     # ── 业务过滤常量 ──────────────────────────────────────────────────────────
@@ -58,9 +56,7 @@ class Settings:
 
     @property
     def duckdb_conn_str(self) -> str:
-        """返回 DuckDB 连接串：有 token 走 MotherDuck，否则走本地文件。"""
-        if self.motherduck_token:
-            return f"md:{self.motherduck_db}?motherduck_token={self.motherduck_token}"
+        """返回 DuckDB 连接串（本地文件路径）。"""
         return str(self.duckdb_path)
 
     @classmethod
@@ -72,14 +68,11 @@ class Settings:
             secret_key = os.environ["QDM_SECRET_KEY"],
             version    = os.getenv("QDM_VERSION",    "1.0"),
         )
-        md_token = os.getenv("MOTHERDUCK_TOKEN", "")
-        md_db    = os.getenv("MOTHERDUCK_DB",    "fm_etl_v3")
-        db_path  = Path(os.getenv("FM_DUCKDB_PATH", str(_DATA_DIR / "fm_etl_v3.duckdb")))
-        return cls(api=api, motherduck_token=md_token, motherduck_db=md_db, duckdb_path=db_path)
+        db_path = Path(os.getenv("FM_DUCKDB_PATH", str(_DATA_DIR / "fm_etl_v3.duckdb")))
+        return cls(api=api, duckdb_path=db_path)
 
     def ensure_data_dir(self) -> None:
-        if not self.motherduck_token:
-            self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
+        self.duckdb_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 _global: Optional[Settings] = None

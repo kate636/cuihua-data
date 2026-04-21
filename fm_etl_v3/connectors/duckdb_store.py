@@ -1,9 +1,9 @@
 """
 DuckDB 存储层
 
-支持两种模式：
-  - 本地文件：FM_DUCKDB_PATH 指定路径（默认）
-  - MotherDuck 云：设置 MOTHERDUCK_TOKEN 后自动切换，连接串为 md:<db>?motherduck_token=...
+本地单文件数据库：
+  - 本地开发：默认 <repo>/data/fm_etl_v3.duckdb
+  - 云端生产：/opt/fm/data/fm.duckdb（由 FM_DUCKDB_PATH 指定）
 
 设计要点：
   - 同一进程内共享同一 connection（DuckDB 进程内不支持多连接同时写）
@@ -25,16 +25,14 @@ _log = get_logger("duckdb")
 
 
 class DuckDBStore:
-    """进程内单例 DuckDB/MotherDuck 连接封装。"""
+    """进程内单例 DuckDB 连接封装（ETL 写入侧）。"""
 
     def __init__(self, conn_str: Optional[str] = None):
         cfg = get_settings()
         self._conn_str = conn_str or cfg.duckdb_conn_str
-        # 本地模式才需要建目录
-        if not self._conn_str.startswith("md:"):
-            Path(self._conn_str).parent.mkdir(parents=True, exist_ok=True)
+        Path(self._conn_str).parent.mkdir(parents=True, exist_ok=True)
         self._conn = duckdb.connect(self._conn_str)
-        _log.info(f"DuckDB connected: {self._conn_str.split('?')[0]}")
+        _log.info(f"DuckDB connected: {self._conn_str}")
 
     def close(self) -> None:
         self._conn.close()
