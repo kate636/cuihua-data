@@ -33,7 +33,7 @@ from datetime import date, timedelta
 from .config import get_settings
 from .connectors import ApiConnector, DuckDBStore
 from .atomic import (
-    SalesExtractor, InventoryExtractor, ScmExtractor,
+    SalesExtractor, InventoryExtractor, ScmExtractor, ScmAdjustExtractor,
     LossExtractor, ComposeExtractor, AllowanceExtractor,
     PromoExtractor, CostPriceExtractor, PriceExtractor,
     DimsExtractor,
@@ -70,6 +70,7 @@ def run(start: str, end: str) -> None:
             SalesExtractor(api, duck),
             InventoryExtractor(api, duck),
             ScmExtractor(api, duck),
+            ScmAdjustExtractor(api, duck),
             LossExtractor(api, duck),
             ComposeExtractor(api, duck),
             AllowanceExtractor(api, duck),

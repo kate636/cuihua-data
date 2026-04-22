@@ -1,7 +1,8 @@
 """
 域① 销售域取数器
 
-源表: hive.dsl.dsl_transaction_non_daily_store_order_details_di
+源表: strategy_fm_sales_di  (订单行级)
+辅表: strategy_fm_dim_goods (unit_weight / sale_unit / category_level1_id)
 目标: DuckDB atomic_sales
 原子字段: sale_qty, sale_piece_qty, return_sale_qty, gift_qty, online/offline/bf19/af19/bf12 qtys,
           sales_weight, sale_amt, original_price_sale_amt, vip_discount_amt, hour_discount_amt,
@@ -76,7 +77,7 @@ class SalesExtractor(BaseExtractor):
             m1.day_clear
         FROM (
             SELECT
-                business_date,
+                inc_day,
                 store_id,
                 abi_article_id,
                 online_flag,
@@ -101,15 +102,13 @@ class SalesExtractor(BaseExtractor):
                 company_paylevel_discount,
                 COALESCE(pay_at, NULL)                  AS pay_at,
                 SUBSTR(inc_time, 12, 2)                 AS trans_hour,
-                day_clear,
-                inc_day
-            FROM hive.dsl.dsl_transaction_non_daily_store_order_details_di
+                day_clear
+            FROM strategy_fm_sales_di
             WHERE inc_day BETWEEN '{start}' AND '{end}'
         ) m1
         LEFT JOIN (
-            SELECT article_id, unit_weight, sale_unit
-            FROM hive.dim.dim_goods_information_have_pt
-            WHERE inc_day = '{yesterday}'
+            SELECT article_id, unit_weight, sale_unit, category_level1_id
+            FROM strategy_fm_dim_goods
         ) m2 ON m1.abi_article_id = m2.article_id
         WHERE COALESCE(m2.category_level1_id, 'rd') NOT IN ('91')
           AND (

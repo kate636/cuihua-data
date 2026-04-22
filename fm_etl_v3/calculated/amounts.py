@@ -42,10 +42,14 @@ class AmountsCalculator:
             inv.init_stock_qty * ap.avg_price               AS init_stock_amt,
             -- 期末库存金额 = end_stock_qty × avg_price
             inv.end_stock_qty * ap.avg_price                AS end_stock_amt,
-            -- 已知损耗金额 = know_lost_qty × cost_price
-            inv.know_lost_qty * w.cost_price                AS know_lost_amt,
-            -- 未知损耗金额 = unknow_lost_qty × cost_price
-            inv.unknow_lost_qty * w.cost_price              AS unknow_lost_amt,
+            -- 已知损耗金额：优先使用源表 (strategy_fm_loss_di.know_lost_amt)，
+            -- 源表为 NULL 时回退 qty × cost_price (生鲜 cost_price 可能为 0)
+            COALESCE(w.know_lost_amt_src,
+                     inv.know_lost_qty * w.cost_price)      AS know_lost_amt,
+            -- 未知损耗金额：优先使用源表 (strategy_fm_loss_di.unknow_lost_amt)，
+            -- 源表为 NULL 时回退 qty × cost_price
+            COALESCE(w.unknow_lost_amt_src,
+                     inv.unknow_lost_qty * w.cost_price)    AS unknow_lost_amt,
             -- 加工转入金额 = compose_in_qty × cost_price
             inv.compose_in_qty * w.cost_price               AS compose_in_amt,
             -- 加工转出金额 = compose_out_qty × cost_price
@@ -78,11 +82,15 @@ class AmountsCalculator:
             -- 非赠品出库让利
             w.scm_promotion_amt_total - w.scm_promotion_amt_gift
                                                             AS scm_promotion_amt,
+            -- 预合计出库让利（sku_dim / levels_sum 依赖）
+            w.scm_promotion_amt_total                       AS scm_promotion_amt_total,
 
             -- ── 3.4 损耗类 ─────────────────────────────────────────────
             inv.know_lost_qty + inv.unknow_lost_qty         AS lost_qty,
-            inv.know_lost_qty * w.cost_price
-              + inv.unknow_lost_qty * w.cost_price          AS lost_amt,
+            COALESCE(w.know_lost_amt_src,
+                     inv.know_lost_qty * w.cost_price)
+            + COALESCE(w.unknow_lost_amt_src,
+                       inv.unknow_lost_qty * w.cost_price)   AS lost_amt,
 
             -- ── 3.8 定价/预期类 ─────────────────────────────────────────
             -- 预期出库金额 = out_stock_pay_amt + scm_promotion_amt_total

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 import string
 import time
 from typing import Any, Optional
@@ -25,6 +26,17 @@ from ..config import get_settings
 from ..utils import get_logger, retry_on_exception
 
 _log = get_logger("api_connector")
+
+# 把 QDM API 返回的 camelCase 列名（如 businessDate / abiArticleId）恢复为
+# SQL 里写的 snake_case（business_date / abi_article_id）。
+# QDM 网关会强制把所有下划线列名/别名改写成 camelCase，下游 DuckDB 合并层写的都是
+# snake_case，所以必须在 query() 出口统一归一化。
+_CAMEL_SPLIT = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _camel_to_snake(name: str) -> str:
+    """驼峰 → 下划线。对全小写/带数字的列名不产生影响。"""
+    return _CAMEL_SPLIT.sub("_", name).lower()
 
 
 class ApiConnector:
@@ -40,11 +52,17 @@ class ApiConnector:
 
     # ── 公开接口（与原 StarRocksConnector.query 签名一致）───────────────────
     @retry_on_exception(max_attempts=3, wait_seconds=5.0)
-    def query(self, sql: str, params=None) -> pd.DataFrame:
-        """执行 SELECT SQL，返回 DataFrame。自动处理分页，最多重试 3 次。"""
+    def query(self, sql: str, params=None, normalize_columns: bool = True) -> pd.DataFrame:
+        """执行 SELECT SQL，返回 DataFrame。自动处理分页，最多重试 3 次。
+
+        normalize_columns=True（默认）会把 API 返回的 camelCase 列名统一转回
+        snake_case，以便 DuckDB 下游 SQL（全部走 snake_case）能正确引用。
+        """
         _log.debug(f"query: {sql[:120].strip()} ...")
         rows = self._fetch_all(sql)
         df = pd.DataFrame(rows)
+        if normalize_columns and not df.empty:
+            df.columns = [_camel_to_snake(str(c)) for c in df.columns]
         _log.debug(f"query returned {len(df)} rows")
         return df
 

@@ -52,8 +52,12 @@ class InventoryCalculator:
                     - compose_out_qty - sale_qty - know_lost_qty
                 )
             END AS end_stock_qty,
-            -- 未知损耗：BOM 快照期末有值时反推，否则为 0
+            -- 未知损耗：优先使用源表 unknow_lost_qty_src（strategy_fm_loss_di），
+            -- 生鲜无 cost_price 时仍能得到金额（见 amounts.py）；
+            -- 源表为空则用库存方程反推
             CASE
+                WHEN unknow_lost_qty_src IS NOT NULL
+                THEN unknow_lost_qty_src
                 WHEN end_stock_qty_raw <> 0 OR init_stock_qty <> 0
                 THEN init_stock_qty + receive_qty + compose_in_qty
                      - compose_out_qty - sale_qty - know_lost_qty

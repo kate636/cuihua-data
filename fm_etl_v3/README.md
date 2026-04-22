@@ -178,6 +178,35 @@ v3 把这套分层**完整落到 DuckDB 表里**，`atomic_*` 对应 Layer -2，
 
 详细字段字典：[docs/底表架构设计_指标字典.md](docs/底表架构设计_指标字典.md)
 
+### 3.5 ⚠️ `day_clear` 字段业务语义（重要）
+
+所有带 `day_clear` 字段的表（`t_atomic_wide`、`t_calc_*`、`t_fm_sku_dim`、`t_fm_cust`、`t_fm_levels_sum`、`t_fm_levels_result`）都遵循以下口径：
+
+| 值 | 含义 | 来源 |
+|---|---|---|
+| `0` | **日清** — 当日必须清空（生鲜、日配品） | 一条业务记录 |
+| `1` | **非日清** — 可跨日留存（标品、冷藏加工类） | 一条业务记录 |
+| `2` | **合计** — `day_clear=0` + `day_clear=1` 的汇总 | **由 ETL 额外 UNION 生成** |
+
+**查询时的注意事项**：
+
+- 查"全天合计"数据 → **必须** `WHERE day_clear = '2'`（或等效 `='2'`）
+- 按 `day_clear` 分组求 `SUM` 会**天然翻倍**（0+1+2 = 2×真实值），这是设计如此，不是 bug
+- 客数字段（`cust_num_cate` 等）单独在 `CustBuilder` 链路按订单级去重生成，**不要在 SKU 维度做 SUM**（同一订单会跨多个 SKU，会放大客数）；`t_fm_levels_sum` 里的 `cust_num_cate` 列目前写死为 0，使用客数时直接查 `t_fm_cust`（按 `level_description + level_id` 取）
+- 当日如果没有日清 SKU（全是非日清），`t_fm_levels_sum` 只会看到 `day_clear='1'` 和 `='2'` 两种值；有日清 SKU 时会出现 `'0'`
+
+示例：查询 2026-04-20 门店当天「合计口径」的销售额 / 毛利：
+
+```sql
+SELECT store_id,
+       SUM(total_sale_amt)      AS 销售额,
+       SUM(article_profit_amt)  AS 门店毛利额
+FROM t_fm_sku_dim
+WHERE business_date = '2026-04-20'
+  AND day_clear = '2'            -- 关键：合计口径
+GROUP BY store_id;
+```
+
 ---
 
 ## 4. 目录结构详解

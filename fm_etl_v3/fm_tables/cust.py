@@ -4,9 +4,15 @@ FM 客数底表构建器
 粒度: 门店 × 日期 × day_clear × level_description × level_id
 结果落到 DuckDB 的 t_fm_cust。
 
-客数来源: 线下+线上订单明细（两张 hive 表 UNION ALL）
+客数来源: strategy_fm_sales_di（订单行级，含 online_flag / day_clear / order_status）
 按多个层级聚合客数，level_description 取值：
   门店 | 大类 | 中类 | 小类 | SPU | 黑白猪
+
+说明: 老实现用 hive.dsl 的 offline/online 两张表 UNION ALL，并 JOIN
+`dal_transaction_chdj_store_sale_article_sale_info_di` 取 day_clear。新表
+`strategy_fm_sales_di` 已经是订单行级且自带 day_clear / online_flag，可以
+一张表替代这三张输入。online 订单的 `order_id` 后缀 '*' 通过 `IF(online_flag='Y', ...)`
+模拟。
 
 WAF 注意: _extract_orders SQL 中 CASE WHEN 已替换为嵌套 IF()。
 """
@@ -44,19 +50,19 @@ class CustBuilder:
 
     # ── 拉取订单 ──────────────────────────────────────────────────────────────
     def _extract_orders(self, start: str, end: str, yesterday: str) -> None:
-        """从 API 提取订单明细，预处理后存入 DuckDB order_detail。"""
+        """从 API 提取订单明细（strategy_fm_sales_di），预处理后存入 DuckDB order_detail。"""
         sql = f"""
         SELECT
             t1.business_date,
             t1.store_id,
             t1.order_id,
             t1.pay_at,
-            t1.abi_article_id               AS article_id,
+            t1.article_id,
             t1.order_status,
             t1.jielong_flag,
             t1.actual_amount,
-            'offline'                        AS channel,
-            dc.day_clear,
+            t1.channel,
+            t1.day_clear,
             t3.category_level2_description,
             t3.category_level1_description,
             IF(t3.category_level2_description IN ('蛋类','烘焙类'),
@@ -82,30 +88,28 @@ class CustBuilder:
             t3.blackwhite_pig_id,
             h.store_flag
         FROM (
-            SELECT business_date, store_id, order_id, pay_at, abi_article_id,
-                   inc_day, order_status, jielong_flag, actual_amount
-            FROM hive.dsl.dsl_transaction_sotre_order_offline_details_di
-            WHERE inc_day BETWEEN '{start}' AND '{end}'
-            UNION ALL
-            SELECT business_date, store_id, CONCAT(order_id,'*') AS order_id,
-                   pay_at, abi_article_id, inc_day, order_status, jielong_flag, actual_amount
-            FROM hive.dsl.dsl_transaction_sotre_order_online_details_di
+            SELECT
+                business_date,
+                store_id,
+                IF(online_flag = 'Y', CONCAT(order_id, '*'), order_id)  AS order_id,
+                pay_at,
+                abi_article_id                  AS article_id,
+                order_status,
+                jielong_flag,
+                actual_amount,
+                IF(online_flag = 'Y', 'online', 'offline')              AS channel,
+                day_clear
+            FROM strategy_fm_sales_di
             WHERE inc_day BETWEEN '{start}' AND '{end}'
         ) t1
-        LEFT JOIN (
-            SELECT store_id, inc_day, article_id, day_clear
-            FROM hive.dal.dal_transaction_chdj_store_sale_article_sale_info_di
-            WHERE inc_day BETWEEN '{start}' AND '{end}'
-        ) dc ON t1.store_id = dc.store_id AND t1.inc_day = dc.inc_day AND t1.abi_article_id = dc.article_id
         LEFT JOIN (
             SELECT article_id, category_level1_description, category_level1_id,
                    category_level2_id, category_level2_description,
                    category_level3_id, category_level3_description,
                    spu_id, blackwhite_pig_id
-            FROM hive.dim.dim_goods_information_have_pt
-            WHERE inc_day = '{yesterday}'
-              AND category_level1_id NOT IN ('70','71','72','73','74','75','76','77')
-        ) t3 ON t1.abi_article_id = t3.article_id
+            FROM strategy_fm_dim_goods
+            WHERE category_level1_id NOT IN ('70','71','72','73','74','75','76','77')
+        ) t3 ON t1.article_id = t3.article_id
         LEFT JOIN (
             SELECT store_id, store_flag
             FROM default_catalog.ads_business_analysis.chdj_store_info

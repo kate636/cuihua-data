@@ -142,8 +142,11 @@ class AtomicMerger:
             COALESCE(scm.vender_bear_gift_amt, 0)      AS vender_bear_gift_amt,
             COALESCE(scm.scm_bear_gift_amt, 0)         AS scm_bear_gift_amt,
             COALESCE(scm.adjustment_amt, 0)            AS adjustment_amt,
-            -- 域④ 损耗域
+            -- 域④ 损耗域 (qty 走方程反推兜底；amt 优先源表值，NULL 时由下游 qty × cost_price 兜底)
             COALESCE(loss.know_lost_qty, 0)            AS know_lost_qty,
+            loss.unknow_lost_qty_src                   AS unknow_lost_qty_src,
+            loss.know_lost_amt_src                     AS know_lost_amt_src,
+            loss.unknow_lost_amt_src                   AS unknow_lost_amt_src,
             -- 域⑤ 加工转换域
             COALESCE(cmp.compose_in_qty, 0)            AS compose_in_qty,
             COALESCE(cmp.compose_out_qty, 0)           AS compose_out_qty,
