@@ -124,15 +124,10 @@ class StockCalculator:
         conn = self._duck._conn
         merge_keys = ['store_id', 'business_date', 'article_id']
 
-        # ── 防御性去重：按 (store, date, article, dc) 聚合 ──
+        # ── 防御性去重：按 (store, date, article, dc) 取首行 ──
         dedup_keys = ['store_id', 'business_date', 'article_id', 'day_clear']
-        num_cols = [c for c in df.columns
-                    if c not in dedup_keys and df[c].dtype in ('float64','float32','int64','int32')]
         before = len(df)
-        df = df.groupby(dedup_keys, as_index=False, dropna=False)[num_cols].sum()
-        for c in df.columns:
-            if df[c].dtype in ('float64', 'float32'):
-                df[c] = df[c].round(6)
+        df = df.drop_duplicates(subset=dedup_keys, keep='first')
         if len(df) < before:
             self._log.info(f"  dedup: {before} → {len(df)} rows ({before - len(df)} duplicates removed)")
 
