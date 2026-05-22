@@ -1,10 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v10.0**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
+**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **0.10**（v10.0，预发布），从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
 
 ## Key Commands
 
@@ -15,7 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 python3 -m venv .venv
 source .venv/bin/activate
 pip install duckdb pandas numpy python-dotenv requests
-cp fmetl/fm_etl_v3/.env.example .env   # 然后填入 QDM_ACCESS_KEY / QDM_SECRET_KEY
+cp fm_etl_v3/.env.example .env   # 然后填入 QDM_ACCESS_KEY / QDM_SECRET_KEY
 ```
 
 ### Run ETL Pipeline
@@ -41,7 +41,7 @@ conn = duckdb.connect('data/fm.duckdb', read_only=True)
 print(conn.execute('SELECT COUNT(*) FROM t_calc_stock WHERE end_stock_qty < 0').fetchone())
 "
 
-# 检查 BOM 对称（bom_in ≈ bom_out）
+# 检查 BOM 对称（bom_in = bom_out）
 python3 -c "
 import duckdb
 conn = duckdb.connect('data/fm.duckdb', read_only=True)
@@ -68,7 +68,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Layer -2: atomic_* (原子层) — 不可分解的独立观测量              │
-│   13张活跃 + 2张骨架表，从 strategy_fm_* 源表 API 拉取          │
+│   12张活跃 + 2张骨架表，从 strategy_fm_* 源表 API 拉取          │
 │   粒度: store_id × business_date × article_id × day_clear       │
 └──────────────────────────────────────────────────────────────────┘
                               ↓ merge → t_atomic_wide (82字段)
@@ -82,7 +82,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
                               ↓ build
 ┌──────────────────────────────────────────────────────────────────┐
 │ Layer 0: t_fm_* (FM底表) — 最终产出                             │
-│   t_fm_sku_dim       → SKU级完整宽表 (~60字段)                  │
+│   t_fm_sku_dim       → SKU级完整宽表 (80字段)                   │
 │   t_fm_cust          → 客数聚合                                  │
 │   t_fm_levels_sum    → 7级分类汇总 (数量/金额)                   │
 │   t_fm_levels_result → 平台对接表 (中文列名 + 比率KPI)           │
@@ -96,15 +96,14 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 - 所有复杂计算从 SQL 移到 Python（pandas + NumPy）
 - 新增 BOM 父品补全、负库存保护、共享组父品分拆、单位归一化
 - 毛利公式纳入 BOM 流入/流出
-- 新增 `atomic_inventory_detail` 源表（人工盘点判定）
 
 ## Pipeline 13 Steps
 
 | Step | Module | Output |
 |---|---|---|
 | 1 | `DimsExtractor` | 7张 `dim_*` 全量替换 |
-| 2 | 15个 `*Extractor` | 13张 `atomic_*` 分区追加 + 2张空骨架 |
-| 3 | `AtomicMerger` | `t_atomic_wide` (82字段, 含父品补全 + 日清覆盖) |
+| 2 | 14个 `*Extractor` | 12张 `atomic_*` 分区追加 + 2张空骨架 |
+| 3 | `AtomicMerger` | `t_atomic_wide` (82字段, 含父品补全) |
 | 4 | `BomAllocCalculator` | `t_calc_bom_alloc` (Σ总权重+共享组分拆+单位归一化) |
 | 5 | `SkuCostCalculator` | `t_calc_sku_cost` (加权平均含期初库存) |
 | 6 | `StockCalculator` | `t_calc_stock` (四流合一+跨日滚动, 中枢模块) |
@@ -142,7 +141,7 @@ Step 6 (stock) ─────────────────────�
 
 ### effective_unit_cost (euc): 加权平均含期初库存
 
-`cost_price` 不参与计算。唯一权威成本来源为 `t_calc_sku_cost`。
+cost_price 不参与计算。唯一权威成本来源为 `t_calc_sku_cost`。
 
 ```
 cost_amt = init_stock_amt + self_receive_amt + compose_net_amt + bom_alloc_amt
@@ -163,22 +162,14 @@ cost_source = 'V10_WEIGHTED_AVG'
 ```
 eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_lost
 
-分支 (优先级从高到低):
-  1. is_counted (人工盘点, created_by != '系统')
-     → end=actual_stock_qty, unknow=max(0, eq-actual)
-  2. day_clear='0' (软日清)
-     → 新供给 = receive + bom_in - bom_out + compose_in - compose_out
-     → end = max(0, init - max(0, (sale+klost) - 新供给))
-     → unknow = max(0, 新供给 - sale - klost)
-  3. eq < 0 (负库存保护)
-     → end=0, unknow=-eq
-  4. know_lost_qty > 0 (有已知损耗)
-     → end=eq, unknow=0
-  5. 其他 (正常)
-     → end=eq, unknow=0
+分支:
+  day_clear='0' (日清) → end=0, unknow=eq
+  eq < 0 (任何场景)    → end=0, unknow=-eq (负库存保护)
+  know_lost_qty > 0    → end=eq, unknow=0 (盘点)
+  其他                  → end=eq, unknow=0
 ```
 
-金额统一用 euc 计算: `end_stock_amt = end_qty × euc`, `unknow_lost_amt = unknow_qty × euc`, `know_lost_amt = know_qty × euc`
+金额统一用 euc 计算: `end_stock_amt = end_qty × euc`, `unknow_lost_amt = unknow_qty × euc`
 
 ### 门店毛利 (profit.py — 含BOM)
 
@@ -187,43 +178,40 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out
        + end_stock - init_stock
 
 注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt（A20）。
-```
-
-### 销售成本
-`sale_cost_amt = sale_qty × euc`（日清/非日清统一公式，差异在 stock.py 端体现）
 
 ### BOM 分摊 — 共享组与父品归集
 
-**共享组**：当 parent_B.subs ⊆ parent_A.subs 时，合并为共享组。分配逻辑：
+**共享组**：当 parent_B.subs ⊆ parent_A.subs 时，合并为共享组。分配遵循 v9 逻辑：
 - **所有子品**（含独有）用组总额 `group_total_amt` 做基数分配，保证子品成本公允
 - 共享子品按进货额比例（如 76%/24%）分拆到两个父品
 
-**父品 bom_out 归集**：在 bom_alloc.py 中按 `alloc_ratio × parent_inbound_amount` 分配，各父品仅承担自身份额。
+**父品 bom_out 归集**（stock.py 5b）：组内所有子品的 bom_out 汇总后可能超过单个父品的 receive_amt，因此按 `receive_amt / group_total_amt` 比例缩放各父品的 `bom_out_amt`，使其精确等于各自的 receive_amt，父品利润归零。
 
-### 库存转移（stock.py）
+### 库存转移（stock.py 12步）
 
 BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 按 bom_alloc 比例转移给子品 `stock_transfer_in`，确保父品 end=0, profit=0。转移直接修改 end_stock，不在毛利公式中额外加减。
+```
+
+### 销售成本
+```
+日清: sale_cost = receive + bom_in - bom_out + compose_in - compose_out
+非日清: sale_cost = sale_qty × euc
+```
 
 ### day_clear 字段语义
 | 值 | 含义 | 库存规则 |
 |---|---|---|
-| `'0'` | 日清 (生鲜) | 软日清: 只清新供给, init 存量可部分消耗 |
+| `'0'` | 日清 (生鲜) | end=0, 残差→unknow_lost |
 | `'1'` | 非日清 (标品) | 正常库存方程 |
 | `'2'` | 合计 (ETL UNION生成) | 查询全天合计必须 `WHERE day_clear='2'` |
 
-**日清覆盖**（merge.py 强制设置 day_clear='0'）:
-- 猪肉类 (`category_level1_description = '猪肉类'`)
-- 熟食类 (`category_level3_description LIKE '%熟食'`)
-- 鲜牛肉 (`category_level1_description = '肉禽蛋类' AND article_name LIKE '鲜黄牛%'`)
-
 ## Data Source Tables
 
-### 原子域表 (13张活跃 + 2张骨架)
+### 原子域表 (12张活跃 + 2张骨架)
 | DuckDB 表 | QDM 商分表 | 域 |
 |---|---|---|
 | `atomic_sales` | `strategy_fm_sales_di` | ①销售 |
 | `atomic_inventory` | `strategy_fm_purchase_di` | ②库存 |
-| `atomic_inventory_detail` | `strategy_fm_store_article_inventory_detail_di` | ②附 盘点 |
 | `atomic_scm` | `strategy_fm_scm_di` | ③供应链 |
 | `atomic_scm_adjust` | `strategy_fm_scm_adjust_di` | ③附 |
 | `atomic_loss` | `strategy_fm_loss_di` | ④损耗 |
@@ -248,24 +236,14 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 | `dim_saleable` | `strategy_fm_dim_saleable` |
 | `dim_chdj_store_info` | `ads_business_analysis.chdj_store_info` |
 
-### 计算层表 (5张)
+### 计算层表 (4张, v10)
 | DuckDB 表 | 算法 |
 |---|---|
-| `t_atomic_wide` | FULL OUTER JOIN + 父品补全 + 日清覆盖 (82字段) |
+| `t_atomic_wide` | FULL OUTER JOIN + 父品补全 (82字段) |
 | `t_calc_bom_alloc` | Σ总权重 + Python共享组识别 + 单位归一化 |
 | `t_calc_sku_cost` | 加权平均含期初库存 |
 | `t_calc_stock` | 四流合一 + 跨日滚动 (中枢, 合并了inventory/avg_price/amounts) |
 | `t_calc_profit` | 含BOM + SCM金融 + 全链路毛利 |
-
-### FM 底表 (6张)
-| DuckDB 表 | 粒度 | 说明 |
-|---|---|---|
-| `t_fm_sku_dim` | store×date×article_id×day_clear | SKU级完整宽表，含分类重映射、7日均量 |
-| `t_fm_cust` | store×date×day_clear×level | 客数聚合（6层级） |
-| `t_fm_levels_sum` | store×date×day_clear×level | 7级分类汇总 |
-| `t_fm_levels_result` | store×date×day_clear×level | 平台对接表（中文列名+KPI） |
-| `t_fm_bom_breakdown` | store×date×parent×sub | BOM分摊溯源 |
-| `t_fm_stock_roll` | store×date×article_id×day_clear | 库存八要素滚动 + balance_qty |
 
 ## Field Mapping Notes
 
@@ -280,10 +258,6 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 | `strategy_fm_dim_calendar` | `day_date` | `business_date` |
 | `strategy_fm_dim_saleable` | `shop_id` | `store_id` |
 | `strategy_fm_dim_saleable` | `sku_code` | `article_id` |
-| `strategy_fm_sales_di` | `abi_article_id` | `article_id` |
-| `strategy_fm_store_article_inventory_detail_di` | `shop_id` | `store_id` |
-| `strategy_fm_store_article_inventory_detail_di` | `sku_code` | `article_id` |
-| `strategy_fm_store_article_inventory_detail_di` | `inventory_date` | `business_date` |
 
 ## Code Patterns
 
@@ -295,11 +269,11 @@ API SQL 中所有 `CASE WHEN x THEN y ELSE z END` 必须写成 `IF(x, y, z)`。D
 
 ### dim_goods 注意事项
 
-`dim_goods` 是**日快照表**（API 侧已按 `inc_day = '{end}'` 过滤），DuckDB 中**没有 inc_day 列**。下游 JOIN dim_goods 时只需 `ON article_id`，不需要额外日期过滤。
+`dim_goods` 是**日快照表**（API 侧已按 `inc_day = '{end}'` 过滤），DuckDB 中**没有 inc_day 列**。下游 JOIN dim_goods 时只需 `ON article_id`，不需要额外日期过滤。用错日期会导致分类映射错误。
 
 ### QDM 对比表
 
-对比 v4 输出时使用 QDM 表 `default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`（不是 `strategy_fm_levels_result`）。该表字段与 v4 一一对应，可做 SKU 级逐字段对比。
+对比 v4 输出时使用 QDM 表 `default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`（不是 `strategy_fm_levels_result`）。该表字段与 v4 一一对应（receive_amt, compose_in/out, know_lost/unknow_lost, init/end_stock 等），可做 SKU 级逐字段对比。
 
 ### 门店过滤 & 品类过滤
 所有原子表 INNER JOIN `dim_store_list`（翠花门店白名单）。品类过滤: `category_level1_id NOT IN ('70','71','72','73','74','75','76','77')` 排除物料类。
@@ -322,21 +296,20 @@ v10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Ca
 
 ```
 翠花数据/
-├── fmetl/                    # 主 ETL Pipeline v10.0
+├── fmetl/                    # 主 ETL Pipeline v10.0 (预发布)
 │   ├── executor.py          # 主入口 (13步)
 │   ├── config/              # API凭证配置
 │   ├── connectors/          # ApiConnector + DuckDBStore
-│   ├── atomic/              # Step 1-2: 原子域提取 (16个extractor文件)
+│   ├── atomic/              # Step 1-2: 原子域提取 (14个extractor)
 │   ├── calculated/          # Step 3-7: 计算层 (5个模块, Python核心)
 │   ├── fm_tables/           # Step 8-13: FM底表 (6张)
-│   ├── utils/               # 日志/日期/重试工具
-│   ├── docs/                # 完整处理逻辑 + 字段手册
-│   └── fm_etl_v3/           # 旧版 v3.0 (历史版本, 保留参考)
+│   └── utils/               # 日志/工具
 │
-├── _archived/               # 历史归档 (deploy/tests/docs/旧版脚本等)
-├── legacy_scripts/          # 旧版独立脚本 (参考/备份)
-├── data/                    # DuckDB数据文件 (不上GitHub)
-└── .claude/                 # Claude Code 配置
+├── fm_etl_v3/               # 旧版 v3.0 (历史版本, 保留参考)
+├── legacy_scripts/          # 旧版脚本 (参考/备份)
+├── _archived/               # 历史归档 (tests/deploy/docs等)
+│
+└── data/                    # DuckDB数据文件 (不上GitHub)
 ```
 
 ## Environment Variables (.env)
@@ -350,6 +323,5 @@ v10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Ca
 ## Key Documents
 
 - [fmetl/README.md](fmetl/README.md) — v10.0 完整pipeline说明 (13步, 核心公式, 修复对照表)
-- [fmetl/docs/ETL_v10_完整处理逻辑.md](fmetl/docs/ETL_v10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
-- [fmetl/docs/strategy_fm_字段手册_完整版.md](fmetl/docs/strategy_fm_字段手册_完整版.md) — QDM源表完整字段手册
-- [fmetl/fm_etl_v3/DEPLOY.md](fmetl/fm_etl_v3/DEPLOY.md) — 云端部署手册 (旧版参考)
+- [fmetl/docs/](fmetl/docs/) — 指标字典 + 字段映射
+- [fm_etl_v3/DEPLOY.md](fm_etl_v3/DEPLOY.md) — 云端部署手册

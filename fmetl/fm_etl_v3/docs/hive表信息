@@ -1,0 +1,1544 @@
+1
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	sp_store_name	VARCHAR(1073741824)	Yes	false	null		门店名称
+
+4	area_description	VARCHAR(1073741824)	Yes	false	null		区域名称
+
+5	area_id	VARCHAR(1073741824)	Yes	false	null		区域编码
+
+6	sp_type	VARCHAR(1073741824)	Yes	false	null		店铺类型 20加盟/10直营
+
+7	sp_level	VARCHAR(1073741824)	Yes	false	null		店铺等级 1:实体门店 2:菜吧 3:B端客户 4:虚拟门店 5:测试店 6:虚拟仓
+
+8	order_id	VARCHAR(1073741824)	Yes	false	null		订单编码
+
+9	order_status	VARCHAR(1073741824)	Yes	false	null		订单状态
+
+10	parent_order_id	VARCHAR(1073741824)	Yes	false	null		父单编码
+
+11	children_order_ids	VARCHAR(1073741824)	Yes	false	null		子单编码
+
+12	serial_id	VARCHAR(1073741824)	Yes	false	null		订单序列号
+
+13	delivery_id	VARCHAR(1073741824)	Yes	false	null		配送表id
+
+14	tenant_id	VARCHAR(1073741824)	Yes	false	null		商户id
+
+15	message	VARCHAR(1073741824)	Yes	false	null		订单备注
+
+16	internal_comment	VARCHAR(1073741824)	Yes	false	null		给管家端的备注
+
+17	reason	VARCHAR(1073741824)	Yes	false	null		评论表对应的ID
+
+18	first_buy_flag	VARCHAR(1073741824)	Yes	false	null		首单标记
+
+19	comment_id	VARCHAR(1073741824)	Yes	false	null		评论表对应的ID
+
+20	comment_time	VARCHAR(1073741824)	Yes	false	null		评论时间 如果不为空表示已经评论
+
+21	sibling_order_ids	VARCHAR(1073741824)	Yes	false	null		拆单时关联的其他单
+
+22	split_supported	VARCHAR(1073741824)	Yes	false	null		是否支持拆单 已拆单，已退款、已退货等不支持
+
+23	root_order_id	VARCHAR(1073741824)	Yes	false	null		拆单情况下关联的最顶层订单号
+
+24	afs_order_id	VARCHAR(1073741824)	Yes	false	null		关联的售后ID
+
+25	outer_order_id	VARCHAR(1073741824)	Yes	false	null		outer订单编号
+
+26	outer_order_type	VARCHAR(1073741824)	Yes	false	null		outer订单类型
+
+27	payment_type	VARCHAR(1073741824)	Yes	false	null		支付方式 如微信，支付宝，余额等
+
+28	bundle_promo_code	VARCHAR(1073741824)	Yes	false	null		促销号,用于标识同一换购,赠品活动
+
+29	sync_seq	VARCHAR(1073741824)	Yes	false	null		过账日期
+
+30	je_date	VARCHAR(1073741824)	Yes	false	null		退货过账日期
+
+31	je_order_id	VARCHAR(1073741824)	Yes	false	null		退货订单号
+
+32	rje_date	VARCHAR(1073741824)	Yes	false	null		退货过账日期
+
+33	rje_order_id	VARCHAR(1073741824)	Yes	false	null		退货订单号
+
+34	is_hour_promotion	VARCHAR(1073741824)	Yes	false	null		是否时段促销 1是
+
+35	abi_article_id	VARCHAR(1073741824)	Yes	false	null		商品编码
+
+36	is_promotion_article	VARCHAR(1073741824)	Yes	false	null		是否促销商品
+
+37	online_flag	VARCHAR(1073741824)	Yes	false	null		线上标识
+
+38	goods_barcode	VARCHAR(1073741824)	Yes	false	null		商品条码
+
+39	spec_num	DOUBLE	Yes	false	null		实际规格数
+
+40	spec_type	VARCHAR(1073741824)	Yes	false	null		规格类型1-g(g-kg),2-kg(kg-g),3-盒(1),4-份(1)
+
+41	customer_id	VARCHAR(1073741824)	Yes	false	null		会员id
+
+42	customer_name	VARCHAR(1073741824)	Yes	false	null		用户名 昵称
+
+43	customer_phone	VARCHAR(1073741824)	Yes	false	null		用户注册手机号
+
+44	sale_unit	VARCHAR(1073741824)	Yes	false	null		销售单位（千克盒）
+
+45	display_price	DOUBLE	Yes	false	null		展示价，如拼团的划线价
+
+46	list_price	DOUBLE	Yes	false	null		商品标价 真实sku商品标价
+
+47	sale_price	DOUBLE	Yes	false	null		商品售价 真实sku商品售价
+
+48	order_type	VARCHAR(1073741824)	Yes	false	null		订单类型
+
+49	order_sub_type	VARCHAR(1073741824)	Yes	false	null		订单子类型 delivery:配送 1 selfpick:自提 2 scancode:扫码购 4 pos:收银机 8
+
+50	channel_id	VARCHAR(1073741824)	Yes	false	null		渠道号
+
+51	inc_time	VARCHAR(1073741824)	Yes	false	null		日结时间
+
+52	pay_at	VARCHAR(1073741824)	Yes	false	null		支付时间
+
+53	refund_at	VARCHAR(1073741824)	Yes	false	null		订单退款时间
+
+54	refund_type	VARCHAR(1073741824)	Yes	false	null		退款类型，整单退，部分退，整单拒收，部分拒收
+
+55	sync_flag	VARCHAR(1073741824)	Yes	false	null		同步第三方标识,0:正常;1:正向待同步;2:正向同步成功;3:逆向待同步;4:逆向同步成功
+
+56	currency	VARCHAR(1073741824)	Yes	false	null		币种 01 RMB,02 USD,03 HKD
+
+57	erp_order_at	VARCHAR(1073741824)	Yes	false	null		财务用下单日期
+
+58	split_at	VARCHAR(1073741824)	Yes	false	null		订单拆分时间
+
+59	complete_at	VARCHAR(1073741824)	Yes	false	null		订单完成、核销时间
+
+60	order_at	VARCHAR(1073741824)	Yes	false	null		订单生成时间
+
+61	allrefund_time	VARCHAR(1073741824)	Yes	false	null		完全退款时间
+
+62	qty	DOUBLE	Yes	false	null		商品数量信息 标品为份数散称为1,规格商品为实际份数
+
+63	qty_spec	DOUBLE	Yes	false	null		商品数量信息(规格*份数)
+
+64	p_paid_sub_amt	DOUBLE	Yes	false	null		该行商品第三方实付金额
+
+65	f_paid_sub_amt	DOUBLE	Yes	false	null		该行商品运费承担实付金额
+
+66	p_pay_sub_amt	DOUBLE	Yes	false	null		该行商品应付金额
+
+67	f_pay_sub_amt	DOUBLE	Yes	false	null		该行商品运费应付金额
+
+68	p_lp_sub_amt	DOUBLE	Yes	false	null		商品总标价 listPrice*qty
+
+69	p_sp_sub_amt	DOUBLE	Yes	false	null		商品总售价 salePrice*qty
+
+70	f_sub_amt	DOUBLE	Yes	false	null		运费分担金额
+
+71	p_promo_sub_amt	DOUBLE	Yes	false	null		该行商品活动优惠分摊金额
+
+72	f_promo_sub_amt	DOUBLE	Yes	false	null		该行运费优惠分摊金额
+
+73	p_pointpay_sub_amt	DOUBLE	Yes	false	null		商品积分支付金额
+
+74	f_pointpay_sub_amt	DOUBLE	Yes	false	null		运费积分支付金额
+
+75	f_balancepay_sub_amt	DOUBLE	Yes	false	null		运费余额支付金额
+
+76	p_balancepay_sub_amt	DOUBLE	Yes	false	null		商品余额支付金额
+
+77	f_cashpay_sub_amt	DOUBLE	Yes	false	null		运费现金抵扣金额
+
+78	p_cashpay_sub_amt	DOUBLE	Yes	false	null		商品现金抵扣金额
+
+79	p_change_sub_amt	DOUBLE	Yes	false	null		抹分 抹角等零钱处理分摊金额
+
+80	sales_amt	DOUBLE	Yes	false	null		日结金额
+
+81	discount_amt	DOUBLE	Yes	false	null		折扣额
+
+82	vip_discount_amt	DOUBLE	Yes	false	null		会员折扣额
+
+83	hour_discount_amt	DOUBLE	Yes	false	null		时段折扣额
+
+84	return_sale_qty	DOUBLE	Yes	false	null		退货数量
+
+85	return_sale_amt	DOUBLE	Yes	false	null		退货额
+
+86	member_hour_sales_amt	DOUBLE	Yes	false	null		会员时段销售额
+
+87	af19_sales_amt	DOUBLE	Yes	false	null		19点后销售额
+
+88	af19_sales_qty	DOUBLE	Yes	false	null		19点后销售数量
+
+89	shop_promo_sub_amt	DOUBLE	Yes	false	null		门店承担优惠-同步
+
+90	promotion_amt	DOUBLE	Yes	false	null		线下表示门店与平台优惠金额 线上表示门店承担非券优惠
+
+91	gift_qty	DOUBLE	Yes	false	null		赠品数量
+
+92	i_promotion_amt	DOUBLE	Yes	false	null		单品促销金额
+
+93	order_promotion_amt	DOUBLE	Yes	false	null		订单级别促销金额
+
+94	ordercoupon_promotion_amt	DOUBLE	Yes	false	null		订单优惠券促销金额
+
+95	actual_weight	DOUBLE	Yes	false	null		实际重量
+
+96	promotion_cost	DOUBLE	Yes	false	null		促销费用
+
+97	promotion_amt_shop	DOUBLE	Yes	false	null		门店承担促销费用
+
+98	promotion_amt_platform	DOUBLE	Yes	false	null		平台承担促销费用
+
+99	actual_amount	DOUBLE	Yes	false	null		实付金额
+
+100	gmv	DOUBLE	Yes	false	null		应付金额(含运费)
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	gmv1	DOUBLE	Yes	false	null		应付金额(不含运费)
+
+2	jielong_flag	VARCHAR(1073741824)	Yes	false	null		community线上接龙,shop门店接龙 -非接龙
+
+3	gift_gmv	DOUBLE	Yes	false	null		赠品gmv
+
+4	postage_shop	DOUBLE	Yes	false	null		门店承担邮费
+
+5	postage_platform	DOUBLE	Yes	false	null		平台承担邮费
+
+6	logistics_status	VARCHAR(1073741824)	Yes	false	null		物流状态：取消订单cancelled、骑手接单shipment_receiving、派单异常shipment_receive_exception、配送中shipment_in_progress、配送完成shipment_shipped、配送异常shipment_ship_exception
+
+7	courier_company	VARCHAR(1073741824)	Yes	false	null		派单平台：蜂鸟ele、美团meituan、达达dada
+
+8	courier_name	VARCHAR(1073741824)	Yes	false	null		骑手姓名
+
+9	courier_name_reverse	VARCHAR(1073741824)	Yes	false	null		骑手姓名逆序
+
+10	courier_phone	VARCHAR(1073741824)	Yes	false	null		骑手电话
+
+11	promotion_amt_platform_gs	DOUBLE	Yes	false	null		平台承担(公司承担部分)
+
+12	promotion_amt_platform_gys	DOUBLE	Yes	false	null		平台承担(供应商承担部分)
+
+13	business_source	VARCHAR(1073741824)	Yes	false	null		订单业务来源0默认1团长订单
+
+14	activity_code	VARCHAR(1073741824)	Yes	false	null		活动编号
+
+15	p_mp_sub_amt	DOUBLE	Yes	false	null		商品中台总价
+
+16	store_paylevel_discount	DOUBLE	Yes	false	null		门店支付级优惠金额
+
+17	company_paylevel_discount	DOUBLE	Yes	false	null		公司支付级优惠金额
+
+18	day_clear	VARCHAR(1073741824)	Yes	false	null		非日清标识(1:不日清,0：日清)
+
+19	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日
+
+
+2
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	day_clear	VARCHAR(1073741824)	Yes	false	null		非日清标识(1:不日清,0：日清)
+
+4	article_id	VARCHAR(1073741824)	Yes	false	null		商品编码(验收条码)
+
+5	article_name	VARCHAR(1073741824)	Yes	false	null		商品名称(验收条码)
+
+6	sale_article_id	VARCHAR(1073741824)	Yes	false	null		BOM子商品(销售条码)
+
+7	sale_article_name	VARCHAR(1073741824)	Yes	false	null		销售商品名称
+
+8	sale_article_qty	DOUBLE	Yes	false	null		销售条码转换量
+
+9	sale_article_purchase_amt	DOUBLE	Yes	false	null		销售条码理论进货金额
+
+10	init_stock_qty	DOUBLE	Yes	false	null		期初库存数量
+
+11	end_stock_qty	DOUBLE	Yes	false	null		期末库存数量
+
+12	init_stock_amt	DOUBLE	Yes	false	null		期初库存金额
+
+13	end_stock_amt	DOUBLE	Yes	false	null		期末库存金额
+
+14	inventory_cost	DOUBLE	Yes	false	null		库存成本
+
+15	avg_inbound_price	DOUBLE	Yes	false	null		进货平均价
+
+16	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日
+
+
+3
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		业务日期
+
+2	new_dc_id	VARCHAR(1073741824)	Yes	false	null		仓id
+
+3	store_id	VARCHAR(1073741824)	Yes	false	null		门店id
+
+4	article_id	VARCHAR(1073741824)	Yes	false	null		商品id
+
+5	out_stock_amt_cb_notax	DOUBLE	Yes	false	null		门店商品维度出库成本
+
+6	out_stock_pay_amt	DOUBLE	Yes	false	null		门店商品维度出库金额
+
+7	return_stock_pay_amt	DOUBLE	Yes	false	null		门店商品维度门店退仓金额
+
+8	return_stock_amt_cb_notax	DOUBLE	Yes	false	null		门店商品维度门店退仓成本(不含税)
+
+9	original_outstock_qty	DOUBLE	Yes	false	null		原价出库数量
+
+10	original_outstock_amt	DOUBLE	Yes	false	null		原价出库金额
+
+11	promotion_outstock_price	DOUBLE	Yes	false	null		促销出库价
+
+12	promotion_outstock_qty	DOUBLE	Yes	false	null		促销出库数量
+
+13	promotion_outstock_amt	DOUBLE	Yes	false	null		促销出库金额
+
+14	gift_outstock_qty	DOUBLE	Yes	false	null		赠品出库数量
+
+15	total_outstock_qty	DOUBLE	Yes	false	null		总出库数量
+
+16	scm_promotion_cost	DOUBLE	Yes	false	null		供应链出库让利金额
+
+17	scm_return_promotion_cost	DOUBLE	Yes	false	null		供应链让利费用金额
+
+18	return_stock_qty	DOUBLE	Yes	false	null		门店退仓量
+
+19	out_stock_zzckj_amt	DOUBLE	Yes	false	null		出库原价金额
+
+20	return_stock_original_amt	DOUBLE	Yes	false	null		门店退仓原价金额
+
+21	store_order_qty	DOUBLE	Yes	false	null		订购数量（订购单位）
+
+22	order_amt	DOUBLE	Yes	false	null		订购金额
+
+23	order_qty_payean	DOUBLE	Yes	false	null		订购数量（结算单位）
+
+24	adjustment_amt	DOUBLE	Yes	false	null		调整金额
+
+25	adjustment_amt_notax	DOUBLE	Yes	false	null		调整金额(不含税)
+
+26	scm_promotion_qty_gift	DOUBLE	Yes	false	null		赠品出库让利数量
+
+27	scm_promotion_amt_gift	DOUBLE	Yes	false	null		赠品出库让利金额
+
+28	scm_promotion_amt	DOUBLE	Yes	false	null		非赠品出库让利金额
+
+29	scm_bear_amt	DOUBLE	Yes	false	null		供应链承担非赠品让利金额
+
+30	vendor_bear_amt	DOUBLE	Yes	false	null		供应商承担非赠品让利金额
+
+31	business_market_bear_amt	DOUBLE	Yes	false	null		运营市场承担非赠品让利金额
+
+32	business_bear_amt	DOUBLE	Yes	false	null		运营承担非赠品让利金额
+
+33	market_bear_amt	DOUBLE	Yes	false	null		市场承担非赠品让利金额
+
+34	scm_promotion_amt_total	DOUBLE	Yes	false	null		出库让利总额
+
+35	miss_stock_qty	DOUBLE	Yes	false	null		少货数量
+
+36	miss_stock_amt	DOUBLE	Yes	false	null		少货金额
+
+37	out_stock_pay_amt_notax	DOUBLE	Yes	false	null		门店出库额(不含税)
+
+38	return_stock_pay_amt_notax	DOUBLE	Yes	false	null		门店退仓额(不含税)
+
+39	out_stock_amt_cb	DOUBLE	Yes	false	null		出库到店成本
+
+40	return_stock_amt_cb	DOUBLE	Yes	false	null		门店退货成本
+
+41	vender_bear_gift_amt	DOUBLE	Yes	false	null		供应商承担赠品金额
+
+42	scm_bear_gift_amt	DOUBLE	Yes	false	null		供应链承担赠品金额
+
+43	store_return_amt_shop	DOUBLE	Yes	false	null		门店退货额(中台)
+
+44	store_return_qty_shop	DOUBLE	Yes	false	null		门店退货数量(中台)
+
+45	qdm_bear_negative_amt_total	DOUBLE	Yes	false	null		公司承担负让利总额
+
+46	qdm_bear_positive_amt_total	DOUBLE	Yes	false	null		公司承担让利总额
+
+47	qdm_bear_gift_qty	DOUBLE	Yes	false	null		公司承担赠品数量
+
+48	qdm_bear_gift_amt	DOUBLE	Yes	false	null		公司承担赠品金额
+
+49	qdm_bear_nogift_negative_amt	DOUBLE	Yes	false	null		公司承担非赠品负让利金额
+
+50	qdm_bear_nogift_positive_amt	DOUBLE	Yes	false	null		公司承担非赠品让利金额
+
+51	qdm_bear_promotion_fee	DOUBLE	Yes	false	null		公司承担促销费用
+
+52	vender_bear_gift_qty	DOUBLE	Yes	false	null		供应商承担赠品数量
+
+53	scm_bear_gift_qty	DOUBLE	Yes	false	null		供应链承担赠品数量
+
+54	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	取营业日期为日分区
+
+
+
+4
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	DATE	Yes	false	null		日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	dc_id	VARCHAR(1073741824)	Yes	false	null		仓编码
+
+4	matnr	VARCHAR(1073741824)	Yes	false	null		物料id
+
+5	article_id	VARCHAR(1073741824)	Yes	false	null		商品id
+
+6	tax	DOUBLE	Yes	false	null		tax_rate
+
+7	adjustment_amt	DOUBLE	Yes	false	null		差异调整金额
+
+8	adjustment_amt_notax	DOUBLE	Yes	false	null		差异调整金额不含税金额
+
+9	new_sp_store_id	VARCHAR(1073741824)	Yes	false	null		新门店编码
+
+10	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+5
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+2	article_id	VARCHAR(1073741824)	Yes	false	null		商品编码
+
+3	article_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+4	category_level1_id	VARCHAR(1073741824)	Yes	false	null		一级分类ID
+
+5	category_level1_description	VARCHAR(1073741824)	Yes	false	null		一级分类描述
+
+6	unknow_lost_qty	DOUBLE	Yes	false	null		未知损耗数量
+
+7	unknow_lost_amt	DOUBLE	Yes	false	null		未知损耗金额
+
+8	know_lost_qty	DOUBLE	Yes	false	null		已知损耗数量
+
+9	know_lost_amt	DOUBLE	Yes	false	null		已知损耗金额
+
+10	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+
+6
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	store_name	VARCHAR(1073741824)	Yes	false	null		门店名称
+
+4	article_id	VARCHAR(1073741824)	Yes	false	null		商品编码
+
+5	article_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+6	compose_in_qty	DOUBLE	Yes	false	null		加工转换入数量
+
+7	compose_in_amt	DOUBLE	Yes	false	null		加工转换入金额
+
+8	compose_out_qty	DOUBLE	Yes	false	null		加工转换出数量
+
+9	compose_out_amt	DOUBLE	Yes	false	null		加工转换出金额
+
+10	update_time	DATETIME	Yes	false	null		最后更新时间
+
+11	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+
+7
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	order_article_id	VARCHAR(1073741824)	Yes	false	null		订购编码
+
+4	activity_name	VARCHAR(1073741824)	Yes	false	null		活动名称
+
+5	out_price	VARCHAR(1073741824)	Yes	false	null		出库价
+
+6	sale_price	VARCHAR(1073741824)	Yes	false	null		售价
+
+7	hot_flag	VARCHAR(1073741824)	Yes	false	null		是否爆款(是:1 否:0)
+
+8	order_price	DOUBLE	Yes	false	null		订购价格
+
+9	order_qty	DOUBLE	Yes	false	null		订购数量(事实)
+
+10	settle_order_qty	DOUBLE	Yes	false	null		订购数量(结算单位)
+
+11	order_amt	DOUBLE	Yes	false	null		订购金额(事实)
+
+12	split_order_qty	DOUBLE	Yes	false	null		拆分后的订购量(验收条码单位)
+
+13	split_order_amt	DOUBLE	Yes	false	null		拆分后的订购额
+
+14	receive_article_id	VARCHAR(1073741824)	Yes	false	null		验收条码
+
+15	receive_amt	DOUBLE	Yes	false	null		验收条码事实进货额
+
+16	receive_qty	DOUBLE	Yes	false	null		验收条码事实进货量
+
+17	purchase_price	DOUBLE	Yes	false	null		验收条码事实进货平均价
+
+18	sale_article_id	VARCHAR(1073741824)	Yes	false	null		销售条码
+
+19	sale_article_receive_qty	DOUBLE	Yes	false	null		销售条码理论进货量
+
+20	sale_article_receive_amt	DOUBLE	Yes	false	null		销售条码理论进货额
+
+21	sale_article_receive_price	DOUBLE	Yes	false	null		销售条码理论进货单价
+
+22	sum_sub_article_qty	DOUBLE	Yes	false	null		验收条码下拆出的子商品量总和
+
+23	split_qty	DOUBLE	Yes	false	null		(拆分后)商品数量信息 标品为份数散称为1规格商品为实际份数
+
+24	qty	DOUBLE	Yes	false	null		销售份数(事实)
+
+25	qty_spec	DOUBLE	Yes	false	null		商品数量信息(规格*份数)(事实)
+
+26	split_qty_spec	DOUBLE	Yes	false	null		商品数量信息(规格*份数)(拆分后)
+
+27	sale_amt	DOUBLE	Yes	false	null		日结金额(事实)
+
+28	split_sale_amt	DOUBLE	Yes	false	null		日结金额(拆分后)
+
+29	lost_qty	DOUBLE	Yes	false	null		损耗数量
+
+30	lost_amt	DOUBLE	Yes	false	null		损耗额
+
+31	profit_amt	DOUBLE	Yes	false	null		毛利额
+
+32	allowance_profit_amt	DOUBLE	Yes	false	null		补贴后毛利
+
+33	split_discount_amt	DOUBLE	Yes	false	null		(拆分后)折扣额
+
+34	split_member_discount_amt	DOUBLE	Yes	false	null		(拆分后)会员折扣额
+
+35	split_hour_discount_amt	DOUBLE	Yes	false	null		(拆分后)时段折扣额
+
+36	split_return_sale_qty	DOUBLE	Yes	false	null		(拆分后)退货数量
+
+37	split_return_sale_amt	DOUBLE	Yes	false	null		(拆分后)退货额
+
+38	split_member_hour_sale_amt	DOUBLE	Yes	false	null		(拆分后)会员时段销售额
+
+39	split_af19_sale_amt	DOUBLE	Yes	false	null		(拆分后)19点后销售额
+
+40	split_af19_sale_qty	DOUBLE	Yes	false	null		(拆分后)19点后销售数量
+
+41	split_bf9_sale_qty	DOUBLE	Yes	false	null		(拆分后)9点前销售数量
+
+42	split_bf10_sale_qty	DOUBLE	Yes	false	null		(拆分后)10点前销售数量
+
+43	split_bf12_sale_qty	DOUBLE	Yes	false	null		(拆分后)12点前销售数量
+
+44	split_bf16_sale_qty	DOUBLE	Yes	false	null		(拆分后)16点前销售数量
+
+45	split_bf19_sale_qty	DOUBLE	Yes	false	null		(拆分后)19点前销售数量
+
+46	split_bf9_sale_amt	DOUBLE	Yes	false	null		(拆分后)9点前销售数量
+
+47	split_bf10_sale_amt	DOUBLE	Yes	false	null		(拆分后)10点前销售数量
+
+48	split_bf12_sale_amt	DOUBLE	Yes	false	null		(拆分后)12点前销售数量
+
+49	split_bf16_sale_amt	DOUBLE	Yes	false	null		(拆分后)16点前销售数量
+
+50	split_bf19_sale_amt	DOUBLE	Yes	false	null		(拆分后)19点前销售数量
+
+51	split_p_lp_sub_amt	DOUBLE	Yes	false	null		(拆分后)商品总标价 listPrice*qty
+
+52	split_p_sp_sub_amt	DOUBLE	Yes	false	null		(拆分后)售价金额
+
+53	split_promotion_discount_amt	DOUBLE	Yes	false	null		(拆分后)促销折扣额
+
+54	split_allowance_amt	DOUBLE	Yes	false	null		拆分后补贴额
+
+55	activity_type	VARCHAR(1073741824)	Yes	false	null		活动类型
+
+56	activity_id	VARCHAR(1073741824)	Yes	false	null		促销活动号
+
+57	order_weight	DOUBLE	Yes	false	null		订购条码的订购重量
+
+58	spilt_receive_weight	DOUBLE	Yes	false	null		销售条码理论进货量转的重量
+
+59	split_bf9_sale_weight	DOUBLE	Yes	false	null		9点前销售重量
+
+60	split_sale_weight	DOUBLE	Yes	false	null		销售条码销售重量
+
+61	split_cust_num	DOUBLE	Yes	false	null		拆分后来客数
+
+62	split_bf19_cust_num	DOUBLE	Yes	false	null		拆分后19点前来客数
+
+63	split_receive_unit_qty_spec	DOUBLE	Yes	false	null		拆分后销售量(验收条码单位)
+
+64	split_receive_unit_order_qty	DOUBLE	Yes	false	null		拆分后订购量(验收条码单位)
+
+65	sale_article_receive_unit_qty	DOUBLE	Yes	false	null		销售条码理论进货量(验收条码单位)
+
+66	last_pay_at	VARCHAR(1073741824)	Yes	false	null		最后支付时间
+
+67	list_price	DOUBLE	Yes	false	null		商品标价
+
+68	init_stock_qty	DOUBLE	Yes	false	null		期初库存数量
+
+69	end_stock_qty	DOUBLE	Yes	false	null		期末库存数量
+
+70	init_stock_amt	DOUBLE	Yes	false	null		期初库存金额
+
+71	end_stock_amt	DOUBLE	Yes	false	null		期末库存金额
+
+72	init_receiveb_qty	DOUBLE	Yes	false	null		期初带来的子商品进货数量
+
+73	init_receiveb_amt	DOUBLE	Yes	false	null		期初带来的子商品进货金额
+
+74	end_receiveb_qty	DOUBLE	Yes	false	null		子商品期末库存数量
+
+75	end_receiveb_amt	DOUBLE	Yes	false	null		子商品期末库存金额
+
+76	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+
+
+
+8
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	order_id	VARCHAR(1073741824)	Yes	false	null		主键
+
+2	order_type	VARCHAR(1073741824)	Yes	false	null		订单类型
+
+3	order_status	VARCHAR(1073741824)	Yes	false	null		订单状态
+
+4	customer_id	VARCHAR(1073741824)	Yes	false	null		用户ID 实际用户ID或者门店对应虚拟用户ID
+
+5	delivery_id	VARCHAR(1073741824)	Yes	false	null		配送表ID
+
+6	customer_name	VARCHAR(1073741824)	Yes	false	null		用户名 昵称
+
+7	customer_phone	VARCHAR(1073741824)	Yes	false	null		用户注册手机号
+
+8	shop_id	VARCHAR(1073741824)	Yes	false	null		门店编号
+
+9	shop_name	VARCHAR(1073741824)	Yes	false	null		门店名称
+
+10	parent_order_id	VARCHAR(1073741824)	Yes	false	null		父订单ID
+
+11	product_count	DOUBLE	Yes	false	null		商品总件数 标品为件数，散称为一行一件
+
+12	channel_id	VARCHAR(1073741824)	Yes	false	null		渠道号
+
+13	order_sub_type	VARCHAR(1073741824)	Yes	false	null		订单子类型
+
+14	outer_order_id	VARCHAR(1073741824)	Yes	false	null		outer订单编号
+
+15	outer_order_type	VARCHAR(1073741824)	Yes	false	null		outer订单类型
+
+16	refund_type	VARCHAR(1073741824)	Yes	false	null		退款类型，整单退，部分退，整单拒收，部分拒收
+
+17	je_date	VARCHAR(1073741824)	Yes	false	null		过账日期
+
+18	rje_date	VARCHAR(1073741824)	Yes	false	null		退货过账日期
+
+19	refund_at	VARCHAR(1073741824)	Yes	false	null		退款时间
+
+20	pay_at	VARCHAR(1073741824)	Yes	false	null		支付时间
+
+21	order_at	VARCHAR(1073741824)	Yes	false	null		订单时间
+
+22	cancel_at	VARCHAR(1073741824)	Yes	false	null		订单取消时间
+
+23	business_source	INT	Yes	false	null		订单业务来源0默认1团长订单
+
+24	row_num	VARCHAR(1073741824)	Yes	false	null		商品商品明细行号
+
+25	goods_id	VARCHAR(1073741824)	Yes	false	null		订单明细行商品编码
+
+26	sku_code	VARCHAR(1073741824)	Yes	false	null		商品原始编辑 如线上场景 goodsi_id对应生成商品idsku_code对应基础库真实商品编码
+
+27	goods_name	VARCHAR(1073741824)	Yes	false	null		商品明细行号
+
+28	category_id	VARCHAR(1073741824)	Yes	false	null		商品对应分类ID
+
+29	spu_code	VARCHAR(1073741824)	Yes	false	null		物料编码
+
+30	bundle_promo_code	VARCHAR(1073741824)	Yes	false	null		促销号用于标识同一换购赠品活动
+
+31	order_item_id	VARCHAR(1073741824)	Yes	false	null		订单商品明细行编码
+
+32	p_promo_amt	DOUBLE	Yes	false	null		商品优惠金额
+
+33	p_promo_total_amt	DOUBLE	Yes	false	null		商品促销原始总金额
+
+34	f_promo_amt	DOUBLE	Yes	false	null		运费优惠金额
+
+35	f_promo_total_amt	DOUBLE	Yes	false	null		运费促销原始总金额
+
+36	promotion_category	VARCHAR(1073741824)	Yes	false	null		订单促销大类标记 对应OrderItemPromotionCategory 规则rule积分point 组合码等
+
+37	promotion_code	VARCHAR(1073741824)	Yes	false	null		促销号
+
+38	promotion_code2	VARCHAR(1073741824)	Yes	false	null		促销编码(纯数字)
+
+39	promo_type	VARCHAR(1073741824)	Yes	false	null		促销大类对应PromotionType
+
+40	promo_sub_type	VARCHAR(1073741824)	Yes	false	null		促销子类对应PromotionSubType
+
+41	coupon_code	VARCHAR(1073741824)	Yes	false	null		如果为券促销时，记录券号
+
+42	from_outer	VARCHAR(1073741824)	Yes	false	null		是否外部导入促销
+
+43	outer_code	VARCHAR(1073741824)	Yes	false	null		外部促销号
+
+44	parent_order_item_id	VARCHAR(1073741824)	Yes	false	null		拆单时映射父itemId
+
+45	parent_order_item_promotion_id	VARCHAR(1073741824)	Yes	false	null		拆单时映射父itemPromotionId
+
+46	parent_bom_order_item_id	VARCHAR(1073741824)	Yes	false	null		关联的组合码商品行ID
+
+47	parent_bom_order_item_promo_id	VARCHAR(1073741824)	Yes	false	null		关联的组合码商品行促销ID
+
+48	cost_center	VARCHAR(1073741824)	Yes	false	null		成本中心
+
+49	coupon_mode	VARCHAR(1073741824)	Yes	false	null		对应CouponMode 是否属于券支付
+
+50	sales_charge_type	VARCHAR(1073741824)	Yes	false	null		对应SalesChargeType促销扣款类型
+
+51	cost_tax_rate	DOUBLE	Yes	false	null		进项税率 由商品信息中获取
+
+52	allocate_rate	DOUBLE	Yes	false	null		供应商承担比例
+
+53	promotion_cost	DOUBLE	Yes	false	null		促销扣款
+
+54	promo_action_type	VARCHAR(1073741824)	Yes	false	null		促销具体类型
+
+55	purchase_limit_qty	DOUBLE	Yes	false	null		促销限购数量
+
+56	promotion_name	VARCHAR(1073741824)	Yes	false	null		促销活动名称
+
+57	activity_type	VARCHAR(1073741824)	Yes	false	null		活动分类
+
+58	activity_level	VARCHAR(1073741824)	Yes	false	null		活动等级
+
+59	code2	VARCHAR(1073741824)	Yes	false	null		促销编码(数字)
+
+60	rank	VARCHAR(1073741824)	Yes	false	null		优先级 如500 400根据此字段对促销排序
+
+61	promo_type1	VARCHAR(1073741824)	Yes	false	null		促销大类 O订单 I单品 S运费
+
+62	promo_sub_type1	VARCHAR(1073741824)	Yes	false	null		促销子类 如O订单级别促销再分 满减 折扣等
+
+63	promo_action	VARCHAR(1073741824)	Yes	false	null		促销应用类型 promo_sub_type为满减时可以根据此字段区分为普通满减，阶梯满减，每满减等可以理解为子类的4进t1.一步区分
+
+64	eligibility_condition	VARCHAR(1073741824)	Yes	false	null		商品适用条件范围 JSON格式存
+
+65	promo_condition_type	VARCHAR(1073741824)	Yes	false	null		适用条件判断类型 比如按金额 按商品件数
+
+66	promo_condition_context	VARCHAR(1073741824)	Yes	false	null		适用条件判断门槛 比如10元 如5件
+
+67	promo_action_context	VARCHAR(1073741824)	Yes	false	null		活动实际内容
+
+68	name	VARCHAR(1073741824)	Yes	false	null		活动名称 程序自动生成
+
+69	description	VARCHAR(1073741824)	Yes	false	null		活动描述
+
+70	tag	VARCHAR(1073741824)	Yes	false	null		活动标签 满减 折扣
+
+71	cost_center_info	VARCHAR(1073741824)	Yes	false	null		成本中心信息
+
+72	available_category	VARCHAR(1073741824)	Yes	false	null		品类促销的一级分类
+
+73	allowance	VARCHAR(1073741824)	Yes	false	null		补贴款类型
+
+74	only_member	VARCHAR(1073741824)	Yes	false	null		是否仅会员专享
+
+75	title	VARCHAR(1073741824)	Yes	false	null		活动标题
+
+76	discount	DOUBLE	Yes	false	null		打折
+
+77	created_by	VARCHAR(1073741824)	Yes	false	null		0为OA(平台发起) 其余为门店发起
+
+78	promotion_type	VARCHAR(1073741824)	Yes	false	null		促销优惠类型 PricePromotionType
+
+79	category_info	VARCHAR(1073741824)	Yes	false	null		活动分类信息
+
+80	source	VARCHAR(1073741824)	Yes	false	null		活动来源（门店、总部）
+
+81	online_flag	VARCHAR(1073741824)	Yes	false	null		线上线下标识
+
+82	normal_inc_day	VARCHAR(1073741824)	Yes	false	null		正向日结日期
+
+83	inc_time	VARCHAR(1073741824)	Yes	false	null		日结小时
+
+84	jielong_flag	VARCHAR(1073741824)	Yes	false	null		接龙标识
+
+85	activity_code	VARCHAR(1073741824)	Yes	false	null		活动编号
+
+86	promo_ext_prop	VARCHAR(1073741824)	Yes	false	null		额外促销属性
+
+87	cost_company	VARCHAR(1073741824)	Yes	false	null		成本公司
+
+88	cost_subject	VARCHAR(1073741824)	Yes	false	null		成本项目
+
+89	is_hour_promotion	VARCHAR(1073741824)	Yes	false	null		时段折扣标签(是:1,否:0)
+
+90	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+
+
+9
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	id	BIGINT	Yes	false	null		id
+
+2	shop_id	VARCHAR(1073741824)	Yes	false	null		门店编号
+
+3	inventory_date	VARCHAR(1073741824)	Yes	false	null		盘点日期
+
+4	sku_code	VARCHAR(1073741824)	Yes	false	null		商品编号
+
+5	sku_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+6	sub_category_id	VARCHAR(1073741824)	Yes	false	null		小分类编码
+
+7	sub_category_name	VARCHAR(1073741824)	Yes	false	null		小分类名称
+
+8	spec	VARCHAR(1073741824)	Yes	false	null		规格
+
+9	sales_unit	VARCHAR(1073741824)	Yes	false	null		销售单位
+
+10	main_img	VARCHAR(1073741824)	Yes	false	null		商品主图
+
+11	gift_flag	INT	Yes	false	null		赠品标识
+
+12	cost_price	DECIMAL(32,4)	Yes	false	null		成本价
+
+13	created_at	VARCHAR(1073741824)	Yes	false	null		创建时间
+
+14	created_by	VARCHAR(1073741824)	Yes	false	null		创建人
+
+15	updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+16	updated_by	VARCHAR(1073741824)	Yes	false	null		最后更新人
+
+17	last_updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+18	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+10
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	id	BIGINT	Yes	false	null		id
+
+2	shop_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	tenant_id	VARCHAR(1073741824)	Yes	false	null		租户编码
+
+4	shop_name	VARCHAR(1073741824)	Yes	false	null		门店名称
+
+5	dc_code	VARCHAR(1073741824)	Yes	false	null		仓库编号
+
+6	dc_name	VARCHAR(1073741824)	Yes	false	null		仓库名称
+
+7	category_code	VARCHAR(1073741824)	Yes	false	null		商品价格策略分类编号
+
+8	category_name	VARCHAR(1073741824)	Yes	false	null		商品价格策略分类名称
+
+9	sku_code	VARCHAR(1073741824)	Yes	false	null		商品编号
+
+10	sku_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+11	current_price	DOUBLE	Yes	false	null		今日价格
+
+12	yesterday_price	DOUBLE	Yes	false	null		昨日价格
+
+13	strategy_no	VARCHAR(1073741824)	Yes	false	null		策略编号
+
+14	promotion_no	VARCHAR(1073741824)	Yes	false	null		促销编号
+
+15	calc_strategy	VARCHAR(1073741824)	Yes	false	null		参与价格计算策略详情
+
+16	dc_original_price	DOUBLE	Yes	false	null		出库原价格
+
+17	dc_price	DOUBLE	Yes	false	null		出库价格
+
+18	anchor_sale_price	DOUBLE	Yes	false	null		锚定销售价
+
+19	deal_status	VARCHAR(1073741824)	Yes	false	null		UNDEAL:未处理、DEALT:已处理
+
+20	exception_type	VARCHAR(1073741824)	Yes	false	null		参考calcExceptionEmun
+
+21	exception_reason	VARCHAR(1073741824)	Yes	false	null		异常原因
+
+22	monitor_type	VARCHAR(1073741824)	Yes	false	null		参考MonitorTypeEmun
+
+23	monitor_desc	VARCHAR(1073741824)	Yes	false	null		监控明细
+
+24	calc_status	VARCHAR(1073741824)	Yes	false	null		RIGHT:正确 WRONG:错误
+
+25	confirm_status	VARCHAR(1073741824)	Yes	false	null		UNCONFIRM:未确认 CONFIRMED:已经确认
+
+26	sale_status	VARCHAR(1073741824)	Yes	false	null		SALABLE:可售 UNSALE:不可售
+
+27	lock_status	INT	Yes	false	null		锁定状态 0 非锁定 1锁定
+
+28	push_status	VARCHAR(1073741824)	Yes	false	null		推送状态 已经推送 pushed 未推送 unpush
+
+29	confirm_by	VARCHAR(1073741824)	Yes	false	null		确认人
+
+30	calc_by	VARCHAR(1073741824)	Yes	false	null		重新计算人
+
+31	calc_effect_at	VARCHAR(1073741824)	Yes	false	null		价格计算生效时间
+
+32	source	VARCHAR(1073741824)	Yes	false	null		数据来源方式 PUSH:erp推的 PULL:主动拉去
+
+33	shop_sku	VARCHAR(1073741824)	Yes	false	null		shopId+skuCode 用于商品维度批量操作
+
+34	sales_unit	VARCHAR(1073741824)	Yes	false	null		销售单位
+
+35	yesterday_dc_price	DOUBLE	Yes	false	null		昨日出库价格
+
+36	created_at	VARCHAR(1073741824)	Yes	false	null		创建时间
+
+37	created_by	VARCHAR(1073741824)	Yes	false	null		创建人
+
+38	updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+39	updated_by	VARCHAR(1073741824)	Yes	false	null		更新人
+
+40	last_updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+41	shop_id_sku_code_calc_at	VARCHAR(1073741824)	Yes	false	null		shop_id_sku_code_calc_at
+
+42	out_updated_at	BIGINT	Yes	false	null		sap最后更新时间
+
+43	original_price	DOUBLE	Yes	false	null		销售原价
+
+44	effective	INT	Yes	false	null		是否生效
+
+45	unadjust_sale_price	DOUBLE	Yes	false	null		调整前价格
+
+46	is_new	INT	Yes	false	null		1 新价格策略数据 0旧价格策略数据
+
+47	original_dc_price	DOUBLE	Yes	false	null		销售原价(根据出库价计算的)
+
+48	dc_original_price_sap	DOUBLE	Yes	false	null		出库原价(来自sap zmmt022表)
+
+49	sales_mode	VARCHAR(1073741824)	Yes	false	null		销售方式
+
+50	outstock_addprice_amt	DOUBLE	Yes	false	null		出库加价额
+
+51	outstock_addprice_rate	DOUBLE	Yes	false	null		出库加价率
+
+52	outstock_profit_rate	DOUBLE	Yes	false	null		出库毛利率
+
+53	outstock_lock_price	DOUBLE	Yes	false	null		出库固定价
+
+54	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+
+
+12
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		盘点日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编号
+
+3	article_id	VARCHAR(1073741824)	Yes	false	null		商品编号
+
+4	article_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+5	category_level3_id	VARCHAR(1073741824)	Yes	false	null		小类编码ID
+
+6	category_level3_description	VARCHAR(1073741824)	Yes	false	null		小类编码名称
+
+7	category_level2_id	VARCHAR(1073741824)	Yes	false	null		中类编码ID
+
+8	category_level2_description	VARCHAR(1073741824)	Yes	false	null		中类编码名称
+
+9	category_level1_id	VARCHAR(1073741824)	Yes	false	null		大类编码ID
+
+10	category_level1_description	VARCHAR(1073741824)	Yes	false	null		大类编码名称
+
+11	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+13	序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	store_service_range	VARCHAR(1073741824)	Yes	false	null		门店业务开通编码
+
+2	store_service_name	VARCHAR(1073741824)	Yes	false	null		门店业务开通名称
+
+3	mall_supervisor_phone	VARCHAR(1073741824)	Yes	false	null		电商督导电话
+
+4	mall_supervisor_name	VARCHAR(1073741824)	Yes	false	null		电商督导名称
+
+5	zman_id	VARCHAR(1073741824)	Yes	false	null		管理方式编码
+
+6	zman_name	VARCHAR(1073741824)	Yes	false	null		管理方式名称
+
+7	original_store_id	VARCHAR(1073741824)	Yes	false	null		转店前最原始门店编码
+
+8	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+9	pt	VARCHAR(1073741824)	Yes	false	null	partition key	区域 01华南 02华东
+
+
+
+14
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	id	BIGINT	Yes	false	null		id
+
+2	tenant_id	VARCHAR(1073741824)	Yes	false	null		租户编码
+
+3	shop_id	VARCHAR(1073741824)	Yes	false	null		门店编号
+
+4	shop_name	VARCHAR(1073741824)	Yes	false	null		门店名称
+
+5	order_at	VARCHAR(1073741824)	Yes	false	null		订购时间
+
+6	category_code	VARCHAR(1073741824)	Yes	false	null		大分类编号
+
+7	category_name	VARCHAR(1073741824)	Yes	false	null		大分类名称
+
+8	mid_category_code	VARCHAR(1073741824)	Yes	false	null		中分类编号
+
+9	mid_category_name	VARCHAR(1073741824)	Yes	false	null		中分类名称
+
+10	sub_category_code	VARCHAR(1073741824)	Yes	false	null		小分类编码
+
+11	sub_category_name	VARCHAR(1073741824)	Yes	false	null		小分类名称
+
+12	sku_code	VARCHAR(1073741824)	Yes	false	null		商品编号
+
+13	sku_name	VARCHAR(1073741824)	Yes	false	null		商品名称
+
+14	sell_unit	VARCHAR(1073741824)	Yes	false	null		销售单位(验收单位)
+
+15	pur_unit	VARCHAR(1073741824)	Yes	false	null		订购单位
+
+16	article_spec	VARCHAR(1073741824)	Yes	false	null		规格
+
+17	old_spec	VARCHAR(1073741824)	Yes	false	null		旧规格
+
+18	spec_update_date	VARCHAR(1073741824)	Yes	false	null		规格更新日期yyyyMMdd
+
+19	purchase_flag	INT	Yes	false	null		采购标识：0 选订 1 必订
+
+20	basic_qty	DECIMAL(19,4)	Yes	false	null		订购基数
+
+21	min_batch_qty	DECIMAL(19,4)	Yes	false	null		最小订购数量
+
+22	max_batch_qty	DECIMAL(19,4)	Yes	false	null		最大订购数量
+
+23	propose_qty	DECIMAL(19,4)	Yes	false	null		建议订购量
+
+24	purchase_price	DECIMAL(19,4)	Yes	false	null		进货价
+
+25	is_special_price	INT	Yes	false	null		是否是特价
+
+26	order_qty	DECIMAL(19,4)	Yes	false	null		订购数量
+
+27	order_amount	DECIMAL(19,4)	Yes	false	null		订购总金额
+
+28	order_weight	DECIMAL(19,4)	Yes	false	null		订购重量
+
+29	conver_rate	DECIMAL(19,4)	Yes	false	null		转化公式(单位重量)
+
+30	only_morning	INT	Yes	false	null		1早配 0晚配
+
+31	sku_created_at	VARCHAR(1073741824)	Yes	false	null		SKU创建时间
+
+32	core_flag	INT	Yes	false	null		是否核心商品
+
+33	tips_flag	INT	Yes	false	null		是否需要提示，订购时是否需要校验建议量
+
+34	seven_days_order_count	INT	Yes	false	null		近七天订购次数
+
+35	seven_days_order_qty	DECIMAL(19,4)	Yes	false	null		近七天订购数量
+
+36	created_at	VARCHAR(1073741824)	Yes	false	null		创建时间
+
+37	created_by	VARCHAR(1073741824)	Yes	false	null		创建人
+
+38	updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+39	updated_by	VARCHAR(1073741824)	Yes	false	null		最后更新人
+
+40	last_updated_at	VARCHAR(1073741824)	Yes	false	null		最后更新时间
+
+41	is_deleted	INT	Yes	false	null		0未删除 1删除
+
+42	propose_desc	VARCHAR(1073741824)	Yes	false	null		大数据智能建议
+
+43	main_img	VARCHAR(1073741824)	Yes	false	null		商品主图
+
+44	allow_single_order	INT	Yes	false	null		是否允许单订 0否 1是
+
+45	sku_tag	INT	Yes	false	null		大数据商品标签
+
+46	receive_sku_code	VARCHAR(1073741824)	Yes	false	null		验收商品编码
+
+47	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+
+
+15
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	blackwhite_pig_id	VARCHAR(1073741824)	Yes	false	null		黑白猪编码 01黑猪 02白猪
+
+2	blackwhite_pig_name	VARCHAR(1073741824)	Yes	false	null		黑白猪名称
+
+3	norms_lower_limit	DOUBLE	Yes	false	null		规格下限
+
+4	norms_upper_limit	DOUBLE	Yes	false	null		规格上限
+
+5	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
+
+6	pt	VARCHAR(1073741824)	Yes	false	null	partition key	区域 华南01,华东02
+
+
+16
+1	day_wid	VARCHAR(1073741824)	Yes	false	null		日期ID
+
+2	day_name	VARCHAR(1073741824)	Yes	false	null		日期名称
+
+3	day_date_chn	VARCHAR(1073741824)	Yes	false	null		农历日期名称
+
+4	day_date	VARCHAR(1073741824)	Yes	false	null		日期
+
+5	day_name_of_week	VARCHAR(1073741824)	Yes	false	null		星期几
+
+6	day_of_week	VARCHAR(1073741824)	Yes	false	null		本周第几天
+
+7	day_of_month	VARCHAR(1073741824)	Yes	false	null		本月第几天
+
+8	day_of_year	VARCHAR(1073741824)	Yes	false	null		本年第几天
+
+9	week_wid	VARCHAR(1073741824)	Yes	false	null		周ID
+
+10	week_name	VARCHAR(1073741824)	Yes	false	null		周名称
+
+11	week_no	VARCHAR(1073741824)	Yes	false	null		周序号
+
+12	week_start_date_wid	VARCHAR(1073741824)	Yes	false	null		本周开始日期ID
+
+13	week_start_date	VARCHAR(1073741824)	Yes	false	null		本周开始日期
+
+14	week_end_date_wid	VARCHAR(1073741824)	Yes	false	null		本周结束日期ID
+
+15	week_end_date	VARCHAR(1073741824)	Yes	false	null		本周结束日期
+
+16	month_wid	VARCHAR(1073741824)	Yes	false	null		月ID
+
+17	month_name	VARCHAR(1073741824)	Yes	false	null		月名称
+
+18	month_no	VARCHAR(1073741824)	Yes	false	null		月序号
+
+19	month_days	VARCHAR(1073741824)	Yes	false	null		本月包含天数
+
+20	month_start_date_wid	VARCHAR(1073741824)	Yes	false	null		本月开始日期ID
+
+21	month_start_date	VARCHAR(1073741824)	Yes	false	null		本月开始日期
+
+22	month_end_date_wid	VARCHAR(1073741824)	Yes	false	null		本月结束日期ID
+
+23	month_end_date	VARCHAR(1073741824)	Yes	false	null		本月结束日期
+
+24	quarter_wid	VARCHAR(1073741824)	Yes	false	null		季度ID
+
+25	quarter_name	VARCHAR(1073741824)	Yes	false	null		季度名称
+
+26	quarter_no	VARCHAR(1073741824)	Yes	false	null		季度序号
+
+27	quarter_start_date_wid	VARCHAR(1073741824)	Yes	false	null		本季度开始日期ID
+
+28	quarter_start_date	VARCHAR(1073741824)	Yes	false	null		本季度开始日期
+
+29	quarter_end_date_wid	VARCHAR(1073741824)	Yes	false	null		本季度结束日期ID
+
+30	quarter_end_date	VARCHAR(1073741824)	Yes	false	null		本季度结束日期
+
+31	year_wid	VARCHAR(1073741824)	Yes	false	null		年ID
+
+32	year_name	VARCHAR(1073741824)	Yes	false	null		年名称
+
+33	year_start_date_wid	VARCHAR(1073741824)	Yes	false	null		本年开始日期ID
+
+34	year_start_date	VARCHAR(1073741824)	Yes	false	null		本年开始日期
+
+35	year_end_date_wid	VARCHAR(1073741824)	Yes	false	null		本年结束日期ID
+
+36	year_end_date	VARCHAR(1073741824)	Yes	false	null		本年结束日期
+
+37	is_last_day_of_week	VARCHAR(1073741824)	Yes	false	null		是否周最后一天(Y是，N否)
+
+38	is_last_day_of_month	VARCHAR(1073741824)	Yes	false	null		是否月最后一天(Y是，N否)
+
+39	is_last_day_of_year	VARCHAR(1073741824)	Yes	false	null		是否年最后一天(Y是，N否)
+
+40	is_weekend	VARCHAR(1073741824)	Yes	false	null		是否周末
+
+41	holiday_name	VARCHAR(1073741824)	Yes	false	null		节假日
+
+42	day_ago_date_wid	VARCHAR(1073741824)	Yes	false	null		昨天日期ID
+
+43	day_ago_date	VARCHAR(1073741824)	Yes	false	null		昨天日期
+
+44	week_ago_date_wid	VARCHAR(1073741824)	Yes	false	null		上周同期日期ID
+
+45	week_ago_date	VARCHAR(1073741824)	Yes	false	null		上周同期日期
+
+46	month_ago_date_wid	VARCHAR(1073741824)	Yes	false	null		上月同期日期ID
+
+47	month_ago_date	VARCHAR(1073741824)	Yes	false	null		上月同期日期
+
+48	quarter_ago_date_wid	VARCHAR(1073741824)	Yes	false	null		上季度同期日期ID
+
+49	quarter_ago_date	VARCHAR(1073741824)	Yes	false	null		上季度同期日期
+
+50	year_ago_date_wid	VARCHAR(1073741824)	Yes	false	null		去年同期日期ID
+
+51	year_ago_date	VARCHAR(1073741824)	Yes	false	null		去年同期日期ID
+
+52	language	VARCHAR(1073741824)	Yes	false	null		语言
+
+53	w_insert_date	VARCHAR(1073741824)	Yes	false	null		数据插入时间
+
+54	w_update_date	VARCHAR(1073741824)	Yes	false	null		数据更新时间
+
+55	is_actual_holiday	VARCHAR(1073741824)	Yes	false	null		实际节假日标签
+
+56	actual_holiday_name	VARCHAR(1073741824)	Yes	false	null		实际节假日名称
+
+57	is_actual_overwork	VARCHAR(1073741824)	Yes	false	null		工作日标签(是否需要补班)
+
+58	is_rest_day	VARCHAR(1073741824)	Yes	false	null		休息日标签(是否休息,包含周末与节假日)
+
+59	actual_week_no	VARCHAR(1073741824)	Yes	false	null		周序号 实际20230101为2023年01周标记为1 不是2022年52周
+
+60	day54_of_week	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 本周第几天
+
+61	week54_wid	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 周ID
+
+62	week54_name	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 周名称
+
+63	week54_no	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 周序号
+
+64	week54_start_date_wid	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 本周开始日期ID
+
+65	week54_start_date	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 本周开始日期
+
+66	week54_end_date_wid	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 本周结束日期ID
+
+67	week54_end_date	VARCHAR(1073741824)	Yes	false	null		上周五至本周四为一周 本周结束日期
+
+68	week_no_name	VARCHAR(1073741824)	Yes	false	null		周序号名称
+
+69	analysis_week_wid	VARCHAR(1073741824)	Yes	false	null		分析周id
+
+70	analysis_week_name	VARCHAR(1073741824)	Yes	false	null		分析周名称
+
+
+
+17
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	article_id	VARCHAR(1073741824)	Yes	false	null		商品编码(验收条码)
+
+4	article_name	VARCHAR(1073741824)	Yes	false	null		商品名称(验收条码)
+
+5	category_level1_id	VARCHAR(1073741824)	Yes	false	null		商品大分类(验收条码)
+
+6	category_level1_description	VARCHAR(1073741824)	Yes	false	null		商品编码(验收条码)
+
+7	inbound_amount	DOUBLE	Yes	false	null		进货额(实际进货)
+
+8	inbound_qty	DOUBLE	Yes	false	null		进货数(实际进货)
+
+9	purchase_price	DOUBLE	Yes	false	null		进货平均价
+
+10	sale_article_id	VARCHAR(1073741824)	Yes	false	null		bom子商品(销售条码)
+
+11	sale_article_name	VARCHAR(1073741824)	Yes	false	null		bom子商品(销售条码名称)
+
+12	sale_article_qty	DOUBLE	Yes	false	null		销售条码转换量
+
+13	spilit_sale_article_amt	DOUBLE	Yes	false	null		销售条码理论进货金额
+
+14	sum_sub_article_qty	DOUBLE	Yes	false	null		父商品下所有子销售条码数量汇总(比如 1件 拆出10kg 验收与销售条码转换用)
+
+15	sale_article_price	DOUBLE	Yes	false	null		销售条码单价
+
+16	sum_sale_article_qty	DOUBLE	Yes	false	null		同一个销售条码数量汇总
+
+17	rate	DOUBLE	Yes	false	null		验收条码相对于销售条码的占比
+
+18	sum_article_qty	DOUBLE	Yes	false	null		同一个验收条码下销售条码理论销量汇总
+
+19	sale_recev_rate	DOUBLE	Yes	false	null		销售条码占验收条码的占比(用于拆分销售条码的进货指标)
+
+20	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	营业日期
+
+
+
+18
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	business_date	VARCHAR(1073741824)	Yes	false	null		营业日期
+
+2	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+3	order_article_id	VARCHAR(1073741824)	Yes	false	null		订购编码
+
+4	order_article_name	VARCHAR(1073741824)	Yes	false	null		订购编码名称
+
+5	order_category_level1_id	VARCHAR(1073741824)	Yes	false	null		订购编码大分类编码
+
+6	order_category_level1_description	VARCHAR(1073741824)	Yes	false	null		订购编码大分类名称
+
+7	re_article_id	VARCHAR(1073741824)	Yes	false	null		验收编码
+
+8	re_article_name	VARCHAR(1073741824)	Yes	false	null		验收编码名称
+
+9	re_category_level1_id	VARCHAR(1073741824)	Yes	false	null		验收编码大分类便阿门
+
+10	re_category_level1_description	VARCHAR(1073741824)	Yes	false	null		验收编码大分类名称
+
+11	order_qty	DOUBLE	Yes	false	null		订购编码订购量
+
+12	order_amt	DOUBLE	Yes	false	null		订购编码订购金额
+
+13	rate	DOUBLE	Yes	false	null		验收编码 所占订购编码的占比
+
+14	type	VARCHAR(1073741824)	Yes	false	null		场景类型(1:验收编码与订购编码一致 2:验收编码与订购编码不一致spu一致 3:订购编码拆出散件验收 4:订购条码特殊情况sap修正 5:spu与BOM融合 6:组合订购与散件同时订购)
+
+15	re_order_qty	DOUBLE	Yes	false	null		订购条码转验收条码的订购量
+
+16	re_order_amt	DOUBLE	Yes	false	null		订购条码转验收条码的订购金额
+
+17	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+
+19
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	store_id	VARCHAR(1073741824)	Yes	false	null		旧id 门店id
+
+2	parent_article_id	VARCHAR(1073741824)	Yes	false	null		父商品编码
+
+3	parent_article_name	VARCHAR(1073741824)	Yes	false	null		父商品名称
+
+4	sub_article_id	VARCHAR(1073741824)	Yes	false	null		子商品编码
+
+5	sub_article_name	VARCHAR(1073741824)	Yes	false	null		子商品名称
+
+6	parent_rate	DOUBLE	Yes	false	null		父商品单位的量*rate=子商品单位的量
+
+7	sub_rate	DOUBLE	Yes	false	null		子商品单位的量*rate2=父商品单位的量
+
+8	ctype	INT	Yes	false	null		场景类型(1:BOM 2:spu 3:spu-BOM混合)
+
+9	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	日分区
+
+
+20
+序号	
+Field
+Type
+Null
+Key
+Default
+Extra
+Comment
+
+1	store_id	VARCHAR(1073741824)	Yes	false	null		门店编码
+
+2	category_level3_id	VARCHAR(1073741824)	Yes	false	null		bom头商品的小类编码id
+
+3	category_level3_description	VARCHAR(1073741824)	Yes	false	null		bom头商品的小类编码名称
+
+4	category_level2_id	VARCHAR(1073741824)	Yes	false	null		bom头商品的中编码id
+
+5	category_level2_description	VARCHAR(1073741824)	Yes	false	null		bom头商品的中类编码名称
+
+6	category_level1_id	VARCHAR(1073741824)	Yes	false	null		bom头商品的大类编码id
+
+7	category_level1_description	VARCHAR(1073741824)	Yes	false	null		bom头商品的大类编码名称
+
+8	parent_article_id	VARCHAR(1073741824)	Yes	false	null		bom头商品
+
+9	parent_article_unit	VARCHAR(1073741824)	Yes	false	null		bom头商品单位
+
+10	sub_article_id	VARCHAR(1073741824)	Yes	false	null		bom子商品
+
+11	sub_article_unit	VARCHAR(1073741824)	Yes	false	null		bom子商品单位
+
+12	dressing_rate	DOUBLE	Yes	false	null		标准出肉率
+
+13	cost_rate	DOUBLE	Yes	false	null		成本比例
+
+14	bom_type	INT	Yes	false	null		门店bom类型 1门店bom 2仓bom 3非门店非仓bom
+
+15	split_mode	VARCHAR(1073741824)	Yes	false	null		bom类型 10 一拆多 20 一拆一
+
+16	sp_level	INT	Yes	false	null		BI店铺等级 有加工 1:实体门店 2:菜吧 3:B端客户 4:虚拟门店 5:测试店 6:虚拟仓 对应SAP为 sp_table_flag
+
+17	inc_day	VARCHAR(1073741824)	Yes	false	null	partition key	增量日期
