@@ -137,12 +137,43 @@ class AtomicMerger:
                     COALESCE(p.init_stock_amt, 0)           AS init_stock_amt_src,
                     COALESCE(p.avg_inbound_price, 0)        AS avg_inbound_price
                 FROM (
-                    SELECT * FROM atomic_sales
+                    -- v10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
+                    -- 防止与 inventory 的 FULL OUTER JOIN 产生笛卡尔积
+                    SELECT
+                        store_id, business_date, article_id,
+                        MAX(day_clear) AS day_clear,
+                        SUM(sale_qty) AS sale_qty, SUM(sale_piece_qty) AS sale_piece_qty,
+                        SUM(return_sale_qty) AS return_sale_qty, SUM(gift_qty) AS gift_qty,
+                        SUM(online_sale_qty) AS online_sale_qty, SUM(offline_sale_qty) AS offline_sale_qty,
+                        SUM(bf19_sale_qty) AS bf19_sale_qty, SUM(af19_sale_qty) AS af19_sale_qty,
+                        SUM(bf12_sale_qty) AS bf12_sale_qty, SUM(sales_weight) AS sales_weight,
+                        SUM(sale_amt) AS sale_amt, SUM(original_price_sale_amt) AS original_price_sale_amt,
+                        SUM(vip_discount_amt) AS vip_discount_amt, SUM(hour_discount_amt) AS hour_discount_amt,
+                        SUM(actual_amount) AS actual_amount, SUM(return_sale_amt) AS return_sale_amt,
+                        SUM(member_discount_amt) AS member_discount_amt, SUM(discount_amt) AS discount_amt,
+                        SUM(member_sale_amt) AS member_sale_amt, SUM(bf19_member_sale_amt) AS bf19_member_sale_amt,
+                        SUM(offline_original_amt) AS offline_original_amt,
+                        SUM(store_paylevel_discount) AS store_paylevel_discount,
+                        SUM(company_paylevel_discount) AS company_paylevel_discount,
+                        SUM(af19_sale_amt) AS af19_sale_amt, SUM(bf19_sale_amt) AS bf19_sale_amt,
+                        SUM(bf19_offline_sale_amt) AS bf19_offline_sale_amt,
+                        SUM(bf12_sale_amt) AS bf12_sale_amt, SUM(bf19_sale_piece_qty) AS bf19_sale_piece_qty,
+                        MAX(last_sysdate) AS last_sysdate
+                    FROM atomic_sales
                     WHERE business_date BETWEEN '{start}' AND '{end}'
+                    GROUP BY store_id, business_date, article_id
                 ) s
                 FULL OUTER JOIN (
-                    SELECT * FROM atomic_inventory
+                    -- v10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
+                    SELECT
+                        store_id, business_date, article_id,
+                        MAX(day_clear) AS day_clear,
+                        SUM(init_stock_qty) AS init_stock_qty,
+                        SUM(init_stock_amt) AS init_stock_amt,
+                        SUM(avg_inbound_price) AS avg_inbound_price
+                    FROM atomic_inventory
                     WHERE business_date BETWEEN '{start}' AND '{end}'
+                    GROUP BY store_id, business_date, article_id
                 ) p ON s.store_id = p.store_id
                     AND s.business_date = p.business_date
                     AND s.article_id = p.article_id
@@ -231,9 +262,11 @@ class AtomicMerger:
                 AND base.article_id = bs.article_id
             LEFT JOIN (
                 SELECT store_id, business_date, article_id,
-                       purchase_receive_qty, purchase_receive_amt
+                       SUM(purchase_receive_qty) AS purchase_receive_qty,
+                       SUM(purchase_receive_amt) AS purchase_receive_amt
                 FROM atomic_inventory
                 WHERE business_date BETWEEN '{start}' AND '{end}'
+                GROUP BY store_id, business_date, article_id
             ) inv ON base.store_id = inv.store_id
                  AND base.business_date = inv.business_date
                  AND base.article_id = inv.article_id
