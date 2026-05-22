@@ -416,28 +416,29 @@ class AtomicMerger:
             WHERE w.article_id IS NULL
               AND sr.self_receive_qty > 0
         """)
-        # 猪肉类业务日清: dim标非日清但鲜肉不过夜, 强制day_clear='0'
+        # v10 fix: 日清覆盖使用 dim_day_clear_override 辅助表（从 dim_goods 派生）
+        # 避免 merge.py 直接依赖 dim_goods（dim_goods 关联统一在 FM 底表层完成）
+        # 猪肉类业务日清: dim标非日清但鲜肉不过夜
         # 牛肉类不在此列: purchase_di的init_stock不为0, 日清会导致巨额亏损
         try:
             self._duck.execute(f"""
                 UPDATE {self.TARGET_TABLE}
                 SET day_clear = '0'
                 WHERE article_id IN (
-                    SELECT article_id FROM dim_goods WHERE category_level1_description = '猪肉类'
+                    SELECT article_id FROM dim_day_clear_override WHERE override_type = '猪肉类'
                 )
             """)
             self._log.info("猪肉类日清覆盖完成")
         except Exception as e:
             self._log.warning(f"猪肉类日清覆盖跳过: {e}")
 
-        # 熟食类业务日清: 即食熟食当日不过夜, 强制day_clear='0'
+        # 熟食类业务日清: 即食熟食当日不过夜
         try:
             self._duck.execute(f"""
                 UPDATE {self.TARGET_TABLE}
                 SET day_clear = '0'
                 WHERE article_id IN (
-                    SELECT article_id FROM dim_goods
-                    WHERE category_level3_description LIKE '%熟食'
+                    SELECT article_id FROM dim_day_clear_override WHERE override_type = '熟食类'
                 )
             """)
             self._log.info("熟食类日清覆盖完成")
@@ -450,9 +451,7 @@ class AtomicMerger:
                 UPDATE {self.TARGET_TABLE}
                 SET day_clear = '0'
                 WHERE article_id IN (
-                    SELECT DISTINCT article_id FROM dim_goods
-                    WHERE category_level1_description = '肉禽蛋类'
-                      AND article_name LIKE '鲜黄牛%'
+                    SELECT article_id FROM dim_day_clear_override WHERE override_type = '鲜牛肉'
                 )
             """)
             self._log.info("鲜牛肉日清覆盖完成")

@@ -76,20 +76,40 @@ class SkuCostCalculator:
             GROUP BY store_id, business_date, sub_article_id
         """).df()
 
-        # 3. 尝试取昨天 t_calc_stock（首日不存在）
-        yesterday_df = None
+        # 3. 从 t_calc_stock 取前一营业日期末库存（MAX business_date < 当天）
+        prev_df = None
         try:
-            yesterday_df = conn.execute("""
-                SELECT
-                    store_id,
-                    article_id,
-                    business_date,
-                    end_stock_qty,
-                    end_stock_amt
-                FROM t_calc_stock
+            prev_df = conn.execute("""
+                WITH stock_pairs AS (
+                    SELECT DISTINCT store_id, article_id, business_date
+                    FROM t_atomic_wide
+                ),
+                prev_match AS (
+                    SELECT sp.store_id, sp.article_id, sp.business_date,
+                           MAX(cs.business_date) AS prev_biz_date
+                    FROM stock_pairs sp
+                    INNER JOIN t_calc_stock cs
+                        ON sp.store_id = cs.store_id
+                        AND sp.article_id = cs.article_id
+                        AND cs.business_date < sp.business_date
+                    GROUP BY sp.store_id, sp.article_id, sp.business_date
+                ),
+                prev_stock AS (
+                    SELECT pm.store_id, pm.article_id, pm.business_date,
+                           cs.end_stock_qty AS prev_end_qty,
+                           cs.end_stock_amt AS prev_end_amt
+                    FROM prev_match pm
+                    INNER JOIN t_calc_stock cs
+                        ON pm.store_id = cs.store_id
+                        AND pm.article_id = cs.article_id
+                        AND pm.prev_biz_date = cs.business_date
+                )
+                SELECT * FROM prev_stock
             """).df()
+            if prev_df.empty:
+                prev_df = None
         except (duckdb.CatalogException, Exception):
-            self._log.info("no t_calc_stock from yesterday — all SKUs are first-day")
+            self._log.info("no t_calc_stock from prior runs — all SKUs are first-day")
 
         # 4. Python: merge BOM
         df = wide_df.merge(bom_df, on=['store_id', 'business_date', 'article_id'],
@@ -97,33 +117,11 @@ class SkuCostCalculator:
         df['bom_alloc_qty'] = df['bom_alloc_qty'].fillna(0)
         df['bom_alloc_amt'] = df['bom_alloc_amt'].fillna(0)
 
-        # 5. Python: 计算 init_stock（昨天期末 或 首日源表值）
-        if yesterday_df is not None and not yesterday_df.empty:
-            # yesterday_df 的 business_date 是昨天的日期，需要 shift +1 来匹配
-            yesterday_df['prev_date'] = (
-                duckdb.sql(
-                    "SELECT CAST(STRFTIME(business_date::DATE + INTERVAL 1 DAY, '%Y-%m-%d') AS VARCHAR) "
-                    "FROM yesterday_df"
-                ).df()
-            )
-            # Actually, use Python for date shift
-            from datetime import date, timedelta
-            yesterday_df['_d'] = yesterday_df['business_date'].apply(
-                lambda d: (date.fromisoformat(d) + timedelta(days=1)).isoformat())
-            yesterday_df = yesterday_df.drop(columns=['business_date'])
-            yesterday_df = yesterday_df.rename(columns={
-                'end_stock_qty': 'prev_end_qty',
-                'end_stock_amt': 'prev_end_amt',
-                '_d': 'business_date',
-            })
-            yesterday_df = yesterday_df[['store_id', 'article_id', 'business_date',
-                                          'prev_end_qty', 'prev_end_amt']]
-
-            df = df.merge(yesterday_df,
+        # 5. Python: 计算 init_stock（前一营业日期末 或 首日源表值）
+        if prev_df is not None and not prev_df.empty:
+            df = df.merge(prev_df,
                           on=['store_id', 'article_id', 'business_date'],
                           how='left')
-            # 首日SKU回退到purchase_di, 但purchase_di对加工品追踪不准(负库存)
-            # 负init对加工品无意义: 它们不经过采购, compose_in才是真实来源
             df['init_stock_qty'] = df['prev_end_qty'].fillna(
                 df['init_stock_qty_src']).clip(lower=0)
             df['init_stock_amt'] = df['prev_end_amt'].fillna(

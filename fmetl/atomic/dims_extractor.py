@@ -29,7 +29,8 @@ class DimsExtractor:
 
     def extract_all(self, yesterday: str, start: str, end: str) -> None:
         """提取所有维度表快照。"""
-        self._extract_goods(yesterday)  # 用昨天，避免当天dim数据未就绪
+        self._extract_goods(end)  # v10 fix: 用end确保dim_goods是最新日期
+        self._build_day_clear_override()  # v10 fix: 从dim_goods派生日清覆盖白名单
         self._extract_store_list(start, end)
         self._extract_day_clear(start, end)
         self._extract_store_profile(yesterday)
@@ -70,6 +71,29 @@ class DimsExtractor:
             # 无新数据时保留现有 dim_goods 不覆盖
             existing = self._duck.row_count("dim_goods")
             self._log.warning(f"dim_goods: no data in last 7 days, keeping existing ({existing} rows)")
+
+    def _build_day_clear_override(self) -> None:
+        """基于 dim_goods 构建日清覆盖白名单（仅 article_id），供 merge.py 使用。
+        将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。"""
+        try:
+            self._duck.execute("DROP TABLE IF EXISTS dim_day_clear_override")
+            self._duck.execute("""
+                CREATE TABLE dim_day_clear_override AS
+                SELECT DISTINCT article_id, '猪肉类' AS override_type
+                FROM dim_goods WHERE category_level1_description = '猪肉类'
+                UNION ALL
+                SELECT DISTINCT article_id, '熟食类' AS override_type
+                FROM dim_goods WHERE category_level3_description LIKE '%熟食'
+                UNION ALL
+                SELECT DISTINCT article_id, '鲜牛肉' AS override_type
+                FROM dim_goods
+                WHERE category_level1_description = '肉禽蛋类'
+                  AND article_name LIKE '鲜黄牛%'
+            """)
+            cnt = self._duck.row_count("dim_day_clear_override")
+            self._log.info(f"dim_day_clear_override built: {cnt} SKUs")
+        except Exception as e:
+            self._log.warning(f"dim_day_clear_override build skipped: {e}")
 
     def _extract_store_list(self, start: str, end: str) -> None:
         # TODO: 等 strategy_fm_dim_store_list 建成后切换为 strategy 表

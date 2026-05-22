@@ -158,18 +158,26 @@ class StockCalculator:
             GROUP BY store_id, business_date, parent_article_id
         """).df()
 
-        # ── 昨天 end_stock（跨日链，只查前一天 + 去重）──
-        from datetime import date as dt_date, timedelta
-        yesterday = (dt_date.fromisoformat(business_date) - timedelta(days=1)).isoformat()
+        # ── 前一营业日期末库存（跨日链，MAX business_date < 当天）──
         prev_df = None
         try:
             prev_df = conn.execute(f"""
-                SELECT store_id, article_id, day_clear, business_date,
-                       MAX(end_stock_qty) AS end_stock_qty,
-                       MAX(end_stock_amt) AS end_stock_amt
-                FROM {self.TARGET_TABLE}
-                WHERE business_date = '{yesterday}'
-                GROUP BY store_id, article_id, day_clear, business_date
+                WITH prev_date AS (
+                    SELECT store_id, article_id, day_clear,
+                           MAX(business_date) AS prev_biz_date
+                    FROM {self.TARGET_TABLE}
+                    WHERE business_date < '{business_date}'
+                    GROUP BY store_id, article_id, day_clear
+                )
+                SELECT s.store_id, s.article_id, s.day_clear,
+                       s.business_date,
+                       s.end_stock_qty, s.end_stock_amt
+                FROM {self.TARGET_TABLE} s
+                INNER JOIN prev_date p
+                    ON s.store_id = p.store_id
+                    AND s.article_id = p.article_id
+                    AND s.day_clear = p.day_clear
+                    AND s.business_date = p.prev_biz_date
             """).df()
             if prev_df.empty:
                 prev_df = None
@@ -263,9 +271,8 @@ class StockCalculator:
                 'end_stock_qty': 'prev_end_qty',
                 'end_stock_amt': 'prev_end_amt',
             })
-            from datetime import date as dt_date, timedelta
-            prev_df['business_date'] = prev_df['business_date'].apply(
-                lambda d: (dt_date.fromisoformat(d) + timedelta(days=1)).isoformat())
+            # prev_df already has the correct prev_biz_date; set to current date for merge
+            prev_df['business_date'] = business_date
             prev_df = prev_df[['store_id', 'article_id', 'day_clear',
                                'business_date', 'prev_end_qty', 'prev_end_amt']]
             df = df.merge(prev_df, on=['store_id', 'article_id', 'day_clear',
@@ -492,32 +499,8 @@ class StockCalculator:
     # 详细日志
     # ═══════════════════════════════════════════════════════════════
     def _log_detail(self, df: pd.DataFrame) -> None:
-        try:
-            cat_df_raw = self._duck._conn.execute("""
-                SELECT DISTINCT article_id,
-                    category_level1_description AS l1,
-                    category_level2_description AS l2,
-                    category_level3_description AS l3
-                FROM dim_goods
-            """).df()
-
-            def _remap(row):
-                l1 = str(row['l1']) if row['l1'] else ''
-                l2 = str(row['l2']) if row['l2'] else ''
-                l3 = str(row['l3']) if row['l3'] else ''
-                if l2 in ('蛋类', '烘焙类'): return l2
-                if l2 in ('冷藏奶制品类', '饮料类'): return '乳制品及水饮类'
-                if l1 == '肉禽蛋类' and l2 != '蛋类': return '肉禽类'
-                if l3.endswith('熟食'): return '熟食类'
-                if l1 in ('冷藏及加工类', '预制菜'): return '冷藏加工及预制菜类'
-                return l1
-
-            cat_df_raw['cat'] = cat_df_raw.apply(_remap, axis=1)
-            cat_df = cat_df_raw[['article_id', 'cat']].drop_duplicates(subset='article_id')
-            df = df.merge(cat_df, on='article_id', how='left')
-            df['cat'] = df['cat'].fillna('?')
-        except Exception:
-            df['cat'] = '?'
+        # v10 fix: dim_goods 分类关联延迟到 FM 底表层，计算层不再引用
+        df['cat'] = '?'
 
         bom_parents = df[df['bom_out_amt'].abs() > 0.01]
         neg_eq = df[(df['eq_end_qty'] < 0) & (df['unknow_lost_qty'] > 0.01)]
