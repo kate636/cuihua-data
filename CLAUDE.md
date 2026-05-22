@@ -57,6 +57,114 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 "
 ```
 
+## Multi-Agent Workflow
+
+本项目的改动遵循 **设计 → 编码 → 审查** 三段式流程，每阶段由一个独立 agent 负责。用户可单独调用任一 agent，也可串联执行。
+
+### 项目目标
+- **目的**: 用 fmetl 替换现有 QDM ETL 链路
+- **验收标准**: 门店 + 大分类维度的门店毛利额与 QDM 数据基本一致（SKU 级允许差异，因计算方式不同）
+- **新 ETL 核心价值**: BOM 正确性、重刷数据便捷性、指标灵活性
+- **QDM 基准表**: `default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`
+
+### Agent 1: 设计 (Design Architect)
+
+**职责**: 分析需求，设计计算逻辑与工程框架。**不写代码**。
+
+**输入**: 用户需求描述、现有代码、QDM 基准表数据、已知问题清单
+
+**输出**:
+- 公式推导（从业务语义到数学表达式，注明每一步的假设和边界）
+- 模块/文件拆分方案（新增/修改哪些文件，数据流如何连接）
+- 对下游模块的影响评估（尤其是 stock → sku_cost 跨日依赖链）
+- 验收标准（哪些指标在什么粒度上应与 QDM 一致，允许差异范围）
+
+**约束**:
+- 遵循现有设计原则（简单SQL复杂Python、每个数字只算一次、四流分离）
+- BOM 分摊必须尊重共享组语义和单位归一化规则
+- 存量模块修改时必须说明对跨日滚动的影响
+
+**触发方式**: `用设计agent分析XX` / `先出方案再写代码`
+
+### Agent 2: 编码 (Code Implementer)
+
+**职责**: 严格按设计文档实现代码。**不自行修改设计**。
+
+**输入**: Agent 1 的设计文档（或用户直接给出的明确技术方案）
+
+**输出**:
+- 修改/新增的代码文件
+- 如有设计疑点，标注 `# TODO-DESIGN: <问题描述>` 回抛给设计 agent
+
+**约束**:
+- 新 extractor 继承 `BaseExtractor`，只实现 `_fetch_sql()`
+- 新 calculator 遵循 Calculator 模式（DuckDB→DataFrame→计算→写回）
+- SQL 仅做 SELECT/JOIN/GROUP BY/WHERE，计算逻辑在 Python
+- 不引入新依赖，不改变公共接口签名
+
+**触发方式**: `按方案实现` / `写代码agent`
+
+### Agent 3: 审查与校对 (Data Reviewer)
+
+**职责**: 核对代码是否与设计一致，运行数据验证，对比 QDM 基准。
+
+**输入**: Agent 2 的代码变更 + Agent 1 的设计文档
+
+**审查清单**:
+
+**A. 代码与设计一致性**
+- [ ] 实现是否完整覆盖设计文档中的所有公式和分支
+- [ ] BOM 字段引用是否正确（`bom_alloc_qty` vs `bom_alloc_qty_sub` 不可混用）
+- [ ] 日清覆盖逻辑是否正确应用
+- [ ] 是否有断裂的跨日依赖链
+
+**B. 内部一致性校验**（跑 DuckDB）
+- [ ] 负库存检查: `SELECT COUNT(*) FROM t_calc_stock WHERE end_stock_qty < 0`
+- [ ] BOM 对称: `SUM(bom_in_amt) - SUM(bom_out_amt)` 全局 ≈ 0
+- [ ] 库存方程平衡: `init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_lost - end - unknow` = 0
+- [ ] 毛利自洽: 毛利公式各分量符号正确，全链路 profit 与拆解加总一致
+- [ ] 父品 profit = 0（BOM 父品不应产生独立毛利）
+
+**C. QDM 对比校验**（核心验收）
+- [ ] 以 `dal_transaction_chdj_store_sale_article_sale_info_di` 为基准
+- [ ] **门店 × 大分类** 粒度: 毛利额偏差在可接受范围（默认 ±5%，具体以设计文档为准）
+- [ ] **门店 × 日期** 粒度: 总毛利额偏差
+- [ ] 差异较大的门店/分类需要标注并分析原因
+- [ ] SKU 粒度差异: 记录但**不阻塞**（因计算方式不同允许差异）
+
+**对比 SQL 模板**:
+```sql
+-- 门店 × 大分类 毛利额对比
+WITH fmetl AS (
+  SELECT store_id, category_level1_id, SUM(profit_amt) as fmetl_profit
+  FROM t_calc_profit GROUP BY store_id, category_level1_id
+),
+qdm AS (
+  SELECT shop_id as store_id, category_level1_id,
+         SUM(<毛利字段>) as qdm_profit
+  FROM default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di
+  WHERE business_date = '<日期>'
+  GROUP BY shop_id, category_level1_id
+)
+SELECT f.store_id, f.category_level1_id,
+       f.fmetl_profit, q.qdm_profit,
+       f.fmetl_profit - q.qdm_profit as diff,
+       CASE WHEN q.qdm_profit != 0 THEN (f.fmetl_profit - q.qdm_profit)/ABS(q.qdm_profit) END as diff_pct
+FROM fmetl f
+FULL OUTER JOIN qdm q ON f.store_id = q.store_id AND f.category_level1_id = q.category_level1_id
+WHERE ABS(f.fmetl_profit - q.qdm_profit) / NULLIF(ABS(q.qdm_profit), 0) > 0.05
+ORDER BY ABS(diff) DESC
+```
+
+**输出**:
+- 审查报告（通过/阻塞/需澄清）
+- 差异明细表（门店、分类、差异额、差异率、原因分析）
+- 对设计或编码的回退建议
+
+**触发方式**: `审查代码` / `校对数据` / `验证agent`
+
+---
+
 ## Architecture: 3-Layer ETL (v10.0)
 
 ### 设计原则
