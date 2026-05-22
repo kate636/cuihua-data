@@ -183,8 +183,8 @@ class AtomicMerger:
                     AND COALESCE(s.article_id, p.article_id) = dc.article_id
                 INNER JOIN chdj_stores cs
                     ON COALESCE(s.store_id, p.store_id) = cs.store_id
-            )
-
+            ),
+            wide_joined AS (
             SELECT
                 base.*,
                 -- v10: 自购数据 (主源 receive_sale_di, 回退 purchase_di 但排除 BOM 子品)
@@ -312,6 +312,17 @@ class AtomicMerger:
             ) pr ON base.store_id = pr.store_id
                  AND base.business_date = pr.business_date
                  AND base.article_id = pr.article_id
+        ),
+        wide_dedup AS (
+            SELECT * EXCLUDE (_rn) FROM (
+                SELECT ROW_NUMBER() OVER (
+                    PARTITION BY store_id, business_date, article_id, day_clear
+                    ORDER BY last_sysdate DESC NULLS LAST) AS _rn,
+                       wj.*
+                FROM wide_joined wj
+            ) WHERE _rn = 1
+        )
+        SELECT * FROM wide_dedup
         """)
         # Step C: 补全 BOM 父品行（父品不在 atomic_sales/atomic_inventory 中，
         #         但需要出现在 t_atomic_wide 以便 downstream 处理其进货和 BOM 流出）
