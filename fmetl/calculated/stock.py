@@ -322,13 +322,13 @@ class StockCalculator:
 
             if is_counted:
                 end_qty[idx] = act_qty
-                unknow_qty[idx] = max(0.0, eq - act_qty)
+                unknow_qty[idx] = eq - act_qty  # 允许负值=盘盈
                 used_actual += 1
             elif dc == '0':
                 new_supply = recv_q + bi_q - bo_q + ci_q - co_q
                 consumed_from_init = max(0.0, (sale_q + kl_qty) - new_supply)
                 end_qty[idx] = max(0.0, init_q - consumed_from_init)
-                unknow_qty[idx] = max(0.0, new_supply - sale_q - kl_qty)
+                unknow_qty[idx] = new_supply - sale_q - kl_qty  # 允许负值=盘盈
             elif eq < 0:
                 end_qty[idx] = 0
                 unknow_qty[idx] = -eq
