@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 from .config import get_settings
@@ -87,24 +88,31 @@ def _run_atomic(api, duck, start, end, yesterday):
     _step("Step 1: 维度表提取")
     DimsExtractor(api, duck).extract_all(yesterday=yesterday, start=start, end=end)
 
-    _step("Step 2: 原子域提取（14 个）")
-    extractors = [
-        SalesExtractor(api, duck),
-        InventoryExtractor(api, duck),
-        InventoryDetailExtractor(api, duck),
-        ScmExtractor(api, duck),
-        ScmAdjustExtractor(api, duck),
-        LossExtractor(api, duck),
-        ComposeExtractor(api, duck),
-        AllowanceExtractor(api, duck),
-        PromoExtractor(api, duck),
-        CostPriceExtractor(api, duck),
-        PriceExtractor(api, duck),
-        BomRelationExtractor(api, duck),
-        ReceiveSaleExtractor(api, duck),
+    _step("Step 2: 原子域提取（14 个，多核并行）")
+    extractor_classes = [
+        SalesExtractor, InventoryExtractor, InventoryDetailExtractor,
+        ScmExtractor, ScmAdjustExtractor, LossExtractor, ComposeExtractor,
+        AllowanceExtractor, PromoExtractor, CostPriceExtractor, PriceExtractor,
+        BomRelationExtractor, ReceiveSaleExtractor,
     ]
-    for extractor in extractors:
-        extractor.extract(start=start, end=end, yesterday=yesterday)
+
+    def _extract_one(cls):
+        """每个线程创建独立的 ApiConnector + DuckDB 连接，避免锁竞争。"""
+        t_api = ApiConnector(get_settings())
+        t_duck = DuckDBStore()
+        try:
+            cls(t_api, t_duck).extract(start=start, end=end, yesterday=yesterday)
+        finally:
+            t_duck.close()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_extract_one, cls): cls for cls in extractor_classes}
+        for f in as_completed(futures):
+            cls = futures[f]
+            try:
+                f.result()
+            except Exception as ex:
+                _log.error(f"{cls.__name__} FAILED: {ex}")
 
     OrderReceiveExtractor(api, duck).ensure_empty_skeleton()
     ArticleConvertExtractor(api, duck).ensure_empty_skeleton()
