@@ -445,18 +445,8 @@ class AtomicMerger:
         except Exception as e:
             self._log.warning(f"熟食类日清覆盖跳过: {e}")
 
-        # 鲜牛肉业务日清: 鲜黄牛部位肉当日不过夜
-        try:
-            self._duck.execute(f"""
-                UPDATE {self.TARGET_TABLE}
-                SET day_clear = '0'
-                WHERE article_id IN (
-                    SELECT article_id FROM dim_day_clear_override WHERE override_type = '鲜牛肉'
-                )
-            """)
-            self._log.info("鲜牛肉日清覆盖完成")
-        except Exception as e:
-            self._log.warning(f"鲜牛肉日清覆盖跳过: {e}")
+        # 鲜牛肉不在此列：purchase_di的init_stock不为0, 日清会导致巨额亏损
+        # 鲜黄牛部位肉按 dim_day_clear 自然标签处理
 
         self._duck.execute("DROP TABLE IF EXISTS _tmp_self_receive")
         self._duck.execute("DROP TABLE IF EXISTS _tmp_bom_subs")

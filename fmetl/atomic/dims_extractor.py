@@ -84,11 +84,6 @@ class DimsExtractor:
                 UNION ALL
                 SELECT DISTINCT article_id, '熟食类' AS override_type
                 FROM dim_goods WHERE category_level3_description LIKE '%熟食'
-                UNION ALL
-                SELECT DISTINCT article_id, '鲜牛肉' AS override_type
-                FROM dim_goods
-                WHERE category_level1_description = '肉禽蛋类'
-                  AND article_name LIKE '鲜黄牛%'
             """)
             cnt = self._duck.row_count("dim_day_clear_override")
             self._log.info(f"dim_day_clear_override built: {cnt} SKUs")

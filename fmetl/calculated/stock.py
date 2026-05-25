@@ -416,6 +416,16 @@ class StockCalculator:
                                (df['business_date'] == pr['business_date']),
                                'end_stock_amt'] = 0.0
 
+                        # 同步更新父品 bom_out_amt/qty，保持 profit 公式自洽
+                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
+                               (df['store_id'] == pr['store_id']) &
+                               (df['business_date'] == pr['business_date']),
+                               'bom_out_amt'] += transfer_amt
+                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
+                               (df['store_id'] == pr['store_id']) &
+                               (df['business_date'] == pr['business_date']),
+                               'bom_out_qty'] += transfer_qty
+
                         for _, sa in sub_alloc.iterrows():
                             sub_mask = (
                                 (df['store_id'] == sa['store_id']) &
@@ -428,6 +438,9 @@ class StockCalculator:
                                 df.loc[sub_mask, 'stock_transfer_in_amt'] += transfer_amt * ratio
                                 df.loc[sub_mask, 'end_stock_qty'] += transfer_qty * ratio
                                 df.loc[sub_mask, 'end_stock_amt'] += transfer_amt * ratio
+                                # 同步更新子品 bom_in_amt/qty，抵消 end 增加的 profit 影响
+                                df.loc[sub_mask, 'bom_in_amt'] += transfer_amt * ratio
+                                df.loc[sub_mask, 'bom_in_qty'] += transfer_qty * ratio
         except (duckdb.CatalogException, Exception):
             pass
 
