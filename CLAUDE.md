@@ -348,13 +348,24 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 ### 维度表 (7张)
 | DuckDB 表 | QDM 源表 |
 |---|---|
-| `dim_goods` | `strategy_fm_dim_goods` |
+| `dim_goods` | `strategy_fm_dim_goods` | ⚠️ 见下方 |
 | `dim_store_list` | `ads_business_analysis.chdj_store_info` |
 | `dim_day_clear` | `strategy_fm_dim_day_clear` |
 | `dim_store_profile` | `strategy_fm_dim_store_profile` |
 | `dim_calendar` | `strategy_fm_dim_calendar` |
 | `dim_saleable` | `strategy_fm_dim_saleable` |
 | `dim_chdj_store_info` | `ads_business_analysis.chdj_store_info` |
+
+### dim_goods 注意事项
+
+`strategy_fm_dim_goods` 在 StarRocks 中**只存最新一天数据**（从 `hive.dim.dim_goods_information_have_pt` 每日全量覆盖）。补数据 SQL：
+```sql
+DELETE FROM default_catalog.ads_business_analysis.strategy_fm_dim_goods;
+INSERT INTO default_catalog.ads_business_analysis.strategy_fm_dim_goods
+SELECT * FROM hive.dim.dim_goods_information_have_pt;
+```
+
+DuckDB 端 `dim_goods` 每次从最新 `inc_day` 全量替换，**表中没有 inc_day 列**。所有历史日期的数据在 FM 底表层（sku_dim.py）统一 JOIN 最新 dim_goods，下游只需 `ON article_id`。
 
 ### 计算层表 (5张)
 | DuckDB 表 | 算法 |
