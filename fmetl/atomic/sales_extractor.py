@@ -109,7 +109,7 @@ class SalesExtractor(BaseExtractor):
         LEFT JOIN (
             SELECT DISTINCT article_id, unit_weight, sale_unit, category_level1_id
             FROM strategy_fm_dim_goods
-            WHERE inc_day = '{end}'
+            WHERE inc_day = '{yesterday}'
         ) m2 ON m1.abi_article_id = m2.article_id
         WHERE COALESCE(m2.category_level1_id, 'rd') NOT IN ('91')
           AND (

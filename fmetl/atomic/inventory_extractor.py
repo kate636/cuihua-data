@@ -55,7 +55,7 @@ class InventoryExtractor(BaseExtractor):
         LEFT JOIN (
             SELECT DISTINCT article_id, category_level1_id
             FROM strategy_fm_dim_goods
-            WHERE inc_day = '{end}'
+            WHERE inc_day = '{yesterday}'
         ) m2 ON m1.sale_article_id = m2.article_id
         WHERE m2.category_level1_id NOT IN {mat_excl}
         GROUP BY
