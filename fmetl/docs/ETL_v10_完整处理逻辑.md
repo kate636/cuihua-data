@@ -76,9 +76,15 @@ yesterday_price   ──→ (不参与计算，仅观测)
 
 ### Step 1: 维度表 (`DimsExtractor`)
 
-7 张维表从 StarRocks 全量拉到 DuckDB。`dim_goods` 排除品类 70-77（物料类）。
+7 张维表从 StarRocks 全量拉到 DuckDB。`dim_goods` 排除品类 70-77（物料类），用最新日期（`{end}` + 7 天回溯兜底），表中无 `inc_day` 列。
+
+**日清覆盖白名单** (`dim_day_clear_override`)：从 `dim_goods` 派生，仅含 `article_id` + `override_type`，供 merge.py 日清覆盖使用，隔离对 dim_goods 的直接依赖。
 
 ### Step 2: 14 个原子域取数器
+
+> **v10 优化**：多核并行提取（`ThreadPoolExecutor`, 6 workers），每个 worker 创建独立 `ApiConnector` + `DuckDBStore`。DuckDB 文件级锁串行化写入，API 调用并行。Step 2 从 ~90s 降至 ~15s。
+>
+> **v10 fix**：`SalesExtractor` / `InventoryExtractor` / `PromoExtractor` 中 LEFT JOIN `strategy_fm_dim_goods` 使用 `inc_day = '{yesterday}'`（保证有数据），不用 `'{end}'`（分段末日期可能无快照）。
 
 | # | 取数器 | 目标 DuckDB 表 | 取什么 |
 |---|--------|---------------|--------|
@@ -102,17 +108,18 @@ yesterday_price   ──→ (不参与计算，仅观测)
 - **自购**（`article_id = sale_article_id`）：`SUM(inbound_qty/amt)` per article
 - **BOM 父品**（`article_id ≠ sale_article_id`）：`MAX(inbound_qty/amt)`（去重）
 
-**3b. 宽表 JOIN**：`atomic_sales FULL OUTER JOIN atomic_inventory` → LEFT JOIN `dim_day_clear` → INNER JOIN `dim_store_list` → LEFT JOIN 10 张原子表
+**3b. 宽表 JOIN**：`atomic_sales` 和 `atomic_inventory` 分别在子查询中 `GROUP BY (store_id, business_date, article_id)` 聚合后再 FULL OUTER JOIN，消除 day_clear 维度差异。结果外层再套 `ROW_NUMBER() OVER (PARTITION BY store_id, business_date, article_id, day_clear)` 全局去重，保证 t_atomic_wide 零重复行。
 
 **3c. BOM 父品补行**：父品不在宽表中时 INSERT 补全
 
-**3d. 日清覆盖**（三组商品强制 `day_clear='0'`）：
+**3d. 日清覆盖**（两组商品强制 `day_clear='0'`，通过 `dim_day_clear_override` 白名单实现）：
 
-| 规则 | SQL 条件 |
-|------|---------|
-| 猪肉类 | `category_level1_description = '猪肉类'` |
-| 熟食类 | `category_level3_description LIKE '%熟食'` |
-| 鲜牛肉 | `category_level1_description = '肉禽蛋类' AND article_name LIKE '鲜黄牛%'` |
+| 规则 | override_type |
+|------|--------------|
+| 猪肉类 | `猪肉类` — `category_level1_description = '猪肉类'` |
+| 熟食类 | `熟食类` — `category_level3_description LIKE '%熟食'` |
+
+> **v10 fix**：鲜牛肉日清覆盖已移除。牛肉有持续期初库存（`purchase_di` 的 `init_stock ≠ 0`），日清会导致巨额虚假亏损。
 
 ### Step 4: BOM 分摊 (`BomAllocCalculator` → `t_calc_bom_alloc`)
 
@@ -170,8 +177,10 @@ profit.py:
   allowance_amt_profit 公式中的 + end_stock_amt - init_stock_amt （euc 间接影响）
 
 明天的 sku_cost.py:
-  init_stock_amt   = 昨天的 end_stock_amt （跨日滚动）
+  init_stock_amt   = 前一营业日的 end_stock_amt（MAX(business_date) < 当天，非 timedelta -1）
 ```
+
+> **v10 fix**：sku_cost.py 和 stock.py 的跨日查找均改为 `MAX(business_date) < 当天`，自动跳过非连续日期（周末/节假日/数据缺失）。
 
 ### Step 6: 库存与金额 (`StockCalculator` → `t_calc_stock`)
 
@@ -212,9 +221,14 @@ eq = init_stock + receive + bom_in - bom_out + compose_in - compose_out - sale -
 
 **金额统一用 euc**：所有 amt = qty × euc（包括 know_lost_amt、unknow_lost_amt、end_stock_amt）
 
-**跨日 init_stock**：今天 init = 昨天 end_stock（+1 天 shift），首日 SKU 回退到源表 `init_stock_qty_src` 并 clamp ≥0
+**跨日 init_stock**：今天 init = 前一营业日的 end_stock（`MAX(business_date) < 当天`，非 timedelta -1 天）。非连续日期（周末、节假日、数据缺失）自动跳过。首日 SKU 回退到源表 `init_stock_qty_src` 并 clamp ≥0
 
-**BOM 父品库存转移**（Step 6.12）：父品 `sale=0, bom_out>0, end>0` → 按 BOM 比例转移给子品 → 父品 end=0 → profit=0
+**BOM 父品库存转移**（Step 6.12）：父品 `sale=0, bom_out>0, end>0` → 按 BOM 比例转移给子品：
+  - 父品 `end=0`，同步增加 `bom_out_amt/qty`（利润 + transfer）
+  - 子品 `end += transfer`，同步增加 `bom_in_amt/qty`（利润 - transfer）
+  - 净效果：profit 公式中 `-bom_in + bom_out + end` 三项保持不变，单品利润不被转移歪曲
+
+**unknow_lost 允许负值（盘盈）**：盘点分支和日清分支的 `unknow_lost_qty` 不再 clamp `max(0, ...)`，允许负值代表盘盈（实际库存 > 方程预测），与 QDM 行为对齐。
 
 ### Step 7: 门店毛利 (`ProfitCalculator` → `t_calc_profit`)
 
@@ -261,3 +275,11 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 2. **`end_stock_qty/amt` 未使用源表值**：`strategy_fm_purchase_di` 有上游算好的 `end_stock_qty/amt`，v10 选择自算。差异可能源于盘点日源表用实盘覆盖而我们用方程推算。
 
 3. **`know_lost_*_src` 提取但未使用**：`atomic_loss` 有源表的 know/unknow_lost_amt，下游 stock.py 统一用 `euc × qty` 重算金额，未参考源表值。
+
+4. **euc 与 QDM 成本方法差异**：fmetl 使用加权平均含期初库存的 euc，QDM v4 使用 `cost_price` 或 `avg_purchase_price`。导致期初期末库存估值系统性偏高 ~5%，是毛利差异的主要来源（EI 差 12-15K）。
+
+5. **日清品 unknow_lost 偏高**：猪肉类/熟食类日清覆盖导致 `unknow_lost = new_supply - sale - know_lost`，正常补货场景必然产生正值。fmetl unknow_lost ~27K vs QDM ~11K。已允许盘盈（负值），但仍需评估是否引入独立"日清损耗"指标以区分真实损耗和日清模型损耗。
+
+6. **双口径毛利已移除**：v9 提供 `store_profit_sales` vs `store_profit_stock` 双口径对比用于检测库存-销售毛利差异，v10 简化为单一 `profit_amt`。如需诊断可考虑恢复。
+
+7. **dim_goods 关联时机**：dim_goods 在 FM 底表层（sku_dim.py）统一 JOIN，所有历史日期使用最新 dim_goods。计算层（stock/profit/merge）不直接引用 dim_goods 分类。
