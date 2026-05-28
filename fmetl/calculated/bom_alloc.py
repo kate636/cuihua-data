@@ -377,14 +377,11 @@ class BomAllocCalculator:
             split_need_qty_val = consume_qty_val
             split_need_weight = consume_weight_val
 
-        # v10 A19: 单位归一化 (子品单位 → 父品单位) — 仅用于父品 bom_out
-        # conv_ratio = parent_qty / sum_sub_qty
-        # 例: 1箱(父) = 12kg(子) → conv=1/12, 10kg消耗 → 0.833箱bom_out
+        # v10 fix: 按总产量(非销量)分配母品成本到子品
+        # alloc_ratio 已编码成本分配权重，qty 同比例从总产量分配
         sum_sub = parent_sum_sub_qty if parent_sum_sub_qty else parent_qty
-        conv_ratio = parent_qty / sum_sub if sum_sub > 0 else 1.0
-        bom_alloc_qty_parent = split_need_qty_val * conv_ratio * qty_split_ratio
-        # A21: 子品单位数量 — 用于子品 euc/sku_cost, 避免与父品单位混淆
-        bom_alloc_qty_sub = split_need_qty_val * qty_split_ratio
+        bom_alloc_qty_parent = alloc_ratio * parent_qty
+        bom_alloc_qty_sub = alloc_ratio * sum_sub
 
         # 共享组: parent_inbound 显示本父品的单独进货额，非组总额
         return {

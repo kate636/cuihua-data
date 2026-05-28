@@ -131,10 +131,11 @@ class StockCalculator:
         if len(df) < before:
             self._log.info(f"  dedup: {before} → {len(df)} rows ({before - len(df)} duplicates removed)")
 
-        # ── euc ──
+        # ── euc + compose 修正金额 ──
         euc_df = conn.execute(f"""
             SELECT store_id, business_date, article_id,
-                   effective_unit_cost, cost_source
+                   effective_unit_cost, cost_source,
+                   compose_in_amt, compose_out_amt
             FROM t_calc_sku_cost
             WHERE business_date = '{business_date}'
         """).df()
@@ -257,6 +258,11 @@ class StockCalculator:
             if col not in df.columns:
                 df[col] = 0.0
 
+        # 优先用 sku_cost 修正后的 compose 金额，回退到源表值
+        # 必须在 fillna 之后：确保 compose_in_amt_src 的 NaN 已被填充为 0
+        df['compose_in_amt_corrected'] = df['compose_in_amt'].fillna(df['compose_in_amt_src'])
+        df['compose_out_amt_corrected'] = df['compose_out_amt'].fillna(df['compose_out_amt_src'])
+
         return self._process_day_core(df, prev_df, business_date)
 
     # ═══════════════════════════════════════════════════════════════
@@ -288,8 +294,9 @@ class StockCalculator:
             df['is_first_day'] = 1
 
         # ── compose 金额 ───────────────────────────────────────────
-        df['compose_in_amt'] = df['compose_in_amt_src'].fillna(0)
-        df['compose_out_amt'] = df['compose_out_amt_src'].fillna(0)
+        # v10 compose correction: 优先用 sku_cost 修正值（加工关系推算），回退源表
+        df['compose_in_amt'] = df['compose_in_amt_corrected'].fillna(0)
+        df['compose_out_amt'] = df['compose_out_amt_corrected'].fillna(0)
         df['receive_amt'] = df['self_receive_amt']
 
         # ── 库存方程 ──────────────────────────────────────────────
@@ -416,15 +423,9 @@ class StockCalculator:
                                (df['business_date'] == pr['business_date']),
                                'end_stock_amt'] = 0.0
 
-                        # 同步更新父品 bom_out_amt/qty，保持 profit 公式自洽
-                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
-                               (df['store_id'] == pr['store_id']) &
-                               (df['business_date'] == pr['business_date']),
-                               'bom_out_amt'] += transfer_amt
-                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
-                               (df['store_id'] == pr['store_id']) &
-                               (df['business_date'] == pr['business_date']),
-                               'bom_out_qty'] += transfer_qty
+                        # v10 fix: 不重复增加父品 bom_out_amt/qty
+                        # BOM alloc 已将 100% 母品成本分摊给子品, stock_transfer 清零
+                        # end_stock 后 bom_out 已等于 receive_amt, 再加 transfer 会重复记账
 
                         for _, sa in sub_alloc.iterrows():
                             sub_mask = (

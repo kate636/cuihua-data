@@ -15,7 +15,7 @@ ETL 中有 **10+ 个 price 字段**，分属四个不同来源，各自用途不
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
 | `original_price` | **销售原价**（list price，标签价） | **BOM 消耗权重**：`weight = (sale_qty + know_lost_qty) × original_price`；**预期销售额**：`pre_sale_amt = lost_qty × original_price + original_price_sale_amt` |
-| `current_price` | 今日实际售价 | 观测值，写入 `t_atomic_wide`，下游不参与计算 |
+| `current_price` | 今日实际售价 | EUC 最终兜底：`euc = current_price × 0.40`（零售估算成本率）；写入 `t_atomic_wide` |
 | `yesterday_price` | 昨日售价 | 观测值，写入 `t_atomic_wide`，下游不参与计算 |
 | `dc_original_price` | **出库原价**（配送中心出库价） | **理论进货额**：`pre_inbound_amount = receive_qty × dc_original_price` |
 
@@ -23,13 +23,13 @@ ETL 中有 **10+ 个 price 字段**，分属四个不同来源，各自用途不
 
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
-| `avg_inbound_price` | **进货均价**（parent 验收均价） | compose_net_amt **回退**（源表无 amt 时 = `qty × avg_inbound_price`）；euc **回退**（cost_qty=0 时 = `avg_inbound_price`） |
+| `avg_inbound_price` | **进货均价**（parent 验收均价） | compose_net_amt **第二层回退**（源表无 amt 且 cost_price=0 时 = `qty × avg_inbound_price`）；euc **第三层回退**（cost_qty=0 且前向填充无值、cost_price=0 时 = `avg_inbound_price`） |
 
 ### 1.3 成本侧（`atomic_cost_price`，源表 `strategy_fm_inventory_pool_di`）
 
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
-| `cost_price` | **成本价快照**（observable only） | **v10 废弃，不参与任何计算**。仅写入 `t_atomic_wide`，供人工查看 |
+| `cost_price` | **标准成本价**（系统维护的标准成本） | **compose_net_amt 第一层回退**（源表无 amt 时 = `qty × cost_price`）；**euc 第四层回退**（前三层均失败时 = `cost_price`），标记 `V10_COST_PRICE_FALLBACK` |
 
 ### 1.4 SCM 侧（`atomic_scm`，源表 `strategy_fm_scm_di`）—— 7 个单价
 
@@ -51,24 +51,24 @@ ETL 中有 **10+ 个 price 字段**，分属四个不同来源，各自用途不
 original_price ──→ bom_alloc.py: consume_weight = (sale + know_lost) × price
                ──→ profit.py:    pre_sale_amt = lost_qty × price + original_price_sale_amt
 dc_original_price ──→ profit.py: pre_inbound_amount = receive_qty × price
-avg_inbound_price ──→ sku_cost.py: compose_net_amt fallback; euc fallback
-                 ──→ stock.py:    compose_net_amt fallback
+cost_price       ──→ sku_cost.py: compose_net_amt 第一层兜底; euc 第四层兜底
+avg_inbound_price ──→ sku_cost.py: compose_net_amt 第二层兜底; euc 第三层兜底
+current_price    ──→ sku_cost.py: euc 第五层兜底 (×0.40 成本率)
 SCM 7 prices      ──→ stock.py:    out_stock_*/return_*/expect_* amt
                  ──→ profit.py:   scm_fin_article_income/cost/profit
-cost_price        ──→ (不参与计算，仅观测)
-current_price     ──→ (不参与计算，仅观测)
 yesterday_price   ──→ (不参与计算，仅观测)
 ```
 
 ---
 
-## 二、7 天 chunk 机制
+## 二、日期分片 chunk 机制
 
-`BaseExtractor.extract()` 调用 `split_date_range(start, end, 7)` 将日期范围切分为每 7 天一段，逐段发 API 请求。
+`split_date_range(start, end, interval)` 将日期范围切分为每 `interval` 天一段，逐段发 API 请求。
 
-**为什么做**：QDM BI API 有查询超时和结果集大小限制。单次查太多天会导致超时或返回数据截断。7 天是经验值，在 API 稳定性和请求次数之间取得平衡。
+- **BaseExtractor 默认**: `interval=7` 天（`_base.py` extract 方法签名）
+- **Executor 实际使用**: `chunk=30` 天（`executor.py` L104），因 7 天 chunk 在某些源表上会导致 API 分页截断，单次 30 天获取完整数据
 
-**对单日 ETL**（如 `2026-04-23 2026-04-23`）：日期范围只有 1 天，不会拆分，7 天 chunk 无实际影响。
+**为什么做 chunk**：QDM BI API 有查询超时和结果集大小限制。单次查太多天会导致超时或返回数据截断。
 
 ---
 
@@ -76,20 +76,32 @@ yesterday_price   ──→ (不参与计算，仅观测)
 
 ### Step 1: 维度表 (`DimsExtractor`)
 
-7 张维表从 StarRocks 全量拉到 DuckDB。`dim_goods` 排除品类 70-77（物料类），用最新日期（`{end}` + 7 天回溯兜底），表中无 `inc_day` 列。
+7 张维表从 StarRocks 全量拉到 DuckDB。`dim_goods` 排除品类 70-77（物料类）。
 
-**日清覆盖白名单** (`dim_day_clear_override`)：从 `dim_goods` 派生，仅含 `article_id` + `override_type`，供 merge.py 日清覆盖使用，隔离对 dim_goods 的直接依赖。
+**dim_goods 日期获取逻辑**：以 `{end}` 为起始日期，向前回溯最多 7 天，取第一个有数据的 `inc_day` 快照。若 7 天内均无数据，保留现有 `dim_goods` 不覆盖（避免历史数据丢失）。表中无 `inc_day` 列。
 
-### Step 2: 14 个原子域取数器
+**日清覆盖白名单** (`dim_day_clear_override`)：从 `dim_goods` 派生，仅含 `article_id` + `override_type`，供 merge.py 日清覆盖使用，隔离对 dim_goods 的直接依赖。包含两组：
+- `猪肉类`：`category_level1_description = '猪肉类'`
+- `熟食类`：`category_level3_description LIKE '%熟食'`
 
-> **v10 优化**：多核并行提取（`ThreadPoolExecutor`, 6 workers），每个 worker 创建独立 `ApiConnector` + `DuckDBStore`。DuckDB 文件级锁串行化写入，API 调用并行。Step 2 从 ~90s 降至 ~15s。
+注意：鲜牛肉不在此列（`purchase_di` 的 `init_stock ≠ 0`，日清会导致巨额虚假亏损）。
+
+### Step 2: 13+2 个原子域取数器
+
+并行提取 13 个域（`ThreadPoolExecutor`, 6 workers）+ 2 个骨架表在末尾串行创建。每个 worker 创建独立 `ApiConnector` + `DuckDBStore`。DuckDB 文件级锁串行化写入，API 调用并行。Step 2 从 ~90s 降至 ~15s。
+
+> **v10 fix**: `SalesExtractor` / `InventoryExtractor` 中 LEFT JOIN `strategy_fm_dim_goods` 使用 `inc_day = '{end}'`（dim_goods 已有 end 日快照时直接命中，不需要回溯到 yesterday）。
 >
-> **v10 fix**：`SalesExtractor` / `InventoryExtractor` / `PromoExtractor` 中 LEFT JOIN `strategy_fm_dim_goods` 使用 `inc_day = '{yesterday}'`（保证有数据），不用 `'{end}'`（分段末日期可能无快照）。
+> **v10 fix**: `PromoExtractor` 使用 **INNER JOIN**（非 LEFT JOIN），且同样使用 `inc_day = '{end}'`。不在 dim_goods 中的 promo 记录会被丢弃。
+>
+> **v10 fix**: `InventoryExtractor` 先 DROP 旧表（schema 变更），再走标准分区写入。写入前调用 `_ensure_table_exists()` 确保 API 返回 0 行时下游 merge 不崩溃。
+>
+> **品类过滤说明**：所有原子表排除品类 70-77（物料类）。`SalesExtractor` 对线下销售（`online_flag='N'`）做品类过滤，线上销售不受限制，且额外排除 `category_level1_id='91'`。
 
 | # | 取数器 | 目标 DuckDB 表 | 取什么 |
 |---|--------|---------------|--------|
 | 2a | SalesExtractor | `atomic_sales` | 20+ 销售指标 |
-| 2b | InventoryExtractor | `atomic_inventory` | `init_stock_qty/amt` + `avg_inbound_price` |
+| 2b | InventoryExtractor | `atomic_inventory` | `init_stock_qty/amt` + `avg_inbound_price` + `purchase_receive_qty/amt` |
 | 2c | InventoryDetailExtractor | `atomic_inventory_detail` | `actual_stock_qty` + `created_by`（判定人工/系统盘点） |
 | 2d | ScmExtractor | `atomic_scm` | 出库/退货/订货的 qty + 7 个单价 |
 | 2e | ScmAdjustExtractor | `atomic_scm_adjust` | SCM 差异调整 |
@@ -97,22 +109,35 @@ yesterday_price   ──→ (不参与计算，仅观测)
 | 2g | ComposeExtractor | `atomic_compose` | `compose_in/out_qty/amt` |
 | 2h | AllowanceExtractor | `atomic_allowance` | `allowance_amt` |
 | 2i | PromoExtractor | `atomic_promo` | 7 个促销金额 |
-| 2j | CostPriceExtractor | `atomic_cost_price` | `cost_price`（观测值） |
+| 2j | CostPriceExtractor | `atomic_cost_price` | `cost_price`（标准成本，EUC 兜底用） |
 | 2k | PriceExtractor | `atomic_price` | 4 个售价 |
-| 2l | BomRelationExtractor | `atomic_bom_relation` | `dressing_rate`, `cost_rate` |
-| 2m | ReceiveSaleExtractor | `atomic_receive_sale` | BOM 核心表 |
+| 2l | BomRelationExtractor | `atomic_bom_relation` | `dressing_rate`, `cost_rate`, `parent_unit`, `sub_unit` |
+| 2m | ReceiveSaleExtractor | `atomic_receive_sale` | BOM 核心表：自购+BOM 父品进货行的 `inbound_qty/amt`、`sum_sub_article_qty` |
+| 2n | OrderReceiveExtractor | `atomic_order_receive` | 空骨架表 |
+| 2o | ArticleConvertExtractor | `atomic_article_convert` | 空骨架表 |
+
+> 注意：`OrderReceiveExtractor` 和 `ArticleConvertExtractor` 不参与并行提取，在 Step 2 末尾单独执行 `ensure_empty_skeleton()`。
 
 ### Step 3: 原子宽表合并 (`AtomicMerger` → `t_atomic_wide`)
 
 **3a. 自购数据提取**（`_tmp_self_receive`）：从 `atomic_receive_sale` 提取两路：
 - **自购**（`article_id = sale_article_id`）：`SUM(inbound_qty/amt)` per article
-- **BOM 父品**（`article_id ≠ sale_article_id`）：`MAX(inbound_qty/amt)`（去重）
+- **BOM 父品**（`article_id ≠ sale_article_id`）：`MAX(inbound_qty/amt)`（去重，同一父品多行对应不同子品）
+
+同时构建 `_tmp_bom_subs` 辅助表（BOM 子品集合），标记哪些 SKU 是 BOM 子品，防止 self_receive 被 `purchase_di` 回退覆盖。
 
 **3b. 宽表 JOIN**：`atomic_sales` 和 `atomic_inventory` 分别在子查询中 `GROUP BY (store_id, business_date, article_id)` 聚合后再 FULL OUTER JOIN，消除 day_clear 维度差异。结果外层再套 `ROW_NUMBER() OVER (PARTITION BY store_id, business_date, article_id, day_clear)` 全局去重，保证 t_atomic_wide 零重复行。
 
-**3c. BOM 父品补行**：父品不在宽表中时 INSERT 补全
+day_clear 优先级：sales.day_clear > inventory.day_clear > dim_day_clear(1→'1' else '0') > 默认 '0'。
 
-**3d. 日清覆盖**（两组商品强制 `day_clear='0'`，通过 `dim_day_clear_override` 白名单实现）：
+**3c. self_receive 回退逻辑**：
+- 优先用 `atomic_receive_sale` 的 `self_receive_qty/amt`
+- 若 receive_sale 无数据，但 SKU 是 BOM 子品 → 回退量 = 0（不用 purchase_di 回退）
+- 若 receive_sale 无数据，且 SKU 不是 BOM 子品 → 回退到 `atomic_inventory.purchase_receive_qty/amt`
+
+**3d. BOM 父品补行**：父品不在宽表中时 INSERT 补全行（父品有 self_receive 但无销售，需出现在宽表以便 downstream 处理其进货和 BOM 流出）。父品行 day_clear 固定为 '1'，所有销售/库存/损耗等字段填 0。
+
+**3e. 日清覆盖**（两组商品强制 `day_clear='0'`，通过 `dim_day_clear_override` 白名单实现）：
 
 | 规则 | override_type |
 |------|--------------|
@@ -132,9 +157,13 @@ split_need_weight = consume_weight - self_inbound_weight  (≥0)
 
 **共享组**：父品 A 的子品 ⊆ 父品 B 的子品时，合并为一组。所有子品按权重比例分 `group_total_amt`，共享子品按进货额比例分拆到两个父品。
 
-**单位归一化**：
-- `bom_alloc_qty`（父品单位）→ stock.py 的 `bom_out`
-- `bom_alloc_qty_sub`（子品单位）→ sku_cost.py 的 `bom_in`
+**数量分配（v10 fix — 按总产量分配）**：
+- `bom_alloc_qty`（父品单位）：`alloc_ratio × parent_qty` — 母品入库总量按权重比例分配，用于 stock.py 的 `bom_out`
+- `bom_alloc_qty_sub`（子品单位）：`alloc_ratio × sum_sub` — 子品总产量（`parent_sum_sub_qty` 或 `parent_qty`）按权重比例分配，用于 sku_cost.py 的 `bom_in`
+
+> **v10 fix**：原公式用 `split_need_qty_val`（日销量口径）作为分母，导致母品全部采购成本只分摊到当日销售的子品上（而非全部产量），EUC 被高估 6x+。改为 `alloc_ratio × 总产量`，成本均匀分摊到全部产出子品上。
+
+**子品单位成本**：`sub_unit_cost = bom_alloc_amt / bom_alloc_qty_sub`（当 `bom_alloc_qty_sub > 0` 时）
 
 ### Step 5: SKU 有效单位成本 (`SkuCostCalculator` → `t_calc_sku_cost`)
 
@@ -157,6 +186,19 @@ euc = cost_amt / cost_qty     （cost_qty > 0 时）
 - compose 的 in 和 out 都发生在同一个 SKU 身上（原料收进来 → 成品转出去），所以 net
 - BOM 的 in 在子品（收到分摊），out 在父品（付出原料）。euc 是按子品算的，子品只收到 bom_in，bom_out 是父品的事
 
+**compose_net_amt 兜底链**（源表 amt 为 0 时）：
+1. `compose_net_qty × cost_price`（系统标准成本）— 第一层
+2. `compose_net_qty × avg_inbound_price`（历史采购均价）— 第二层
+
+**euc 兜底链**（`cost_qty = 0` 时，从前到后依次尝试）：
+1. 前向填充（ffill）：沿 `(store_id, article_id)` 从上一营业日继承 euc，标记 `V10_INHERITED_EUC`
+2. `avg_inbound_price`：历史采购均价，标记 `V10_AVG_INBOUND_FALLBACK`
+3. `cost_price`：系统标准成本，标记 `V10_COST_PRICE_FALLBACK`
+4. `current_price × 0.40`：售价反推成本（烘焙品毛利率假设 60%），标记 `V10_RETAIL_ESTIMATED_FALLBACK`
+5. 以上均失败 → euc 保持 0，WARNING 日志输出受影响的 SKU 列表
+
+注意：仅向前填充（ffill），不做反向填充（bfill）。供给前的 euc 应来自历史库存，而非未来批次的成本。
+
 **父品 euc**：父品自身也参与 euc 计算（有自己的 init + receive + bom_alloc），但父品通常没有 bom_in（它是给别人分的，不是收别人的）。父品的 euc 用于计算它的 `end_stock_amt`。
 
 **BOM 父品剩余库存处理**（不在 sku_cost.py，在 stock.py Step 6.12）：
@@ -174,7 +216,6 @@ profit.py:
   profit_amt       公式中的 + end_stock_amt - init_stock_amt （euc 间接影响）
   sale_cost_amt    = sale_qty × euc      ← 输出到 t_calc_profit，不参与中间计算
   pre_profit_amt   = original_price_sale_amt - sale_qty × euc
-  allowance_amt_profit 公式中的 + end_stock_amt - init_stock_amt （euc 间接影响）
 
 明天的 sku_cost.py:
   init_stock_amt   = 前一营业日的 end_stock_amt（MAX(business_date) < 当天，非 timedelta -1）
@@ -197,13 +238,15 @@ eq = init_stock + receive + bom_in - bom_out + compose_in - compose_out - sale -
    → end = actual_stock_qty
    → unknow = max(0, eq - actual)
    判定: atomic_inventory_detail.created_by != '系统' → 信任实盘值
+   若盘点日无人工盘点记录，此分支不触发
 
 2. day_clear = '0' (软日清):
    → 新供给 = receive + bom_in - bom_out + compose_in - compose_out
    → consumed_from_init = max(0, (sale + k_lost) - 新供给)
    → end = max(0, init - consumed_from_init)
-   → unknow = max(0, 新供给 - sale - k_lost)
+   → unknow = 新供给 - sale - k_lost
    解释：只清当日新供给的未售部分。存量 init 不日清（已在前几天算过失耗）
+   注意：unknow 可为负值（新供给小于销售时，消耗期初库存）
 
 3. eq < 0 (负库存保护):
    → end = 0
@@ -221,18 +264,18 @@ eq = init_stock + receive + bom_in - bom_out + compose_in - compose_out - sale -
 
 **金额统一用 euc**：所有 amt = qty × euc（包括 know_lost_amt、unknow_lost_amt、end_stock_amt）
 
-**跨日 init_stock**：今天 init = 前一营业日的 end_stock（`MAX(business_date) < 当天`，非 timedelta -1 天）。非连续日期（周末、节假日、数据缺失）自动跳过。首日 SKU 回退到源表 `init_stock_qty_src` 并 clamp ≥0
+**跨日 init_stock**：今天 init = 前一营业日的 end_stock（`MAX(business_date) < 当天`，非 timedelta -1 天）。非连续日期（周末、节假日、数据缺失）自动跳过。首日 SKU 回退到源表 `init_stock_qty_src` 并 clamp ≥0。
 
 **BOM 父品库存转移**（Step 6.12）：父品 `sale=0, bom_out>0, end>0` → 按 BOM 比例转移给子品：
-  - 父品 `end=0`，同步增加 `bom_out_amt/qty`（利润 + transfer）
-  - 子品 `end += transfer`，同步增加 `bom_in_amt/qty`（利润 - transfer）
-  - 净效果：profit 公式中 `-bom_in + bom_out + end` 三项保持不变，单品利润不被转移歪曲
+  - 父品 `end=0`，`stock_transfer_out = 原end_stock`（记录于 `stock_transfer_out_qty/amt` 字段）
+  - 子品 `end += transfer`，记录 `stock_transfer_in_qty/amt`；同步增加 `bom_in_amt/qty`（抵消 end 增加对子品 profit 的影响）
+  - v10 fix：不再重复增加父品 `bom_out_amt/qty`。BOM alloc 已将 100% 母品成本分摊给子品，stock_transfer 清零 end_stock 后无需额外调整 bom_out
 
-**unknow_lost 允许负值（盘盈）**：盘点分支和日清分支的 `unknow_lost_qty` 不再 clamp `max(0, ...)`，允许负值代表盘盈（实际库存 > 方程预测），与 QDM 行为对齐。
+**跨日 init_stock 查找注意**：前日 end_stock 查找按 `(store_id, article_id, day_clear)` 分组。若同一 SKU 的 day_clear 在不同日期间变化（例如从 '1' 变为 '0'），跨日链条会断裂，该 SKU 回退到源表 `init_stock_qty_src`。
 
 ### Step 7: 门店毛利 (`ProfitCalculator` → `t_calc_profit`)
 
-**毛利公式**：
+**核心毛利公式**：
 
 ```
 profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - init)
@@ -240,35 +283,109 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 
 损耗不在公式中单独扣减（已通过库存方程的 `end_stock` 体现）。
 
-**`sale_cost_amt` 的定位**：`sale_qty × euc`（日清/非日清统一公式），作为独立字段写入 `t_calc_profit` 和 `t_fm_sku_dim`，用于后续的毛利率 KPI 计算（`t_fm_levels_result`），**不参与 profit.py 内部中间计算**。日清差异在 stock.py 端体现（end=0 → 残差转 unknow_lost），不影响 sale_cost 公式。
+**辅助毛利指标**：
+
+| 字段 | 公式 | 用途 |
+|------|------|------|
+| `sale_cost_amt` | `sale_qty × euc` | 销售成本，日清/非日清统一公式，写入 `t_fm_sku_dim` 用于毛利率 KPI |
+| `pre_profit_amt` | `original_price_sale_amt - sale_qty × euc` | 原价口径毛利额 |
+| `allowance_amt_profit` | `sale - receive + allowance + (end - init)` | 补贴后毛利额 |
+| `scm_fin_article_income` | `\|out_stock_pay_amt_notax\| - \|return_stock_pay_amt_notax\|` | SCM 金融收入 |
+| `scm_fin_article_cost` | `\|outstock_cost_price_notax × outstock_qty\| - \|return_cost_price_notax × return_qty\|` | SCM 金融成本 |
+| `scm_fin_article_profit` | `scm_fin_article_income - scm_fin_article_cost` | SCM 金融毛利 |
+| `full_link_article_profit` | `profit + scm_fin_article_profit` | 全链路毛利 |
+
+**`sale_cost_amt` 的定位**：作为独立字段写入 `t_calc_profit` 和 `t_fm_sku_dim`，用于后续的毛利率 KPI 计算（`t_fm_levels_result`），不参与 profit.py 内部中间计算。日清差异在 stock.py 端体现（end=0 → 残差转 unknow_lost），不影响 sale_cost 公式。
 
 ### Step 8-13: FM 底表
 
 | Step | 产出 | 说明 |
 |------|------|------|
 | 8 | `t_fm_sku_dim` | SKU 级完整宽表，60+ 字段，含分类重映射、is_soldout、7 日滚动均量 |
-| 9 | `t_fm_cust` | 客数聚合，按 6 个分类层级统计 distinct order_id |
-| 10 | `t_fm_levels_sum` | 7 级分类 × 3 种 day_clear 汇总 |
-| 11 | `t_fm_levels_result` | 中文列名 + 20+ KPI 比率 |
-| 12 | `t_fm_bom_breakdown` | BOM 溯源：parent × sub 明细 |
-| 13 | `t_fm_stock_roll` | 库存八要素滚动 + balance_qty 校验 |
+| 9 | `t_fm_cust` | 客数聚合，按 6 个分类层级统计 distinct order_id（通过 dim_goods JOIN 过滤品类 70-77） |
+| 10 | `t_fm_levels_sum` | 7 级分类 × 3 种 day_clear 汇总（'0'日清 / '1'非日清 / '2'合计） |
+| 11 | `t_fm_levels_result` | 中文列名 + 20+ KPI 比率（毛利率、损耗率、促销费率等） |
+| 12 | `t_fm_bom_breakdown` | BOM 溯源：parent × sub 明细，含 `sub_unit_cost`、`sub_qty_actual` |
+| 13 | `t_fm_stock_roll` | 库存八要素滚动（init/receive/bom_in/bom_out/compose_in/compose_out/sale/lost → end）+ balance_qty 校验 |
 
 ---
 
 ## 四、分类重映射
 
-| 条件 | 新分类名 |
-|------|---------|
-| `L2 IN ('蛋类','烘焙类')` | 蛋类 / 烘焙类（独立） |
-| `L2 IN ('冷藏奶制品类','饮料类')` | **乳制品及水饮类** |
-| `L1 = '肉禽蛋类' AND L2 ≠ '蛋类'` | **肉禽类** |
-| `L3 LIKE '%熟食'` | **熟食类** |
-| `L1 IN ('冷藏及加工类','预制菜')` | **冷藏加工及预制菜类** |
-| 其他 | 保持原始 L1 分类 |
+`sku_dim.py` `build()` 方法中 pandas 向量化实现，与 v3 SQL CASE WHEN 逻辑一致。产出 `category_level1_id_remap` 和 `category_level1_description_remap` 两列。
+
+| 条件 | 新 ID | 新描述 |
+|------|-------|--------|
+| L2 IN ('蛋类', '烘焙类') | '' | L2 本身（蛋类 / 烘焙类） |
+| L2 IN ('冷藏奶制品类', '饮料类') | '' | 乳制品及水饮类 |
+| L1 = '肉禽蛋类' AND L2 ≠ '蛋类' | '' | 肉禽类 |
+| L3.endswith('熟食') | '' | 熟食类 |
+| L1 IN ('冷藏及加工类', '预制菜') | '' | 冷藏加工及预制菜类 |
+| 其他 | 原始 L1 ID | 原始 L1 描述 |
+
+> 注意：`_remap_category()` 函数（L24-59）是 v3 遗留的单行应用函数，当前 `build()` 使用 numpy.where 链式向量化实现（L188-207），该函数未被调用。重映射后两类字段（原始 + 重映射）同时存在于 FM 底表中。
 
 ---
 
-## 五、待确认 / 已知局限性
+## 五、数据源表
+
+### 5.1 原子域表（16 张）
+
+| DuckDB 表 | QDM 商分源表 | 域 | 说明 |
+|-----------|-------------|---|------|
+| `atomic_sales` | `strategy_fm_sales_di` | ①销售 | 20+ 销售指标，含 `abi_article_id→article_id` |
+| `atomic_inventory` | `strategy_fm_purchase_di` | ②库存 | `init_stock` + `avg_inbound_price` + `purchase_receive` |
+| `atomic_inventory_detail` | `strategy_fm_store_article_inventory_detail_di` | ②附 盘点 | `actual_stock_qty` + `created_by`，`shop_id→store_id`, `sku_code→article_id` |
+| `atomic_scm` | `strategy_fm_scm_di` | ③供应链 | 出库/退货/订货 + 7 个单价 |
+| `atomic_scm_adjust` | `strategy_fm_scm_adjust_di` | ③附 | SCM 差异调整 |
+| `atomic_loss` | `strategy_fm_loss_di` | ④损耗 | `know_lost_qty` + `*_amt_src` |
+| `atomic_compose` | `strategy_fm_compose_di` | ⑤加工 | `compose_in/out_qty/amt` |
+| `atomic_allowance` | `strategy_fm_allowance_di` | ⑥补贴 | `allowance_amt` |
+| `atomic_promo` | `strategy_fm_promo_di` | ⑦促销 | 7 个促销金额，`shop_id→store_id`, `sku_code→article_id` |
+| `atomic_cost_price` | `strategy_fm_inventory_pool_di` | ⑧成本价 | `cost_price`，`shop_id→store_id`, `sku_code→article_id`, `inventory_date→business_date` |
+| `atomic_price` | `strategy_fm_price_da` | ⑨价格 | 4 个售价 |
+| `atomic_bom_relation` | `strategy_dim_store_article_bom_relation` | BOM关系 | `dressing_rate`, `cost_rate`, `parent_unit`, `sub_unit`, `bom_type` |
+| `atomic_receive_sale` | `strategy_fm_receive_sale_di` | BOM核心 | 自购+BOM父品进货的 `inbound_qty/amt`、`sum_sub_article_qty` |
+| `atomic_order_receive` | (空骨架) | — | 预留，当前不参与计算 |
+| `atomic_article_convert` | (空骨架) | — | 预留，当前不参与计算 |
+
+### 5.2 维度表（7 张）
+
+| DuckDB 表 | QDM 源表 | 写入模式 |
+|-----------|---------|---------|
+| `dim_goods` | `strategy_fm_dim_goods` | 全量替换（end 日回溯 7 天取最新快照） |
+| `dim_day_clear` | `strategy_fm_dim_day_clear` | 分区替换（7 天 chunk） |
+| `dim_day_clear_override` | (派生) | 从 dim_goods 派生，DROP + CREATE |
+| `dim_store_list` | `ads_business_analysis.chdj_store_info` | 全量替换 |
+| `dim_store_profile` | `strategy_fm_dim_store_profile` | 全量替换 |
+| `dim_calendar` | `strategy_fm_dim_calendar` | 全量替换 |
+| `dim_saleable` | `strategy_fm_dim_saleable` | 全量替换 |
+| `dim_chdj_store_info` | `ads_business_analysis.chdj_store_info` | 全量替换 |
+
+### 5.3 计算层表（5 张）
+
+| DuckDB 表 | 算法 | 粒度 |
+|-----------|------|------|
+| `t_atomic_wide` | FULL OUTER JOIN + 父品补全 + 日清覆盖 + ROW_NUMBER 去重 | store×date×article×day_clear |
+| `t_calc_bom_alloc` | Σ总权重 + 共享组识别 + 产量比例分配 | store×date×parent×sub |
+| `t_calc_sku_cost` | 加权平均含期初库存（5 层兜底链） | store×date×article |
+| `t_calc_stock` | 四流合一 + 跨日滚动（中枢模块） | store×date×article×day_clear |
+| `t_calc_profit` | 含 BOM + SCM 金融 + 全链路 + 多口径毛利 | store×date×article×day_clear |
+
+### 5.4 FM 底表（6 张）
+
+| DuckDB 表 | 粒度 | 说明 |
+|-----------|------|------|
+| `t_fm_sku_dim` | store×date×article×day_clear | SKU 级完整宽表，含分类重映射、7日均量 |
+| `t_fm_cust` | store×date×day_clear×level | 客数聚合（6 层级） |
+| `t_fm_levels_sum` | store×date×day_clear×level | 7 级分类汇总（数量/金额/比率） |
+| `t_fm_levels_result` | store×date×day_clear×level | 平台对接表（中文列名+KPI） |
+| `t_fm_bom_breakdown` | store×date×parent×sub | BOM 分摊溯源 |
+| `t_fm_stock_roll` | store×date×article×day_clear | 库存八要素滚动 + balance_qty 校验 |
+
+---
+
+## 六、已知局限性 / 设计决策
 
 1. **`is_counted` 逻辑**：依赖 `atomic_inventory_detail.created_by != '系统'` 判定人工盘点。`created_by = '系统'` 的记为系统快照（继续用方程自算），其余为人工盘点（信任实盘值覆盖 end_stock）。若源表无人工盘点记录，此分支不会触发。
 
@@ -276,10 +393,16 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 
 3. **`know_lost_*_src` 提取但未使用**：`atomic_loss` 有源表的 know/unknow_lost_amt，下游 stock.py 统一用 `euc × qty` 重算金额，未参考源表值。
 
-4. **euc 与 QDM 成本方法差异**：fmetl 使用加权平均含期初库存的 euc，QDM v4 使用 `cost_price` 或 `avg_purchase_price`。导致期初期末库存估值系统性偏高 ~5%，是毛利差异的主要来源（EI 差 12-15K）。
+4. **euc 与 QDM 成本方法差异**：fmetl 使用加权平均含期初库存的 euc，QDM 使用 `cost_price` 或 `avg_purchase_price`。fmetl 已加入 `cost_price` 和 `current_price×0.40` 作为兜底以减少差异。
 
-5. **日清品 unknow_lost 偏高**：猪肉类/熟食类日清覆盖导致 `unknow_lost = new_supply - sale - know_lost`，正常补货场景必然产生正值。fmetl unknow_lost ~27K vs QDM ~11K。已允许盘盈（负值），但仍需评估是否引入独立"日清损耗"指标以区分真实损耗和日清模型损耗。
+5. **EUC 兜底的 40% 成本率假设**：`V10_RETAIL_ESTIMATED_FALLBACK` 使用 `current_price × 0.40` 估算成本，假设烘焙品毛利率 ~60%。不同 SKU 实际成本率可能不同，此兜底主要覆盖无任何成本数据的现烤加工 SKU。
 
-6. **双口径毛利已移除**：v9 提供 `store_profit_sales` vs `store_profit_stock` 双口径对比用于检测库存-销售毛利差异，v10 简化为单一 `profit_amt`。如需诊断可考虑恢复。
+6. **日清品 unknow_lost 可为负值**：日清分支中 `unknow = 新供给 - sale - know_lost`，当新供给小于销售时产生负值（表示消耗期初库存）。软日清设计有意允许此行为。
 
-7. **dim_goods 关联时机**：dim_goods 在 FM 底表层（sku_dim.py）统一 JOIN，所有历史日期使用最新 dim_goods。计算层（stock/profit/merge）不直接引用 dim_goods 分类。
+7. **双口径毛利已移除**：v9 提供 `store_profit_sales` vs `store_profit_stock` 双口径对比用于检测库存-销售毛利差异，v10 简化为单一 `profit_amt`。如需诊断可考虑恢复。
+
+8. **dim_goods 关联时机**：dim_goods 在 FM 底表层（sku_dim.py）统一 JOIN，所有历史日期使用最新 dim_goods 快照。计算层（stock/profit/merge）不直接引用 dim_goods 分类。日清覆盖通过 `dim_day_clear_override` 辅助表隔离。
+
+9. **跨日依赖与 sku_cost 初次运行**：sku_cost (Step 5) 读取 t_calc_stock (Step 6 产出) 获取前日 end_stock。由于 Step 5 先于 Step 6 运行，当次运行的跨日链使用上一次 ETL 运行的 t_calc_stock 数据。修复 BOM 等影响库存的模块后需运行两次才能完全更新跨日链。
+
+10. **标品类数据覆盖**：部分标品 SKU 在 QDM 有销售/利润但 fmetl 无对应数据，可能源自数据提取窗口或源表覆盖差异。`chunk=30` 已改善数据完整性，但仍有少量 SKU 存在差异。

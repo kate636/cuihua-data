@@ -102,7 +102,7 @@ class PromoExtractor(BaseExtractor):
         INNER JOIN (
             SELECT DISTINCT article_id
             FROM strategy_fm_dim_goods
-            WHERE inc_day = '{yesterday}'
+            WHERE inc_day = (SELECT MAX(inc_day) FROM strategy_fm_dim_goods)
               AND category_level1_id NOT IN {mat_excl}
         ) t3 ON t1.article_id = t3.article_id
         GROUP BY

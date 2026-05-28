@@ -23,10 +23,12 @@ Pipeline (v10.0, 13 步):
   Step 11  FM 结果层 (t_fm_levels_result)
   Step 12  BOM 分摊溯源 (t_fm_bom_breakdown)
   Step 13  库存滚动展开 (t_fm_stock_roll)
+  Step 14  同步加工关系候选数据到云端
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -101,7 +103,7 @@ def _run_atomic(api, duck, start, end, yesterday):
         t_api = ApiConnector(get_settings())
         t_duck = DuckDBStore()
         try:
-            cls(t_api, t_duck).extract(start=start, end=end, yesterday=yesterday)
+            cls(t_api, t_duck).extract(start=start, end=end, yesterday=yesterday, chunk=30)
         finally:
             t_duck.close()
 
@@ -155,6 +157,89 @@ def _run_fm(duck, api, start, end, yesterday):
 
     _step("Step 13: 库存滚动展开 → t_fm_stock_roll")
     StockRollBuilder(duck).build(start=start, end=end)
+
+    _step("Step 14: 同步加工关系候选数据 → 云端")
+    _sync_processing_candidates(duck)
+
+
+def _sync_processing_candidates(duck):
+    """从 DuckDB 提取烘焙+熟食类候选 SKU，同步到云端加工关系管理系统。"""
+    import sqlite3
+    import tempfile
+
+    try:
+        conn = duck._conn
+    except Exception:
+        return
+
+    # 查询有销售的加工类 SKU（烘焙、熟食、方便速食、即食/即热/即烹）
+    try:
+        df = conn.execute("""
+            WITH sku_sales AS (
+                SELECT p.article_id,
+                       SUM(p.pre_sale_amt) as total_sales
+                FROM t_calc_profit p
+                JOIN dim_goods g ON p.article_id = g.article_id
+                WHERE (g.category_level2_description = '烘焙类'
+                       OR g.category_level3_description LIKE '%熟食'
+                       OR g.category_level2_description = '方便速食类'
+                       OR g.category_level2_description IN ('即食类','即热类','即烹类'))
+                  AND p.pre_sale_amt > 0
+                GROUP BY p.article_id
+            )
+            SELECT g.article_id, g.article_name,
+                   CASE
+                        WHEN g.category_level2_description = '烘焙类' THEN '烘焙类'
+                        WHEN g.category_level3_description LIKE '%熟食' THEN '熟食类'
+                        WHEN g.category_level2_description = '方便速食类' THEN '方便速食类'
+                        ELSE g.category_level2_description
+                   END as category_type,
+                   ROUND(COALESCE(s.total_sales, 0), 1) as total_sales,
+                   0 as relation_count
+            FROM dim_goods g
+            INNER JOIN sku_sales s ON g.article_id = s.article_id
+            ORDER BY s.total_sales DESC
+        """).df()
+    except Exception:
+        return
+
+    if df.empty:
+        return
+
+    _log.info(f"syncing {len(df)} processing candidates to cloud ...")
+
+    # 写入临时 SQLite → SCP 到云端
+    try:
+        tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        tmp.close()
+        sdb = sqlite3.connect(tmp.name)
+        df.to_sql("proc_candidates", sdb, if_exists="replace", index=False)
+        sdb.execute("CREATE INDEX IF NOT EXISTS idx_pc_id ON proc_candidates(article_id)")
+        sdb.commit()
+        sdb.close()
+
+        import subprocess
+        ssh_key = os.path.expanduser("~/.ssh/id_rsa")
+        subprocess.run([
+            "scp", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+            tmp.name, "root@47.115.213.115:/opt/fm/proc-rel/proc_candidates.db",
+        ], check=True, capture_output=True, timeout=30)
+
+        subprocess.run([
+            "ssh", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+            "root@47.115.213.115",
+            "python3 -c \"import sqlite3; db=sqlite3.connect('/opt/fm/proc-rel/processing_relation.db'); "
+            "db.execute('DROP TABLE IF EXISTS proc_candidates'); "
+            "db.execute('ATTACH DATABASE \\\"/opt/fm/proc-rel/proc_candidates.db\\\" AS cand'); "
+            "db.execute('CREATE TABLE proc_candidates AS SELECT * FROM cand.proc_candidates'); "
+            "db.execute('UPDATE proc_candidates SET relation_count = (SELECT COUNT(*) FROM processing_relation pr WHERE pr.finished_sku = proc_candidates.article_id AND pr.is_active = 1)'); "
+            "db.commit(); db.close()\"",
+        ], check=True, capture_output=True, timeout=30)
+
+        os.unlink(tmp.name)
+        _log.info(f"processing candidates synced: {len(df)} SKUs")
+    except Exception as e:
+        _log.warning(f"processing candidate sync failed (non-fatal): {e}")
 
 
 def _step(name: str) -> None:

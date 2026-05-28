@@ -1971,32 +1971,33 @@ effective_unit_cost = COALESCE(
 
 ---
 
-## 附录B：完整表序号速查
+## 附录B：完整表序号速查（三列对照）
 
-| 序号 | StarRocks 表 | 核心用途 | 字段数 |
-|---|---|---|---:|
-| 1 | `strategy_fm_sales_di` | 销售事实 | 119 |
-| 2 | `strategy_fm_purchase_di` | 进货验收（BOM 预拆） | 16 |
-| 3 | `strategy_fm_scm_di` | SAP 出入库 | 54 |
-| 4 | `strategy_fm_scm_adjust_di` | SCM 差异调整（空） | 10 |
-| 5 | `strategy_fm_loss_di` | 损耗 | 10 |
-| 6 | `strategy_fm_compose_di` | 加工转换 | 11 |
-| 7 | `strategy_fm_allowance_di` | 活动让利 | 76 |
-| 8 | `strategy_fm_promo_di` | 促销明细 | 90 |
-| 9 | `strategy_fm_inventory_pool_di` | 成本价池 | 18 |
-| 10 | `strategy_fm_price_da` | 价格 | 54 |
-| 12 | `strategy_fm_dim_day_clear` | 日清商品清单 | 11 |
-| 13 | `strategy_fm_dim_store_profile` | 门店画像 | 109 |
-| 14 | `strategy_fm_dim_saleable` | 可售商品 | 47 |
-| 15 | `strategy_fm_dim_goods` | 商品主数据 | 106 |
-| 16 | `strategy_fm_dim_calendar` | 日历 | 70 |
-| 17 | `strategy_fm_receive_sale_di` | ⭐ BOM 分摊事实 | 20 |
-| 18 | `strategy_fm_order_receive_di` | 订验关系（空） | 17 |
-| 19 | `strategy_fm_dim_article_convert` | 单位换算 | 9 |
-| 20 | `strategy_dim_store_article_bom_relation` | ⭐ BOM 关系边 | 17 |
-| 21 | `strategy_fm_store_article_inventory_detail_di` | **库存快照（系统 + 实盘）** | 21 |
+> 一行看清：Hive源表 → strategy_fm → DuckDB
 
----
+| 序号 | Hive 源表 | strategy_fm 表 | DuckDB 表 | 域 | 字段数 |
+|---:|---|---|---|---:|---:|
+| 1 | `hive.dsl.dsl_transaction_non_daily_store_order_details_di` | `strategy_fm_sales_di` | `atomic_sales` | ①销售 | 119 |
+| 2 | `hive.dsl.dsl_transaction_non_daily_store_article_purchase_di` | `strategy_fm_purchase_di` | `atomic_inventory` | ②库存 | 16 |
+| 3 | `hive.dal_full_link.dal_manage_full_link_dc_store_article_scm_di` | `strategy_fm_scm_di` | `atomic_scm` | ③供应链 | 54 |
+| 4 | `hive.dal_bi_rpt.dal_debit_store_dc_difference_adjustment_di` | `strategy_fm_scm_adjust_di` | `atomic_scm_adjust` | ③附 调整 | 10 |
+| 5 | `hive.dal.dal_transaction_store_article_lost_di` | `strategy_fm_loss_di` | `atomic_loss` | ④损耗 | 10 |
+| 6 | `hive.dsl.dsl_transaction_sotre_article_compose_info_di` | `strategy_fm_compose_di` | `atomic_compose` | ⑤加工 | 11 |
+| 7 | `hive.dal.dal_activity_article_order_sale_info_di` | `strategy_fm_allowance_di` | `atomic_allowance` | ⑥补贴 | 76 |
+| 8 | `hive.dsl.dsl_promotion_order_item_article_sale_info_di` | `strategy_fm_promo_di` | `atomic_promo` | ⑦促销 | 90 |
+| 9 | `hive.ods_sc_db.t_shop_inventory_sku_pool` | `strategy_fm_inventory_pool_di` | `atomic_cost_price` | ⑧成本价 | 18 |
+| 10 | `hive.dim.dim_store_article_price_info_da` | `strategy_fm_price_da` | `atomic_price` | ⑨价格 | 54 |
+| 11 | `hive.dim.dim_chdj_store_list_di` | `strategy_fm_dim_store_list` | `dim_store_list` | 门店白名单 | — |
+| 12 | `hive.dim.dim_day_clear_article_list_di` | `strategy_fm_dim_day_clear` | `dim_day_clear` | 日清标签 | 11 |
+| 13 | `hive.dim.dim_store_profile` | `strategy_fm_dim_store_profile` | `dim_store_profile` | 门店画像 | 109 |
+| 14 | `hive.ods_sc_db.t_purchase_order_item_tmp` | `strategy_fm_dim_saleable` | `dim_saleable` | 可售商品 | 47 |
+| 15 | `hive.dim.dim_goods_information_have_pt` | `strategy_fm_dim_goods` | `dim_goods` | 商品主数据 | 106 |
+| 16 | `hive.dim.dim_calendar` | `strategy_fm_dim_calendar` | `dim_calendar` | 日历 | 70 |
+| 17 | `hive.dal.dal_receive_sale_di` | `strategy_fm_receive_sale_di` | `atomic_receive_sale` | ⭐BOM事实 | 20 |
+| 18 | `hive.dal.dal_store_order_receive_di` | `strategy_fm_order_receive_di` | `atomic_order_receive` | 订验(空) | 17 |
+| 19 | `hive.dim.dim_store_article_convert_info_da` | `strategy_fm_dim_article_convert` | `atomic_article_convert` | 单位换算 | 9 |
+| 20 | `hive.dim.dim_store_article_bom_relation` | `strategy_dim_store_article_bom_relation` | `atomic_bom_relation` | ⭐BOM关系 | 17 |
+| 21 | `hive.ddl.ddl_transaction_store_article_inventory_detail_di` | `strategy_fm_store_article_inventory_detail_di` | `atomic_inventory_detail` | 库存明细 | 21 |
 
 *生成时间：2026-04-24*
 *版本：v5.0 完整版*

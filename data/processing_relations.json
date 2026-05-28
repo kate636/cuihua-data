@@ -1,0 +1,25 @@
+{
+  "relations": [
+    {"finished_sku": "21282423", "finished_name": "葡式蛋挞6个(C)", "raw_sku": "21326066", "raw_name": "好禧坊葡式蛋挞液907g(C)", "raw_qty": 1.0, "raw_unit": "支", "yield_qty": 23.0, "yield_unit": "盒"},
+    {"finished_sku": "21282423", "finished_name": "葡式蛋挞6个(C)", "raw_sku": "21340840", "raw_name": "仿手工葡挞皮660g(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 5.0, "yield_unit": "盒"},
+    {"finished_sku": "21306259", "finished_name": "蔓越莓贝果(C)", "raw_sku": "21306242", "raw_name": "蔓越莓贝果5个(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 5.0, "yield_unit": "个"},
+    {"finished_sku": "21311277", "finished_name": "安佳黄油千层花边挞(C)", "raw_sku": "21326011", "raw_name": "奥昆千层花边挞20个/袋600g(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 20.0, "yield_unit": "盒"},
+    {"finished_sku": "21311277", "finished_name": "安佳黄油千层花边挞(C)", "raw_sku": "21342370", "raw_name": "奥昆葡式蛋挞液907g(C)", "raw_qty": 1.0, "raw_unit": "支", "yield_qty": 20.0, "yield_unit": "盒"},
+    {"finished_sku": "21311543", "finished_name": "奶香片3个装(C)", "raw_sku": "21282973", "raw_name": "奶香片(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 3.3, "yield_unit": "份"},
+    {"finished_sku": "21311604", "finished_name": "现烤蓝莓甜甜圈(C)", "raw_sku": "21282959", "raw_name": "蓝莓甜甜圈(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 5.0, "yield_unit": "份"},
+    {"finished_sku": "21311659", "finished_name": "迷你原味甜甜圈6个装(C)", "raw_sku": "21282935", "raw_name": "迷你原味甜甜圈(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 3.0, "yield_unit": "份"},
+    {"finished_sku": "21317910", "finished_name": "巧克力双拼甜甜圈80g(C)", "raw_sku": "21317941", "raw_name": "多哥夫白巧克力味涂层迷你甜甜圈200g(C)", "raw_qty": 1.0, "raw_unit": "包", "yield_qty": 5.0, "yield_unit": "盒"},
+    {"finished_sku": "21317910", "finished_name": "巧克力双拼甜甜圈80g(C)", "raw_sku": "21317989", "raw_name": "多哥夫黑巧克力味涂层迷你甜甜圈200g(C)", "raw_qty": 1.0, "raw_unit": "包", "yield_qty": 5.0, "yield_unit": "盒"},
+    {"finished_sku": "21326028", "finished_name": "糯叽叽紫薯麻薯(C)", "raw_sku": "21326059", "raw_name": "奥昆紫薯麻薯600g(C)", "raw_qty": 1.0, "raw_unit": "包", "yield_qty": 5.0, "yield_unit": "份"},
+    {"finished_sku": "21326042", "finished_name": "QQ原味麻薯(C)", "raw_sku": "21326035", "raw_name": "奥昆麻薯胚30", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 20.0, "yield_unit": "份"},
+    {"finished_sku": "21337994", "finished_name": "手作坚果酸法包(C)", "raw_sku": "21339615", "raw_name": "坚果酸法包(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 5.0, "yield_unit": "个"},
+    {"finished_sku": "21339431", "finished_name": "手工原味小麻花(C)", "raw_sku": "21339400", "raw_name": "谷麦坊葱香味小麻花10kg(C)", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 33.3, "yield_unit": "袋"},
+    {"finished_sku": "21339455", "finished_name": "手工广式鸡仔饼(C)", "raw_sku": "21339448", "raw_name": "谷麦坊鸡仔饼10kg(C)", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 40.0, "yield_unit": "袋"},
+    {"finished_sku": "21339479", "finished_name": "手工黑芝麻酥(C)", "raw_sku": "21339417", "raw_name": "谷麦坊黑芝麻酥4kg(C)", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 26.6, "yield_unit": "袋"},
+    {"finished_sku": "21339486", "finished_name": "手工龙耳酥(C)", "raw_sku": "21339424", "raw_name": "谷麦坊龙耳酥10kg(C)", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 33.3, "yield_unit": "袋"},
+    {"finished_sku": "21339608", "finished_name": "手作橄榄菜腊肠恰巴塔(C)", "raw_sku": "21337987", "raw_name": "橄榄菜腊肠恰巴塔(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 5.0, "yield_unit": "个"},
+    {"finished_sku": "21346583", "finished_name": "现烤老婆饼(C)", "raw_sku": "21296765", "raw_name": "起酥老婆饼(C)", "raw_qty": 1.0, "raw_unit": "箱", "yield_qty": 224.0, "yield_unit": "个"},
+    {"finished_sku": "21346590", "finished_name": "丹麦菠萝包(C)", "raw_sku": "21281952", "raw_name": "丹麦菠萝包48个(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 48.0, "yield_unit": "个"},
+    {"finished_sku": "21346743", "finished_name": "椰蓉古法奶油包(C)", "raw_sku": "21282171", "raw_name": "古早咸奶油包9个(C)", "raw_qty": 1.0, "raw_unit": "袋", "yield_qty": 9.0, "yield_unit": "个"}
+  ]
+}

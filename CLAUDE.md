@@ -362,7 +362,8 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 ```sql
 DELETE FROM default_catalog.ads_business_analysis.strategy_fm_dim_goods;
 INSERT INTO default_catalog.ads_business_analysis.strategy_fm_dim_goods
-SELECT * FROM hive.dim.dim_goods_information_have_pt;
+SELECT * FROM hive.dim.dim_goods_information_have_pt
+WHERE inc_day = '${date}';
 ```
 
 DuckDB 端 `dim_goods` 每次从最新 `inc_day` 全量替换，**表中没有 inc_day 列**。所有历史日期的数据在 FM 底表层（sku_dim.py）统一 JOIN 最新 dim_goods，下游只需 `ON article_id`。

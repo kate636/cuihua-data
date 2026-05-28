@@ -61,3 +61,9 @@ class BaseExtractor(ABC):
             f"extract done: {self.TARGET_TABLE} total rows = "
             f"{self._duck.row_count(self.TARGET_TABLE)}"
         )
+
+    def _ensure_table_exists(self, create_ddl: str) -> None:
+        """如果提取结果为空（全部分段 0 行），创建空骨架表避免下游 JOIN 失败。"""
+        if not self._duck.table_exists(self.TARGET_TABLE):
+            self._duck.execute(create_ddl)
+            self._log.info(f"{self.TARGET_TABLE}: created empty skeleton")

@@ -19,6 +19,14 @@ class InventoryExtractor(BaseExtractor):
         """v10: 先 DROP 旧表（schema 变了），再走标准分区写入。"""
         self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
         super().extract(start=start, end=end, yesterday=yesterday, chunk=chunk)
+        # 防止 API 返回 0 行时下游 merge 崩溃
+        self._ensure_table_exists(f"""
+            CREATE TABLE {self.TARGET_TABLE} (
+                store_id VARCHAR, business_date VARCHAR, article_id VARCHAR,
+                avg_inbound_price DOUBLE, init_stock_qty DOUBLE, init_stock_amt DOUBLE,
+                purchase_receive_qty DOUBLE, purchase_receive_amt DOUBLE, day_clear VARCHAR
+            )
+        """)
 
     def _fetch_sql(self, start: str, end: str, yesterday: str) -> str:
         mat_excl = "('70','71','72','73','74','75','76','77')"
@@ -55,7 +63,7 @@ class InventoryExtractor(BaseExtractor):
         LEFT JOIN (
             SELECT DISTINCT article_id, category_level1_id
             FROM strategy_fm_dim_goods
-            WHERE inc_day = '{yesterday}'
+            WHERE inc_day = (SELECT MAX(inc_day) FROM strategy_fm_dim_goods)
         ) m2 ON m1.sale_article_id = m2.article_id
         WHERE m2.category_level1_id NOT IN {mat_excl}
         GROUP BY
