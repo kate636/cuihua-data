@@ -139,10 +139,10 @@ class CustBuilder:
             GROUP BY business_date, store_id, day_clear {group_extra}
             """)
         union_sql = "\nUNION ALL\n".join(parts)
-        # 首次创建表结构（UNION ALL 需要子查询包裹才能加 WHERE 1=0）
+        # 首次创建表结构（UNION ALL 需要子查询包裹才能加 LIMIT 0）
         self._duck.execute(f"""
             CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS
-            SELECT * FROM ({union_sql}) _sub WHERE 1=0
+            SELECT * FROM ({union_sql}) _sub LIMIT 0
         """)
         # 删除旧数据，重新插入（幂等分区覆盖）
         self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")

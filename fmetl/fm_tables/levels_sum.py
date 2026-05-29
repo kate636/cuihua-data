@@ -80,7 +80,7 @@ class LevelsSumBuilder:
         self._duck.execute(f"""
         CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS
         {self._build_full_sql(start, end)}
-        WHERE 1=0
+        LIMIT 0
         """)
         # 删除日期范围内的旧数据，重新插入（幂等分区覆盖）
         self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")

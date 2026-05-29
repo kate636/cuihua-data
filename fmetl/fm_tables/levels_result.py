@@ -113,7 +113,7 @@ class LevelsResultBuilder:
             SUM(is_stock_sku)                   AS 上架sku数,
             AVG(avg_7d_sale_qty)                AS "近7天日均销量"
         FROM t_fm_levels_sum
-        WHERE 1=0
+        LIMIT 0
         """)
         # 删除日期范围内的旧数据，重新插入（幂等分区覆盖）
         self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE 日期 BETWEEN '{start}' AND '{end}'")
