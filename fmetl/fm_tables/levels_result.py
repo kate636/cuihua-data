@@ -116,7 +116,7 @@ class LevelsResultBuilder:
                                                 AS sku动销率,
             AVG(avg_7d_sale_qty)                AS "近7天日均销量",
             -- 销售/进货明细
-            AVG(purchase_weight)                AS 进货重量,
+            AVG(purchase_weight_kg)             AS 进货重量,
             AVG(init_stock_qty)                 AS 期初库存量,
             AVG(inbound_qty)                    AS 进货数量,
             AVG(end_stock_qty)                  AS 期末库存量,
@@ -137,7 +137,7 @@ class LevelsResultBuilder:
             {safe_div('SUM(return_amt)', 'SUM(out_stock_pay_amt) + SUM(return_amt)')}
                                                 AS 退货率,
             -- 价格
-            {safe_div('SUM(inbound_amount)', 'SUM(purchase_weight)')}
+            {safe_div('SUM(inbound_amount)', 'SUM(purchase_weight_kg)')}
                                                 AS 门店进货价,
             {safe_div('SUM(lp_sale_amt)', 'SUM(sales_weight)')}
                                                 AS 平均销售原价,

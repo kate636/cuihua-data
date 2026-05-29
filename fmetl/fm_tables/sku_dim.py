@@ -218,6 +218,9 @@ class SkuDimBuilder:
                                        df['total_sale_qty'] * unit_w)
         df['bf19_sales_weight'] = np.where(is_kg, df['bf19_sale_qty'],
                                             df['bf19_sale_qty'] * unit_w)
+        # 进货物理重量 (和 sales_weight 一致的单位转换)
+        df['purchase_weight_kg'] = np.where(is_kg, df['receive_qty'],
+                                               df['receive_qty'] * unit_w)
 
         # is_stock_sku
         has_saleable = df['is_saleable'].notna()
@@ -225,16 +228,21 @@ class SkuDimBuilder:
             (df['sale_amt'] == 0) & ((df['end_stock_amt'] != 0) | (df['lost_amt'] != 0)))
         df['is_stock_sku'] = np.where(has_saleable & has_activity, 1, 0)
 
-        # is_soldout
-        last_time = df['last_sysdate'].astype(str).str[11:19]
+        # is_soldout (QDM 一致逻辑: last_sysdate + end_stock + J/ZC 过滤)
+        not_saleable = ~has_saleable | (
+            df['article_name'].fillna('').str.contains('J|ZC', na=False))
+        last_str = df['last_sysdate'].fillna('').astype(str)
+        last_time = last_str.str[11:19]
+        has_last_sysdate = (last_str != '') & (last_str != 'nan') & (last_str != 'None')
+        end_is_zero = df['end_stock_qty'].abs() < 0.001
         df['is_soldout_16'] = np.where(
-            ~has_saleable, None,
-            np.where((df['end_stock_qty'] == 0) & (last_time < '16:00:00'), 1,
-                     np.where(df['last_sysdate'].notna() | (df['end_stock_qty'] > 0), 0, None)))
+            not_saleable, None,
+            np.where(end_is_zero & (last_time < '16:00:00') & has_last_sysdate, 1,
+                     np.where(has_last_sysdate | ~end_is_zero, 0, None)))
         df['is_soldout_20'] = np.where(
-            ~has_saleable, None,
-            np.where((df['end_stock_qty'] == 0) & (last_time < '20:00:00'), 1,
-                     np.where(df['last_sysdate'].notna() | (df['end_stock_qty'] > 0), 0, None)))
+            not_saleable, None,
+            np.where(end_is_zero & (last_time < '20:00:00') & has_last_sysdate, 1,
+                     np.where(has_last_sysdate | ~end_is_zero, 0, None)))
 
         # lost_denominator
         df['lost_denominator'] = df['receive_amt'] + df['init_stock_amt']
@@ -270,6 +278,7 @@ class SkuDimBuilder:
             'inbound_qty': df['receive_qty'],
             'inbound_amount': df['receive_amt'],
             'purchase_weight': df['purchase_weight'],
+            'purchase_weight_kg': df['purchase_weight_kg'],
             'init_stock_qty': df['init_stock_qty'],
             'end_stock_qty': df['end_stock_qty'],
             'init_stock_amt': df['init_stock_amt'],

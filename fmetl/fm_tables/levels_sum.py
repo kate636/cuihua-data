@@ -66,6 +66,7 @@ _METRIC_COLS = [
     "init_stock_amt", "end_stock_amt", "init_stock_qty", "inbound_qty",
     "is_stock_sku", "store_lost_qty", "sale_piece_qty",
     "store_know_lost_amt", "store_unknow_lost_amt",
+    "purchase_weight_kg",
 ]
 
 
