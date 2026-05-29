@@ -42,6 +42,8 @@ def _remap_category(row):
         return '', '休闲食品类'
     if c2 == '日杂用品类':
         return '', '日杂用品类'
+    if c2 == '冰品类':
+        return '', '冷冻类'
     if c2 in ('牛肉类', '羊肉类'):
         return '', '牛羊类'
     if c2 in ('鸡类', '鸭类', '其他禽类'):
