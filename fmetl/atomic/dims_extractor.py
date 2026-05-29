@@ -40,11 +40,14 @@ class DimsExtractor:
 
     def _extract_goods(self, yesterday: str) -> None:
         # strategy_fm_dim_goods是日快照表，有incDay字段
-        # 尝试 yesterday 往前回溯，直到找到有数据的日期
+        # 以end日期为基准，前后各扫描几天，取最近的有数据快照
         from datetime import date as dt_date, timedelta
         df = None
-        try_date = dt_date.fromisoformat(yesterday)
-        for _ in range(7):  # 最多回溯7天
+        # 优先查 end 到 end-7 天，再查 end+3 到 end（覆盖今天同步但ETL跑历史日期的情况）
+        base_date = dt_date.fromisoformat(yesterday)
+        scan_dates = [base_date - timedelta(days=i) for i in range(8)]  # yesterday back 7 days
+        scan_dates += [base_date + timedelta(days=i) for i in range(1, 4)]  # forward up to 3 days
+        for try_date in scan_dates:
             ds = try_date.isoformat()
             sql = f"""
             SELECT
@@ -63,7 +66,6 @@ class DimsExtractor:
             if not df.empty:
                 self._log.info(f"dim_goods found at inc_day={ds}")
                 break
-            try_date = try_date - timedelta(days=1)
         if df is not None and not df.empty:
             self._duck.load_df(df, "dim_goods", mode="replace")
             self._log.info(f"dim_goods: {len(df)} rows")
@@ -77,13 +79,24 @@ class DimsExtractor:
         将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。"""
         try:
             self._duck.execute("DROP TABLE IF EXISTS dim_day_clear_override")
-            self._duck.execute("""
+            # 烘焙日清白名单（业务临时补充，后续产品侧维护）
+            bakery_skus = [
+                '21333774','21333798','21334108','21334115','21334146','21334153','21334160',
+                '21334177','21334184','21334191','21334207','21334221','21336645','21346026',
+                '21346033','21346040','21346057','21346064','21346583','21346590','21346705',
+                '21346729','21346736','21346743',
+            ]
+            bakery_list = "', '".join(bakery_skus)
+            self._duck.execute(f"""
                 CREATE TABLE dim_day_clear_override AS
                 SELECT DISTINCT article_id, '猪肉类' AS override_type
                 FROM dim_goods WHERE category_level1_description = '猪肉类'
                 UNION ALL
                 SELECT DISTINCT article_id, '熟食类' AS override_type
                 FROM dim_goods WHERE category_level3_description LIKE '%熟食'
+                UNION ALL
+                SELECT DISTINCT article_id, '烘焙类' AS override_type
+                FROM dim_goods WHERE article_id IN ('{bakery_list}')
             """)
             cnt = self._duck.row_count("dim_day_clear_override")
             self._log.info(f"dim_day_clear_override built: {cnt} SKUs")

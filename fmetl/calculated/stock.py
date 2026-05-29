@@ -234,7 +234,8 @@ class StockCalculator:
             df = df.merge(actual_df, on=merge_keys, how='left')
             df['actual_stock_qty'] = df['actual_stock_qty'].fillna(0)
             df['created_by'] = df['created_by'].fillna('系统')
-            df['is_counted'] = df['created_by'] != '系统'
+            # 人工盘点（非系统创建）或 系统快照中有实盘数 → 信任实盘值
+            df['is_counted'] = (df['created_by'] != '系统') | ((df['actual_stock_qty'] > 0) & (df['created_by'] == '系统'))
         else:
             df['actual_stock_qty'] = 0
             df['created_by'] = '系统'
@@ -342,6 +343,11 @@ class StockCalculator:
             elif kl_qty > 0:
                 end_qty[idx] = eq
                 unknow_qty[idx] = 0
+            elif act_qty > 0 and act_qty > eq + 0.001:
+                # 系统记录的实盘数超过方程计算值 → 盘盈
+                end_qty[idx] = act_qty
+                unknow_qty[idx] = eq - act_qty  # 负值 = 盘盈
+                used_actual += 1
             else:
                 end_qty[idx] = eq
                 unknow_qty[idx] = 0
