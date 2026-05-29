@@ -19,8 +19,8 @@ QDM BI API  ────ApiConnector.query()────▶  pandas.DataFrame
 封装 `bdapp.qdama.cn` HTTP API，**只读**（没有写入方法），对外接口和旧 `StarRocksConnector.query()` 完全一致。
 
 ```python
-from fm_etl_v3.connectors import ApiConnector
-from fm_etl_v3.config import get_settings
+from fmetl.connectors import ApiConnector
+from fmetl.config import get_settings
 
 api = ApiConnector(get_settings())
 df  = api.query("SELECT store_id, SUM(sale_amt) FROM ... GROUP BY 1")
@@ -65,7 +65,7 @@ df  = api.query("SELECT store_id, SUM(sale_amt) FROM ... GROUP BY 1")
 进程内单 `connection`，pipeline 所有步骤共用同一实例（DuckDB 同一文件不支持多连接并发写）。
 
 ```python
-from fm_etl_v3.connectors import DuckDBStore
+from fmetl.connectors import DuckDBStore
 
 duck = DuckDBStore()                  # 连接路径由 cfg.duckdb_conn_str 决定
 # ... pipeline 运行 ...
@@ -103,8 +103,8 @@ duck.close()                          # executor finally 块中调用
 
 - DuckDB 同一文件**只允许一个读写连接**
 - 可以有任意多个 `read_only=True` 的并发读连接
-- 所以 **ETL 写入时**（02:00~02:15 附近），`query_api` 的只读查询可能偶发 `IO Error`
-- **约定**：用户端查询统一在 03:00 之后
+- 所以 **ETL 写入时**（08:50~09:05 附近），只读查询可能偶发 `IO Error`
+- **约定**：用户端查询统一在 09:30 之后
 
 ---
 

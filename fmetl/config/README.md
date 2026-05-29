@@ -39,7 +39,7 @@
 ## 使用方式
 
 ```python
-from fm_etl_v3.config import get_settings
+from fmetl.config import get_settings
 
 cfg = get_settings()              # 单例
 cfg.api.access_key                # QDM access key

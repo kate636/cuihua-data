@@ -72,7 +72,7 @@
 
 ### 1.4 整体方案一句话总结
 
-> **QDM BI API 是唯一数据来源 → 在本地 DuckDB 里做 13 个 Step 的 Python 计算 → 结果留在同一个 `fm.duckdb` 文件里 → 通过 FastAPI 只读服务提供查询。**
+> **QDM BI API 是唯一数据来源 → 在本地 DuckDB 里做 13 个 Step 的 Python 计算 → 结果留在同一个 `fm.duckdb` 文件里 → 通过 nginx :8080 静态报告 + DuckDB 直连提供查询。**
 
 ### 1.5 范围边界（本期不做）
 
@@ -95,7 +95,7 @@
 │   ▼                            │
 └─── GitHub 私有仓库 cuihua-data ┘
             │
-            │  每日 02:00 git pull --ff-only
+            │  每日 08:50 git pull --ff-only
             ▼
 ┌─── 阿里云 ECS 47.115.213.115 (广州) ─────────────────────┐
 │                                                         │
@@ -103,7 +103,7 @@
 │  /opt/fm/data/fm.duckdb      唯一数据文件（不上 GitHub）│
 │  /opt/fm/logs/               ETL + API 日志             │
 │                                                         │
-│   cron 02:00                                            │
+│   cron 08:50                                            │
 │     ↓                                                   │
 │   daily_run.sh                                          │
 │     ↓                                                   │
@@ -113,18 +113,16 @@
 │     ▼                                                   │
 │   /opt/fm/data/fm.duckdb  ←─── 读 (read_only=True) ──┐  │
 │                                                      │  │
-│   fm-query-api.service (systemd)                     │  │
-│     └── uvicorn 127.0.0.1:5003  (FastAPI)            │  │
-│                    ▲                                 │  │
-│                    │ 反代 location /api/             │  │
-│   nginx :8080 (现有，仅追加 location)                │  │
+│   /opt/fm/data/fm.duckdb  ←─── 读 (read_only=True)      │
+│                                                         │
+│   nginx :8080                                           │
+│     ├─ /reports/       静态报告页面                     │
+│     └─ /api/proc-rel/  → 127.0.0.1:5003 (加工关系API)   │
 │                    ▲                                 │  │
 └────────────────────┼─────────────────────────────────┘  │
                      │                                    │
             ┌────────────┼────────────┐                   │
             │            │            │                   │
-      浏览器/Postman  DBeaver+SSH   Cursor Remote-SSH ────┘
-      (Bearer Token)  (只读隧道)    (开发/改代码)
 ```
 
 ### 两条硬性红线
@@ -132,7 +130,7 @@
 | 红线 | 强制手段 |
 |---|---|
 | **数据库绝不上 GitHub** | `.gitignore` 排除 `data/` / `*.duckdb` / `*.duckdb.wal`；云端 `.env` 也不入库 |
-| **现有看板一律不动** | `/opt/fm/reports/`、`/opt/fm/duitou/`、Flask:5002、Mac 本地 09:20 cron 保持现状；nginx 只追加 `location /api/` |
+| **现有看板一律不动** | `/opt/fm/reports/` 保持现状；nginx :8080 已配置 `/reports/` 和 `/api/proc-rel/` |
 
 ---
 

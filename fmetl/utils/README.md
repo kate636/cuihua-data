@@ -5,7 +5,7 @@
 ## 公共入口
 
 ```python
-from fm_etl_v3.utils import get_logger, split_date_range, retry_on_exception
+from fmetl.utils import get_logger, split_date_range, retry_on_exception
 ```
 
 `__init__.py` 只暴露这三个名字。

@@ -210,33 +210,37 @@ ELSE (首日, 无历史):
     is_first_day   = 1 (全部标记为首日)
 ```
 
-#### 加工净额
+#### 加工净额 (v10 compose correction)
+
+加工成品成本由**加工关系**配方推算，不再使用 QDM 源表金额：
 
 ```
+base_euc = (init + self_receive + bom_alloc) / (init_qty + self_receive_qty + bom_alloc_qty)
+
+成品: compose_in_amt = compose_in_qty × Σ(raw_qty / yield_qty × raw_base_euc)
+原料: compose_out_amt = compose_out_qty × base_euc (价值守恒)
+
 compose_net_qty = compose_in_qty - compose_out_qty
-compose_net_amt = compose_net_qty × avg_inbound_price   ← A6修复: 统一用 avg_inbound_price
+compose_net_amt = compose_in_amt - compose_out_amt
 ```
 
-#### 加权成本
+#### 加权成本 (含兜底链)
 
 ```
-total_cost_amt = init_stock_amt      (期初库存额)
-               + self_receive_amt    (自购进货额)
-               + compose_net_amt     (加工净增额)
-               + bom_alloc_amt       (BOM分摊额)
-
-cost_qty       = init_stock_qty      (期初库存量)
-               + self_receive_qty    (自购进货量)
-               + compose_net_qty     (加工净增量)
-               + bom_alloc_qty       (BOM分摊量)
-
-effective_unit_cost = total_cost_amt / cost_qty    (仅当 cost_qty > 0; 否则为 0)
+total_cost_amt = init_stock_amt + self_receive_amt + compose_net_amt + bom_alloc_amt
+cost_qty       = init_stock_qty + self_receive_qty + compose_net_qty + bom_alloc_qty
+effective_unit_cost = total_cost_amt / cost_qty    (仅当 cost_qty > 0)
 cost_source         = 'V10_WEIGHTED_AVG'
 ```
 
-> **注意**: cost_price (来自 atomic_cost_price) 不参与 euc 计算 (v10 A6修复)。euc 纯粹由加权平均得出，不依赖历史成本价。
+**euc 兜底链** (cost_qty=0 时):
+1. ffill 沿 (store_id, article_id) 从前一营业日继承 → `V10_INHERITED_EUC`
+2. avg_inbound_price → `V10_AVG_INBOUND_FALLBACK`
+3. 加工关系推算 → `V10_PROCESSING_RELATION`
 
-### 输出字段 (17列)
+> cost_price 不参与 euc 计算。
+
+### 输出字段 (19列)
 
 | 字段 | 公式/来源 | 说明 |
 |------|----------|------|
@@ -247,7 +251,9 @@ cost_source         = 'V10_WEIGHTED_AVG'
 | `self_inbound_qty` | `self_receive_qty` | 自购进货量 |
 | `self_inbound_amt` | `self_receive_amt` | 自购进货额 |
 | `compose_net_qty` | `compose_in_qty - compose_out_qty` | 加工净增量 |
-| `compose_net_amt` | `compose_net_qty × avg_inbound_price` | 加工净增额 |
+| `compose_net_amt` | `compose_in_amt - compose_out_amt` | 加工净增额 (配方推算) |
+| `compose_in_amt` | 成品=配方推算, 否则源表值 | 加工流入金额 |
+| `compose_out_amt` | `qty × base_euc` | 加工流出金额 (价值守恒) |
 | `bom_alloc_amt` | SUM from t_calc_bom_alloc | BOM分摊金额 |
 | `bom_alloc_qty` | SUM from t_calc_bom_alloc | BOM分摊数量 |
 | `init_stock_qty` | 昨日end / 首日源表 | 期初库存量 |
@@ -291,16 +297,18 @@ eq_end_qty = init_stock_qty
            - know_lost_qty      (已知损耗流出)
 ```
 
-### 分支逻辑
+### 分支逻辑 (v10 6分支)
 
 | 优先级 | 条件 | end_stock_qty | unknow_lost_qty | 语义 |
 |--------|------|---------------|-----------------|------|
-| 1 | `day_clear = '0'` | 0 | eq | 日清商品当日必须清空 |
-| 2 | `eq < 0` | 0 | -eq | 负库存保护 (含盘点场景) ← A2修复 |
-| 3 | `know_lost_qty > 0` | eq | 0 | 盘点日信任复盘结果 ← A7修复 |
-| 4 | 其他 | eq | 0 | 非日清无盘点正常计算 |
+| 1 | `is_counted` (人工盘点 或 系统实盘>0) | `actual_stock_qty` | `eq - actual` (允许负=盘盈) | 信任实盘值 |
+| 2 | `day_clear = '0'` | `max(0, init - consumed)` | `新供给 - sale - kl` (允许负) | 软日清：只清新供给，init可部分消耗 |
+| 3 | `eq < 0` | 0 | `-eq` | 负库存保护 |
+| 4 | `know_lost_qty > 0` | `eq` | 0 | 已知损耗日信任方程 |
+| 5 | `actual_stock_qty > eq` | `actual_stock_qty` | `eq - actual` (负=盘盈) | 系统快照盘盈检测 |
+| 6 | 其他 | `eq` | 0 | 正常 |
 
-> **A2/A7修复关键**: eq<0 的优先级在 know_lost_qty>0 之前。即使盘点日，如果方程残差为负，也转为未知损耗。这避免了盘点场景下的负库存。
+> **v10 修复**: is_counted 从仅人工盘点(`created_by != '系统'`)扩展到包含系统快照(`actual>0`)。分支5新增盘盈检测：系统记录的实盘超过方程计算值时自动识别盘盈。
 
 ### 金额派生
 
@@ -399,24 +407,18 @@ profit_amt = sale_amt
            - lost_amt
 ```
 
-### 销售成本
+### 销售成本 (v10 统一公式)
 
 ```
-日清 (day_clear = '0'):
-  sale_cost_amt = receive_amt + bom_in_amt - bom_out_amt
-                + compose_in_amt - compose_out_amt         ← A12修复
-                - lost_amt
-
-非日清:
-  sale_cost_amt = sale_qty × effective_unit_cost
+日清/非日清统一: sale_cost_amt = sale_qty × effective_unit_cost
 ```
+
+日清差异仅在 stock.py 端体现（end强制=0 → 残差转unknow_lost），不影响 sale_cost 公式。
 
 ### 预期毛利额 (原价口径)
 
 ```
-expected_cost = 日清 ? (receive + bom_in - bom_out + compose_in - compose_out - lost) : (sale_qty × euc)
-
-pre_profit_amt = original_price_sale_amt - expected_cost
+pre_profit_amt = original_price_sale_amt - sale_qty × effective_unit_cost
 ```
 
 ### 补贴后毛利
