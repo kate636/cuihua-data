@@ -22,41 +22,43 @@ TARGET_DUCK_TABLE = "t_fm_sku_dim"
 
 
 def _remap_category(row):
-    """类别重映射 — 与 v3 sku_dim SQL CASE WHEN 完全一致"""
+    """类别重映射 — 以 master-data v2.1 为权威来源（中分类映射）"""
     c2 = str(row.get('category_level2_description', ''))
-    c1_desc = str(row.get('category_level1_description', ''))
-    c3 = str(row.get('category_level3_description', ''))
+    c1 = str(row.get('category_level1_description', ''))
     c1_id = str(row.get('category_level1_id', ''))
 
-    # category_level1_id
-    if c2 in ('蛋类', '烘焙类'):
-        new_id = ''
-    elif c2 in ('冷藏奶制品类', '饮料类'):
-        new_id = ''
-    elif c1_desc == '肉禽蛋类' and c2 != '蛋类':
-        new_id = ''
-    elif c3.endswith('熟食'):
-        new_id = ''
-    elif c1_desc in ('冷藏及加工类', '预制菜'):
-        new_id = ''
-    else:
-        new_id = c1_id
+    # 中分类映射（优先级从高到低）
+    if c2 == '蛋类':
+        return '', '蛋类'
+    if c2 == '烘焙类':
+        return '', '烘焙类'
+    if c2 == '冷藏奶制品类':
+        return '', '冷藏乳品类'
+    if c2 in ('酒类', '饮料类'):
+        return '', '水饮类'
+    if c2 in ('方便速食类', '调味品类', '粮油副食类'):
+        return '', '基础食品类'
+    if c2 == '休闲零食类':
+        return '', '休闲食品类'
+    if c2 == '日杂用品类':
+        return '', '日杂用品类'
+    if c2 in ('牛肉类', '羊肉类'):
+        return '', '牛羊类'
+    if c2 in ('鸡类', '鸭类', '其他禽类'):
+        return '', '禽类'
+    if c2 in ('即烹类', '即热类'):
+        return '', '熟食类'
 
-    # category_level1_description
-    if c2 in ('蛋类', '烘焙类'):
-        new_desc = c2
-    elif c2 in ('冷藏奶制品类', '饮料类'):
-        new_desc = '乳制品及水饮类'
-    elif c1_desc == '肉禽蛋类' and c2 != '蛋类':
-        new_desc = '肉禽类'
-    elif c3.endswith('熟食'):
-        new_desc = '熟食类'
-    elif c1_desc in ('冷藏及加工类', '预制菜'):
-        new_desc = '冷藏加工及预制菜类'
-    else:
-        new_desc = c1_desc
+    # 1:1 直通（大分类名 = 报告品类名）
+    if c1 in ('猪肉类', '蔬菜类', '熟食类', '水果类', '烘焙类', '水产类', '蛋类'):
+        return c1_id, c1
 
-    return new_id, new_desc
+    # 冷藏加工及预制菜类（剩余未映射的中分类）
+    if c1 in ('冷藏及加工类', '预制菜', '冷藏加工及预制菜类'):
+        return '', '冷藏加工及预制菜类'
+
+    # 兜底
+    return c1_id, c1
 
 
 class SkuDimBuilder:
@@ -184,27 +186,49 @@ class SkuDimBuilder:
             if c in df.columns:
                 df[c] = df[c].fillna('')
 
-        # 7. Python: 类别重映射 (pandas 向量化, 避免 iterrows)
+        # 7. Python: 类别重映射 — master-data v2.1 中分类映射
         c2 = df['category_level2_description'].fillna('')
-        c1_desc = df['category_level1_description'].fillna('')
-        c3 = df['category_level3_description'].fillna('')
+        c1 = df['category_level1_description'].fillna('')
         c1_id = df['category_level1_id'].fillna('')
 
-        is_egg_bake = c2.isin(['蛋类', '烘焙类'])
-        is_dairy_drink = c2.isin(['冷藏奶制品类', '饮料类'])
-        is_meat = (c1_desc == '肉禽蛋类') & (c2 != '蛋类')
-        is_cooked = c3.str.endswith('熟食').fillna(False)
-        is_cold_prep = c1_desc.isin(['冷藏及加工类', '预制菜'])
-        is_remapped = is_egg_bake | is_dairy_drink | is_meat | is_cooked | is_cold_prep
+        # 中分类映射规则（master-data v2.1）
+        cond_egg         = (c2 == '蛋类')
+        cond_bake        = (c2 == '烘焙类')
+        cond_dairy       = (c2 == '冷藏奶制品类')
+        cond_drink       = (c2.isin(['酒类', '饮料类']))
+        cond_staple      = (c2.isin(['方便速食类', '调味品类', '粮油副食类']))
+        cond_snack       = (c2 == '休闲零食类')
+        cond_daily       = (c2 == '日杂用品类')
+        cond_beef_mutton = (c2.isin(['牛肉类', '羊肉类']))
+        cond_poultry     = (c2.isin(['鸡类', '鸭类', '其他禽类']))
+        cond_cooked_l2   = (c2.isin(['即烹类', '即热类']))
+        # 1:1 直通
+        cond_1to1 = c1.isin(['猪肉类', '蔬菜类', '熟食类', '水果类', '烘焙类', '水产类', '蛋类'])
+        # 冷藏加工及预制菜类
+        cond_cold = c1.isin(['冷藏及加工类', '预制菜', '冷藏加工及预制菜类'])
 
-        df['category_level1_id_remap'] = c1_id.where(~is_remapped, '')
-        df['category_level1_description_remap'] = (
-            c2.where(is_egg_bake,
-            np.where(is_dairy_drink, '乳制品及水饮类',
-            np.where(is_meat, '肉禽类',
-            np.where(is_cooked, '熟食类',
-            np.where(is_cold_prep, '冷藏加工及预制菜类',
-                     c1_desc))))))
+        # ID: 只有1:1直通保留原ID，其余为空
+        df['category_level1_id_remap'] = c1_id.where(cond_1to1 & ~(
+            cond_egg|cond_bake|cond_dairy|cond_drink|cond_staple|cond_snack|
+            cond_daily|cond_beef_mutton|cond_poultry|cond_cooked_l2|cond_cold
+        ), '')
+
+        # Description: 按优先级从高到低 (最先匹配的生效)
+        desc = c1.copy()
+        desc = np.where(cond_cooked_l2,  '熟食类', desc)
+        desc = np.where(cond_poultry,     '禽类', desc)
+        desc = np.where(cond_beef_mutton, '牛羊类', desc)
+        desc = np.where(cond_daily,       '日杂用品类', desc)
+        desc = np.where(cond_snack,       '休闲食品类', desc)
+        desc = np.where(cond_staple,      '基础食品类', desc)
+        desc = np.where(cond_drink,       '水饮类', desc)
+        desc = np.where(cond_dairy,       '冷藏乳品类', desc)
+        desc = np.where(cond_bake,        '烘焙类', desc)
+        desc = np.where(cond_egg,         '蛋类', desc)
+        desc = np.where(cond_cold & ~(cond_cooked_l2|cond_egg|cond_bake|cond_dairy|
+                         cond_drink|cond_staple|cond_snack|cond_daily|
+                         cond_beef_mutton|cond_poultry), '冷藏加工及预制菜类', desc)
+        df['category_level1_description_remap'] = desc
 
         # 8. Python: 衍生字段
         df['discount_amt_cate'] = df['discount_amt'] - df['hour_discount_amt']
