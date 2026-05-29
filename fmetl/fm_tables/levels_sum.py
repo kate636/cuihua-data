@@ -76,21 +76,15 @@ class LevelsSumBuilder:
 
     def build(self, start: str, end: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
-        # 首次创建表结构（空表）
-        self._duck.execute(f"""
-        CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS
-        {self._build_full_sql(start, end)}
-        LIMIT 0
-        """)
-        # 删除日期范围内的旧数据，重新插入（幂等分区覆盖）
-        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
-        self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE} {self._build_full_sql(start, end)}")
+        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
+        self._duck.execute(self._build_full_sql(start, end))
         rows = self._duck.row_count(TARGET_DUCK_TABLE)
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows built")
 
     def _build_full_sql(self, start: str, end: str) -> str:
         base_sql = self._build_sql(start, end)
         return f"""
+        CREATE TABLE {TARGET_DUCK_TABLE} AS
         WITH cust_wide AS (
             SELECT business_date, store_id, day_clear, level_description, level_id,
                    cust_num_cate, bf19_cust_num_cate, sale_article_num_cate
