@@ -332,11 +332,11 @@ class SkuDimBuilder:
         conn.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
         conn.execute(f"INSERT INTO {TARGET_DUCK_TABLE} SELECT * FROM out_df")
 
-        # 7-day rolling average (window function — keep in SQL since it's simpler)
+        # 7-day rolling average (全量重算，window function 跨所有历史日期)
         conn.execute(f"""
             CREATE OR REPLACE TABLE {TARGET_DUCK_TABLE} AS
             SELECT
-                *,
+                * EXCLUDE (avg_7d_sale_qty),
                 COALESCE(
                     AVG(total_sale_qty) OVER (
                         PARTITION BY store_id, article_id, day_clear
