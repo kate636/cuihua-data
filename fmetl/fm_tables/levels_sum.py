@@ -76,15 +76,28 @@ class LevelsSumBuilder:
 
     def build(self, start: str, end: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
-        self._duck.execute(self._build_full_sql(start, end))
+        select_sql = self._build_select_sql(start, end)
+        # 首次建表（空表结构，不触发数据查询）
+        self._duck.execute(f"CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS {select_sql} LIMIT 0")
+        # 分区覆盖：删旧插新，保留其他日期的历史数据
+        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
+        self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE} {select_sql}")
         rows = self._duck.row_count(TARGET_DUCK_TABLE)
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows built")
 
     def _build_full_sql(self, start: str, end: str) -> str:
-        base_sql = self._build_sql(start, end)
         return f"""
         CREATE TABLE {TARGET_DUCK_TABLE} AS
+        {self._build_query_sql(start, end)}
+        """
+
+    def _build_select_sql(self, start: str, end: str) -> str:
+        """返回纯 SELECT（不含 CREATE TABLE），供 INSERT INTO 和 LIMIT 0 使用"""
+        return self._build_query_sql(start, end)
+
+    def _build_query_sql(self, start: str, end: str) -> str:
+        base_sql = self._build_sql(start, end)
+        return f"""
         WITH cust_wide AS (
             SELECT business_date, store_id, day_clear, level_description, level_id,
                    cust_num_cate, bf19_cust_num_cate, sale_article_num_cate

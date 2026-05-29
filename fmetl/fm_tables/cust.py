@@ -37,7 +37,7 @@ class CustBuilder:
     def build(self, start: str, end: str, yesterday: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
         self._extract_orders(start, end, yesterday)
-        self._compute_cust()
+        self._compute_cust(start, end)
         rows = self._duck.row_count(TARGET_DUCK_TABLE)
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows built")
 
@@ -115,9 +115,8 @@ class CustBuilder:
 
         self._duck.load_df(df, "order_detail", mode="replace")
 
-    def _compute_cust(self) -> None:
-        """在 DuckDB 聚合客数"""
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
+    def _compute_cust(self, start: str, end: str) -> None:
+        """在 DuckDB 聚合客数（分区覆盖，保留历史数据）"""
         parts = []
         for level_desc, level_id_col, extra_cols in _LEVELS:
             level_id_expr = f"COALESCE({level_id_col}::VARCHAR, '')" if level_id_col else "''"
@@ -140,4 +139,11 @@ class CustBuilder:
             GROUP BY business_date, store_id, day_clear {group_extra}
             """)
         union_sql = "\nUNION ALL\n".join(parts)
-        self._duck.execute(f"CREATE TABLE {TARGET_DUCK_TABLE} AS\n{union_sql}")
+        # 首次建表（空结构，UNION ALL 需包在子查询中）
+        self._duck.execute(f"""
+            CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS
+            SELECT * FROM ({union_sql}) _sub LIMIT 0
+        """)
+        # 分区覆盖
+        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
+        self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE}\n{union_sql}")

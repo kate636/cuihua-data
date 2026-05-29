@@ -242,8 +242,7 @@ class SkuDimBuilder:
         # saleable flag
         df['saleable'] = np.where(has_saleable, 1, 0)
 
-        # 9. 写出结果
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
+        # 9. 写出结果（分区覆盖，保留历史数据）
         out_cols = {
             'store_id': df['store_id'],
             'business_date': df['business_date'],
@@ -324,15 +323,20 @@ class SkuDimBuilder:
             'month_wid': df['month_wid'],
             'year_wid': df['year_wid'],
             'saleable': df['saleable'],
+            'avg_7d_sale_qty': 0.0,
         }
         out_df = pd.DataFrame(out_cols)
-        conn.execute(f"CREATE TABLE {TARGET_DUCK_TABLE} AS SELECT * FROM out_df")
+        # 首次建表（空结构）
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS SELECT * FROM out_df LIMIT 0")
+        # 分区覆盖
+        conn.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
+        conn.execute(f"INSERT INTO {TARGET_DUCK_TABLE} SELECT * FROM out_df")
 
-        # 7-day rolling average (window function — keep in SQL since it's simpler)
+        # 7-day rolling average (全量重算，window function 需要全部历史数据)
         conn.execute(f"""
             CREATE OR REPLACE TABLE {TARGET_DUCK_TABLE} AS
             SELECT
-                *,
+                * EXCLUDE (avg_7d_sale_qty),
                 COALESCE(
                     AVG(total_sale_qty) OVER (
                         PARTITION BY store_id, article_id, day_clear

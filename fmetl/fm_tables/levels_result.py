@@ -22,13 +22,11 @@ class LevelsResultBuilder:
 
     def build(self, start: str, end: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
 
         def safe_div(num, den):
             return f"CASE WHEN COALESCE({den}, 0) = 0 THEN NULL ELSE ({num}) / ({den}) END"
 
-        self._duck.execute(f"""
-        CREATE TABLE {TARGET_DUCK_TABLE} AS
+        select_sql = f"""
         SELECT
             store_flag                          AS 标签,
             store_no                            AS 门店号,
@@ -122,6 +120,11 @@ class LevelsResultBuilder:
             level_description, day_clear,
             manage_area_name, sap_area_name, city_description,
             week_no, week_start_date, week_end_date, month_wid, year_wid
-        """)
+        """
+        # 首次建表（空表结构，不触发数据查询）
+        self._duck.execute(f"CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS {select_sql} LIMIT 0")
+        # 分区覆盖：删旧插新，保留其他日期的历史数据
+        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE 日期 BETWEEN '{start}' AND '{end}'")
+        self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE} {select_sql}")
         rows = self._duck.row_count(TARGET_DUCK_TABLE)
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows built")
