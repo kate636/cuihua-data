@@ -22,13 +22,12 @@ class LevelsResultBuilder:
 
     def build(self, start: str, end: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
 
         def safe_div(num, den):
             return f"CASE WHEN COALESCE({den}, 0) = 0 THEN NULL ELSE ({num}) / ({den}) END"
 
         self._duck.execute(f"""
-        CREATE TABLE {TARGET_DUCK_TABLE} AS
+        CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS
         SELECT
             store_flag                          AS 标签,
             store_no                            AS 门店号,
@@ -113,6 +112,77 @@ class LevelsResultBuilder:
             AVG(is_soldout_20)                  AS 售罄率20,
             SUM(is_stock_sku)                   AS 上架sku数,
             AVG(avg_7d_sale_qty)                AS "近7天日均销量"
+        FROM t_fm_levels_sum
+        WHERE 1=0
+        """)
+        # 删除日期范围内的旧数据，重新插入（幂等分区覆盖）
+        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE 日期 BETWEEN '{start}' AND '{end}'")
+        self._duck.execute(f"""
+        INSERT INTO {TARGET_DUCK_TABLE}
+        SELECT
+            store_flag,
+            store_no,
+            business_date,
+            CASE WHEN store_flag IS NULL THEN '广州' ELSE store_name END,
+            level_id,
+            CASE
+                WHEN level_description = '门店'  THEN ''
+                WHEN level_description = '大类'  THEN category_level1_description
+                WHEN level_description = '中类'  THEN category_level2_description
+                WHEN level_description = '小类'  THEN category_level3_description
+                WHEN level_description IN ('SPU','黑白猪') THEN spu_name
+                WHEN level_description = 'SKU'  THEN article_name
+            END,
+            category_level1_description,
+            category_level2_description,
+            category_level3_description,
+            level_description,
+            day_clear,
+            CASE
+                WHEN day_clear = '0' THEN '日清'
+                WHEN day_clear = '1' THEN '非日清'
+                WHEN day_clear = '2' THEN '合计'
+            END,
+            COUNT(store_id),
+            COUNT(DISTINCT store_id),
+            AVG(full_link_article_profit),
+            AVG(scm_fin_article_profit),
+            AVG(article_profit_amt),
+            {safe_div('SUM(full_link_article_profit)', 'SUM(total_sale_amt)')},
+            {safe_div('SUM(scm_fin_article_profit)', 'SUM(out_stock_pay_amt_notax) + SUM(return_stock_pay_amt_notax)')},
+            {safe_div('SUM(article_profit_amt)', 'SUM(total_sale_amt)')},
+            AVG(sales_weight),
+            AVG(bf19_sales_weight),
+            AVG(total_sale_qty),
+            AVG(bf19_sale_qty),
+            AVG(inbound_amount),
+            AVG(total_sale_amt),
+            AVG(cust_num_cate),
+            {safe_div('AVG(total_sale_amt)', 'AVG(cust_num_cate)')},
+            AVG(bf19_sale_amt),
+            AVG(bf19_cust_num_cate),
+            {safe_div('AVG(bf19_sale_amt)', 'AVG(bf19_cust_num_cate)')},
+            {safe_div('SUM(bf19_sale_amt)', 'SUM(bf19_sale_piece_qty)')},
+            {safe_div('SUM(bf19_sale_piece_qty)', 'SUM(bf19_cust_num_cate)')},
+            AVG(sale_article_num_cate),
+            {safe_div('SUM(expect_outstock_amt) - SUM(out_stock_amt_cb)', 'SUM(expect_outstock_amt)')},
+            {safe_div('SUM(pre_profit_amt)', 'SUM(lp_sale_amt)')},
+            {safe_div('SUM(pre_sale_amt) - SUM(pre_inbound_amount) - COALESCE(SUM(init_stock_amt),0) + COALESCE(SUM(end_stock_amt),0)',
+                      'SUM(pre_sale_amt)')},
+            {safe_div('SUM(out_stock_amt_cb)', 'SUM(purchase_weight)')},
+            {safe_div('SUM(total_sale_amt)', 'SUM(sales_weight)')},
+            {safe_div('SUM(scm_promotion_amt_total)', 'SUM(scm_promotion_amt_total) + SUM(out_stock_pay_amt_notax)')},
+            {safe_div('SUM(discount_amt)', 'SUM(lp_sale_amt)')},
+            {safe_div('SUM(discount_amt_cate)', 'SUM(lp_sale_amt)')},
+            {safe_div('SUM(hour_discount_amt)', 'SUM(lp_sale_amt)')},
+            AVG(store_lost_amt),
+            {safe_div('SUM(store_lost_amt)', 'SUM(lost_denominator)')},
+            {safe_div('SUM(store_know_lost_amt)', 'SUM(lost_denominator)')},
+            {safe_div('SUM(store_unknow_lost_amt)', 'SUM(lost_denominator)')},
+            AVG(is_soldout_16),
+            AVG(is_soldout_20),
+            SUM(is_stock_sku),
+            AVG(avg_7d_sale_qty)
         FROM t_fm_levels_sum
         WHERE business_date BETWEEN '{start}' AND '{end}'
         GROUP BY
