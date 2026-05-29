@@ -319,10 +319,11 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 | `'1'` | 非日清 (标品) | 正常库存方程 |
 | `'2'` | 合计 (ETL UNION生成) | 查询全天合计必须 `WHERE day_clear='2'` |
 
-**日清覆盖**（merge.py 强制设置 day_clear='0'）:
+**日清覆盖**（merge.py 强制设置 day_clear='0'，通过 `dim_day_clear_override` 辅助表）:
 - 猪肉类 (`category_level1_description = '猪肉类'`)
 - 熟食类 (`category_level3_description LIKE '%熟食'`)
-- 鲜牛肉 (`category_level1_description = '肉禽蛋类' AND article_name LIKE '鲜黄牛%'`)
+- 烘焙类 (24个现烤面包/点心 SKU，详见 Deployment > 日清覆盖规则)
+- 鲜牛肉**已移除**（purchase_di 的 init_stock ≠ 0，日清会导致巨额虚假亏损）
 
 ## Data Source Tables
 
@@ -459,17 +460,235 @@ v10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Ca
 └── .claude/                 # Claude Code 配置
 ```
 
+## Deployment Architecture
+
+### 系统架构
+
+```
+┌─── 本地 Mac (开发) ────────────┐
+│ Cursor 改代码                  │
+│   │                            │
+│   │ git push                   │
+│   ▼                            │
+└─── GitHub 私有仓库 kate636/cuihua-data ┘
+            │
+            │  每日 08:50 git pull --ff-only
+            ▼
+┌─── 阿里云 ECS 47.115.213.115 (广州) ─────────────────────┐
+│                                                         │
+│  /opt/fm/etl/cuihua-data/    代码（git clone）          │
+│  /opt/fm/data/fm.duckdb      唯一数据文件（不上 GitHub）│
+│  /opt/fm/logs/               ETL 日志                   │
+│  /opt/fm/etl/daily_run.sh    ETL 入口脚本               │
+│  /opt/fm/proc-rel/           加工关系管理 API            │
+│  /opt/fm/reports/            前端页面（nginx :8080）     │
+│                                                         │
+│   cron 08:50                                            │
+│     ↓                                                   │
+│   daily_run.sh                                          │
+│     ├─ git pull --ff-only (从 GitHub 拉最新代码)        │
+│     └─ python -m fmetl.executor 昨天 昨天               │
+│                                                         │
+│   前置依赖: 源表同步 (sync_strategy_fm.sh, 公司IDE手动) │
+│   加工关系: /opt/fm/proc-rel/cloud_api.py (systemd)     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 关键路径
+
+| 路径 | 用途 |
+|------|------|
+| `/opt/fm/etl/cuihua-data/` | git clone 代码 |
+| `/opt/fm/data/fm.duckdb` | 唯一数据文件（111MB+） |
+| `/opt/fm/logs/` | ETL 日志 |
+| `/opt/fm/etl/daily_run.sh` | 每日 ETL 入口 |
+| `/opt/fm/proc-rel/` | 加工关系 API + SQLite DB |
+| `/opt/fm/reports/` | 前端 HTML 页面 |
+
+### 部署后注意事项
+
+- **代码更新**: 本地 `git push` → 次日 08:50 服务器自动 `git pull --ff-only`
+- **DuckDB 不要提交**: `data/` 目录在 .gitignore 中，fm.duckdb 仅存在于服务器
+- **加工关系**: 远程服务器 `/opt/fm/proc-rel/processing_relation.db` 是权威数据源，
+  本地 `data/processing_relations.json` 仅作缓存。API 通过 systemd service `proc-rel` 保活
+- **源表同步**: `data/sync_strategy_fm.sh` 在 StarRocks 上执行（公司IDE手动），
+  从 Hive 同步 21 张表到 `strategy_fm_*`，必须在 ETL 之前跑完
+- **dim_goods 日期**: 仅存最新 inc_day 快照（INSERT OVERWRITE），
+  ETL 会从 `end` 日期向前 7 天 + 向后 3 天扫描找到最新数据
+
+### Cron 任务 (服务器)
+
+```
+50 8 * * * /bin/sh /opt/fm/etl/daily_run.sh    # ETL (git pull + 运行)
+```
+
+### Systemd 服务 (服务器)
+
+```
+proc-rel.service    # 加工关系管理 API (端口 5003)
+```
+
+---
+
+## QDM 对比基准
+
+### 对比结果 (2026-05-28 修复后)
+
+5月1-24日全月日均对比，**总差异 +3.7%，进入 ±5% 目标范围**：
+
+| 大分类 | 差异 | 评估 |
+|--------|:---:|:---:|
+| 猪肉类 | +0.7% | ✅ |
+| 蛋类 | +3.8% | ✅ |
+| 标品类 | +1.1% | ✅ |
+| 乳制品及水饮类 | -1.1% | ✅ |
+| 蔬菜类 | -5.5% | ✅ |
+| 水果类 | 0.0% | ✅ |
+| 水产类 | +13.9% | 小基数波动 |
+| 熟食类 | -6.5% | 待补充加工关系 |
+| 烘焙类 | +25.5% | 日清覆盖后大幅改善（修复前+170%） |
+| 冷藏加工类 | +9.6% | 修复前+98% |
+
+### QDM 对比表
+
+`default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`。
+该表 `day_clear` 只有 `'1'`（不含 `'2'`），FM 对比时需合并 `'0'+'1'` 全口径。
+
+### QDM 数据查询
+
+通过 `ApiConnector` 从 StarRocks 查询。QDM 表不包含 category 字段，
+需 JOIN `strategy_fm_dim_goods` 获取分类。
+
+---
+
+## 加工关系 (Processing Relation)
+
+### 业务逻辑
+
+加工关系管理原料→成品的转化率，**与 BOM 逻辑不同**：
+- **BOM**: 1个父品 → 多个子品（拆分，如整猪→排骨+五花肉）
+- **加工关系**: 多个原料 → 1个成品（组合，如蛋挞液+蛋挞皮→葡式蛋挞）
+
+### 成本计算公式
+
+```
+成品 compose_in_amt = compose_in_qty × Σ(raw_qty / yield_qty × raw_base_euc)
+原料 compose_out_amt = compose_out_qty × base_euc (价值守恒)
+```
+
+- `raw_qty`: 原料用量
+- `yield_qty`: 产出成品数量
+- `raw_base_euc`: 原料的 base EUC（不含 compose 的加权平均成本）
+
+### 数据管理
+
+| 位置 | 说明 |
+|------|------|
+| 远程 DB `/opt/fm/proc-rel/processing_relation.db` | **权威数据源** |
+| 本地 `data/processing_relations.json` | 缓存（ETL 优先读本地，失败则调 API） |
+| Web 管理 `http://47.115.213.115:8080/reports/processing-relation.html` | 前端页面 |
+| API `http://47.115.213.115:5003/api/proc-rel/` | Flask REST API |
+
+### 当前覆盖
+
+22 条活跃关系，18 个成品（全部为烘焙类）。熟食类加工关系待补充。
+
+### 加工关系修改后
+
+需在服务器上重启 ETL 或等次日自动跑。本地修改 JSON 不影响服务器 ETL——
+服务器 ETL 优先读服务器上的 JSON 缓存，回退到 API。
+
+---
+
+## 日清覆盖规则 (day_clear override)
+
+### 当前三组覆盖（merge.py + dims_extractor.py）
+
+| override_type | 规则 | 来源 |
+|:---|------|------|
+| 猪肉类 | `category_level1_description = '猪肉类'` | dim_goods 派生 |
+| 熟食类 | `category_level3_description LIKE '%熟食'` | dim_goods 派生 |
+| 烘焙类 | 24 个 SKU 硬编码列表 | 业务临时补充 |
+
+### 烘焙日清 SKU 清单
+
+```
+21333774 愤怒的小章鱼(C)    21333798 核桃马里奥(C)
+21334108 丹麦芝士金枪鱼(C)  21334115 南瓜软欧(C)
+21334146 茶香果物(C)        21334153 凤梨鸡扒三文治(C)
+21334160 伯爵红茶(C)        21334177 今生挚爱(C)
+21334184 岩烧榴莲(C)        21334191 芋泥麻薯软欧(C)
+21334207 招牌榴莲软欧(C)    21334221 原味可颂(C)
+21336645 巴伐利亚碱水结(C)  21346026 半个核桃马里奥(C)
+21346033 半个伯爵红茶(C)    21346040 半个今生挚爱(C)
+21346057 半个招牌榴莲软欧(C) 21346064 半个茶香果物(C)
+21346583 现烤老婆饼(C)      21346590 丹麦菠萝包(C)
+21346705 现烤榴莲酥(C)      21346729 原味麻花(C)
+21346736 北海道吐司(C)      21346743 椰蓉古法奶油包(C)
+```
+
+> 注意: 鲜牛肉**不在**日清覆盖中（purchase_di 的 init_stock ≠ 0，日清会导致虚假亏损）
+> 烘焙日清清单为业务临时补充，后续需产品侧建立持续维护机制
+
+---
+
+## 盘盈（负损耗）处理
+
+### 问题
+
+QDM 的 `lost_amt` 可以为负（盘盈/inventory gain），FM 的库存方程在"正常"分支
+不产生负损耗。QDM 盘盈是运营记录（净库存调整），FM 损耗是方程残差。
+
+### v10 修复
+
+1. **is_counted 扩展**: 不仅 `created_by != '系统'` 触发，系统快照中 `actual_stock_qty > 0`
+   的记录也会触发盘点逻辑（`is_counted = True`）
+2. **盘盈检测**: 正常分支中，如果 `actual_stock_qty > eq + 0.001`，
+   用实盘数覆盖 end_stock，差额记为负 unknow_lost
+3. **日清分支**: `unknow = 新供给 - sale - kl`，已经允许负值
+
+### 局限性
+
+盘盈仅在有人工盘点或有实盘数据的日期触发。大多数日期（无盘点数据），
+正常 SKU 的 unknow 仍为 0。这是结构性差异，短期无法完全对齐。
+
+---
+
+## 采购价定义
+
+FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
+
+```
+采购价 = SUM(out_stock_amt_cb) / SUM(purchase_weight)
+
+其中:
+  out_stock_amt_cb = outstock_cost_price × original_outstock_qty (出库成本金额)
+  purchase_weight  = order_qty_payean × outstock_unit_price       (订货权重)
+```
+
+**全部字段来自 `strategy_fm_scm_di`** (Hive: `hive.dal_full_link.dal_manage_full_link_dc_store_article_scm_di`)
+
+采购价是 **SCM SAP 出库成本单价（含税）**——DC 配送到门店的出库成本，不是门店验收价。
+
+### 采购价 ≠ 进货价
+
+| | 采购价(FM输出) | dc_original_price | self_receive_amt/qty |
+|---|---|---|---|
+| **含义** | SCM出库成本单价(含税) | DC标准出库原价 | 门店实际验收价 |
+| **来源** | SCM表 | 价格表 | 验收表 |
+| **EUC使用** | ❌ | ❌ | ✅ | 
+
 ## Environment Variables (.env)
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `QDM_ACCESS_KEY` | ✅ | QDM BI API access key |
 | `QDM_SECRET_KEY` | ✅ | QDM BI API secret key |
-| `FM_DUCKDB_PATH` | ❌ | DuckDB路径 (默认 `data/fm.duckdb`) |
+| `FM_DUCKDB_PATH` | ❌ | DuckDB路径 (默认 `data/fm.duckdb`，服务器设为 `/opt/fm/data/fm.duckdb`) |
 
 ## Key Documents
 
 - [fmetl/README.md](fmetl/README.md) — v10.0 完整pipeline说明 (13步, 核心公式, 修复对照表)
 - [fmetl/docs/ETL_v10_完整处理逻辑.md](fmetl/docs/ETL_v10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
 - [fmetl/docs/strategy_fm_字段手册_完整版.md](fmetl/docs/strategy_fm_字段手册_完整版.md) — QDM源表完整字段手册
-- [fmetl/fm_etl_v3/DEPLOY.md](fmetl/fm_etl_v3/DEPLOY.md) — 云端部署手册 (旧版参考)
+- [fmetl/docs/差异问题与待办事项_v10.md](fmetl/docs/差异问题与待办事项_v10.md) — QDM对比差异分析 + 行动计划
