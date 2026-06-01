@@ -58,12 +58,17 @@
 
 ```
 fmetl/docs/fixes/
-├── README.md                       (本文件 — 索引)
-├── FIX-001-compose-pure-pr.md      (加工金额纯加工关系计算)
-├── FIX-002-euc-fallback.md         (EUC计算链路与兜底修复方案)
-├── FIX-003-init-stock-consistency.md (跨日init_stock查找不一致)
-├── FIX-004-bom-transfer.md         (BOM父品库存转移负毛利)
-└── FIX-005-amount-balance.md       (库存方程金额平衡分析)
+├── README.md                          (本文件 — 索引)
+├── FIX-001-compose-pure-pr.md         (加工金额纯加工关系计算 ✅)
+├── FIX-002-euc-fallback.md            (EUC计算链路与兜底修复方案 ⏳)
+├── FIX-003-init-stock-consistency.md  (跨日init_stock查找不一致 🟡)
+├── FIX-004-bom-transfer.md            (BOM父品库存转移负毛利 ⏳)
+├── FIX-005-amount-balance.md          (库存方程金额平衡分析 🟡)
+├── FIX-006-egg-category-deviation.md  (蛋类 -34.9% → FIX-004波及 🟡)
+├── FIX-007-may29-loss.md              (5/29巨损 → FIX-004波及 🟡)
+├── FIX-008-inventory-writeoff.md      (标品核销分析 → 根因FIX-009 🟡)
+└── FIX-009-is-counted-snapshot.md     (is_counted系统快照 ✅)
+```
 ```
 
 ---
@@ -174,18 +179,74 @@ fmetl/docs/fixes/
 
 ---
 
+### FIX-006: 蛋类 -34.9% 偏差 🟡
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-006-egg-category-deviation.md](FIX-006-egg-category-deviation.md) |
+| **审查报告** | §3.8 |
+| **状态** | 🟡 由 FIX-004 修复后解决 |
+| **依赖** | FIX-004 |
+
+**结论**: 蛋类 8 个 SKU 中，2 个 BOM 父子 SKU 拖累 -1,030 元。去除后 FM 3,276 vs QDM 3,448 = -5.0%，在目标范围内。非独立 bug。
+
+---
+
+### FIX-007: 5/29 FM 巨损 🟡
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-007-may29-loss.md](FIX-007-may29-loss.md) |
+| **审查报告** | §7.1 #7 |
+| **状态** | 🟡 主要由 FIX-004 修复 |
+| **依赖** | FIX-004 |
+
+**结论**: 5/29 利润 532（正常 2,500-4,000），主要由 BOM 父品 transfer(-662) 和大批量收货(-12,548)叠加。FIX-004 修复后恢复到 ~1,194。
+
+---
+
+### FIX-008: 非易腐品库存核销 🟡
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-008-inventory-writeoff.md](FIX-008-inventory-writeoff.md) |
+| **审查报告** | §3.5 |
+| **状态** | 🟡 根因已被 FIX-009 修复 |
+
+**结论**: 初步分析认为是盘点差异正常暴露，后续发现根因是 is_counted 条件过宽。
+
+---
+
+### FIX-009: is_counted 系统快照导致虚假核销 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-009-is-counted-snapshot.md](FIX-009-is-counted-snapshot.md) |
+| **审查报告** | §3.5 |
+| **状态** | ✅ 已实现 (`6ad7e91`) |
+| **修改文件** | `fmetl/calculated/stock.py` |
+| **优先级** | 🔴 P0 |
+
+**修复**: is_counted 不再对系统快照（created_by='系统'）触发，仅人工盘点（created_by!='系统'）触发。盘盈检测（分支5）保留。消除每日 ~1,400 SKU、~1,000-5,000 元的虚假库存核销。
+
+---
+
 ## 实现顺序
 
 ```
-1. FIX-001 (✅ 已完成)     ← 无依赖，影响面最小
-      │
-2. FIX-002 (⏳ 下一步)     ← 依赖 FIX-001，影响面最大
-      │
-      ├── 3a. FIX-004 (⏳)  ← 依赖 FIX-001/002
-      │
-      └── 3b. FIX-003 (🟡)  ← 低优先级，依赖 FIX-001/002
-      
-4. FIX-005 (🟡)             ← 低优先级，依赖 FIX-002/004
+已实现:
+  1. FIX-001 ✅  compose纯加工关系
+  2. FIX-009 ✅  is_counted系统快照 (独立, 无依赖)
+
+待实现:
+  3. FIX-002 ⏳  EUC兜底链 (依赖 FIX-001)
+  4. FIX-004 ⏳  BOM父品转移 (依赖 FIX-001/002)
+  
+波及修复 (自动解决):
+  5. FIX-003 🟡  init_stock对齐 (依赖 FIX-001/002, 低优先级)
+  6. FIX-005 🟡  金额平衡公式 (依赖 FIX-002/004, 低优先级)
+  7. FIX-006 🟡  蛋类偏差 (依赖 FIX-004)
+  8. FIX-007 🟡  5/29巨损 (依赖 FIX-004)
 ```
 
 ---
