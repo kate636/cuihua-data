@@ -1,6 +1,6 @@
 # FIX-009: is_counted 系统快照导致大量虚假库存核销
 
-> 状态: **✅ 已实现** | Commit: `6ad7e91` | [修复索引 →](README.md)
+> 状态: **✅ 已实现** | Commit: `6ad7e91` | ETL验证: ❌ 未跑 | [修复索引 →](README.md)
 >
 > 修改文件: `fmetl/calculated/stock.py` (1 行改动)
 >

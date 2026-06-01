@@ -1,6 +1,6 @@
 # 加工金额纯加工关系计算 — EUC 修复第1点 (FIX-001)
 
-> 状态: **✅ 已实现** | Commit: `277f296` `c2cb613` | [修复索引 →](README.md)
+> 状态: **✅ 已实现** | Commit: `277f296` `c2cb613` | ETL验证: ❌ 未跑 | [修复索引 →](README.md)
 >
 > 修改文件: `fmetl/calculated/sku_cost.py`, `fmetl/calculated/stock.py`
 >
