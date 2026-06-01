@@ -21,48 +21,6 @@ from ..utils import get_logger
 TARGET_DUCK_TABLE = "t_fm_sku_dim"
 
 
-def _remap_category(row):
-    """类别重映射 — 以 master-data v2.1 为权威来源（中分类映射）"""
-    c2 = str(row.get('category_level2_description', ''))
-    c1 = str(row.get('category_level1_description', ''))
-    c1_id = str(row.get('category_level1_id', ''))
-
-    # 中分类映射（优先级从高到低）
-    if c2 == '蛋类':
-        return '', '蛋类'
-    if c2 == '烘焙类':
-        return '', '烘焙类'
-    if c2 == '冷藏奶制品类':
-        return '', '冷藏乳品类'
-    if c2 in ('酒类', '饮料类'):
-        return '', '水饮类'
-    if c2 in ('方便速食类', '调味品类', '粮油副食类'):
-        return '', '基础食品类'
-    if c2 == '休闲零食类':
-        return '', '休闲食品类'
-    if c2 == '日杂用品类':
-        return '', '日杂用品类'
-    if c2 == '冰品类':
-        return '', '冷冻类'
-    if c2 in ('牛肉类', '羊肉类'):
-        return '', '牛羊类'
-    if c2 in ('鸡类', '鸭类', '其他禽类'):
-        return '', '禽类'
-    if c2 in ('即烹类', '即热类'):
-        return '', '熟食类'
-
-    # 1:1 直通（大分类名 = 报告品类名）
-    if c1 in ('猪肉类', '蔬菜类', '熟食类', '水果类', '烘焙类', '水产类', '蛋类'):
-        return c1_id, c1
-
-    # 冷藏加工及预制菜类（剩余未映射的中分类）
-    if c1 in ('冷藏及加工类', '预制菜', '冷藏加工及预制菜类'):
-        return '', '冷藏加工及预制菜类'
-
-    # 兜底
-    return c1_id, c1
-
-
 class SkuDimBuilder:
     def __init__(self, duck: DuckDBStore):
         self._duck = duck
@@ -201,6 +159,8 @@ class SkuDimBuilder:
         cond_staple      = (c2.isin(['方便速食类', '调味品类', '粮油副食类']))
         cond_snack       = (c2 == '休闲零食类')
         cond_daily       = (c2 == '日杂用品类')
+        # TODO: master-data v2.1 要求冷冻类通过 SKU 清单映射 (config/frozen_skus.json, 126 SKU)
+        # 当前 JSON 文件不存在，使用中分类映射作为临时方案
         cond_ice         = (c2 == '冰品类')
         cond_beef_mutton = (c2.isin(['牛肉类', '羊肉类']))
         cond_poultry     = (c2.isin(['鸡类', '鸭类', '其他禽类']))

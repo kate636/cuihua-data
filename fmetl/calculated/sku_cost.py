@@ -401,16 +401,44 @@ class SkuCostCalculator:
 
     # ── 加工关系成本推算（兜底: EUC=0 的成品）──────────────────────
 
-    _PROC_REL_API = "http://47.115.213.115:5003/api/proc-rel/export"
+    _PROC_REL_API_URLS = [
+        "http://47.115.213.115:8080/api/proc-rel/export",   # nginx 代理（外部可达）
+        "http://127.0.0.1:5003/api/proc-rel/export",         # 服务器本地直连
+    ]
     _PROC_REL_CACHE = None  # 类级别缓存
 
     @classmethod
     def _load_processing_relations(cls):
-        """加载加工关系（优先本地缓存 JSON，失败则 API 调用）。"""
+        """加载加工关系。
+
+        策略（每次 ETL 运行都尝试拉取最新数据）:
+        1. 远程 API（通过 nginx :8080 或本地 :5003）—— 保证数据最新
+        2. 本地缓存 JSON —— 网络不可达时的兜底
+        3. API 成功后自动写入本地缓存
+        """
         if cls._PROC_REL_CACHE is not None:
             return cls._PROC_REL_CACHE
 
-        # 1. 尝试本地缓存
+        relations = None
+
+        # 1. 远程 API（优先，保证数据最新）
+        for url in cls._PROC_REL_API_URLS:
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    raw_relations = data.get("relations", [])
+                    # 过滤自身关系 (raw_sku == finished_sku, 1:1 无意义)
+                    relations = [r for r in raw_relations
+                                 if str(r.get("raw_sku", "")) != str(r.get("finished_sku", ""))]
+                    cls._PROC_REL_CACHE = relations
+                    # 自动更新本地缓存（保存过滤后的数据）
+                    cls._save_local_cache({"relations": relations})
+                    return cls._PROC_REL_CACHE
+            except Exception:
+                continue
+
+        # 2. 本地缓存兜底
         cache_paths = [
             Path(__file__).parent.parent.parent / "data" / "processing_relations.json",
             Path("/opt/fm/proc-rel/processing_relations.json"),
@@ -420,23 +448,27 @@ class SkuCostCalculator:
             if p.exists():
                 try:
                     data = json.loads(p.read_text())
-                    cls._PROC_REL_CACHE = data.get("relations", [])
+                    raw_relations = data.get("relations", [])
+                    # 同样过滤自身关系
+                    relations = [r for r in raw_relations
+                                 if str(r.get("raw_sku", "")) != str(r.get("finished_sku", ""))]
+                    cls._PROC_REL_CACHE = relations
                     return cls._PROC_REL_CACHE
                 except (json.JSONDecodeError, KeyError):
                     continue
 
-        # 2. API 调用
-        try:
-            resp = requests.get(cls._PROC_REL_API, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                cls._PROC_REL_CACHE = data.get("relations", [])
-                return cls._PROC_REL_CACHE
-        except Exception:
-            pass
-
         cls._PROC_REL_CACHE = []
         return cls._PROC_REL_CACHE
+
+    @classmethod
+    def _save_local_cache(cls, data):
+        """API 拉取成功后写入本地缓存文件。"""
+        cache_path = Path(__file__).parent.parent.parent / "data" / "processing_relations.json"
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        except Exception:
+            pass  # 写入失败不阻塞 ETL
 
     def _apply_processing_relation_fallback(self, df):
         """加工关系成本推算: Σ(原料用量 × 原料euc) / 产出数量。

@@ -6,11 +6,13 @@ FM 客数底表 (v10)
 输出: t_fm_cust
 
 v10 修复 (A16): Python JOIN dim_goods 后排除 70-77 品类物料
+v10 修复 (B1): 分类映射从 SQL IF 嵌套迁移到 Python pandas（避免 QDM API 12 层嵌套失败）
 """
 
 from __future__ import annotations
 
 import duckdb
+import numpy as np
 from ..connectors import ApiConnector, DuckDBStore
 from ..utils import get_logger
 
@@ -28,6 +30,46 @@ _LEVELS = [
 _EXCLUDED_CATS = ('70', '71', '72', '73', '74', '75', '76', '77')
 
 
+def _remap_category_level1(df):
+    """品类重映射 — master-data v2.1 中分类映射，与 sku_dim.py 完全一致。
+
+    在 DataFrame 上直接修改，新增 category_level1_id 列（存储重映射后的品类名称）。
+    """
+    c2 = df['category_level2_description'].fillna('')
+    c1 = df['category_level1_description'].fillna('')
+
+    cond_egg         = (c2 == '蛋类')
+    cond_bake        = (c2 == '烘焙类')
+    cond_dairy       = (c2 == '冷藏奶制品类')
+    cond_drink       = (c2.isin(['酒类', '饮料类']))
+    cond_staple      = (c2.isin(['方便速食类', '调味品类', '粮油副食类']))
+    cond_snack       = (c2 == '休闲零食类')
+    cond_daily       = (c2 == '日杂用品类')
+    cond_ice         = (c2 == '冰品类')
+    cond_beef_mutton = (c2.isin(['牛肉类', '羊肉类']))
+    cond_poultry     = (c2.isin(['鸡类', '鸭类', '其他禽类']))
+    cond_cooked_l2   = (c2.isin(['即烹类', '即热类']))
+    cond_cold        = (c1.isin(['冷藏及加工类', '预制菜', '冷藏加工及预制菜类']))
+
+    desc = c1.copy()
+    desc = np.where(cond_cooked_l2,  '熟食类', desc)
+    desc = np.where(cond_poultry,     '禽类', desc)
+    desc = np.where(cond_beef_mutton, '牛羊类', desc)
+    desc = np.where(cond_daily,       '日杂用品类', desc)
+    desc = np.where(cond_ice,         '冷冻类', desc)
+    desc = np.where(cond_snack,       '休闲食品类', desc)
+    desc = np.where(cond_staple,      '基础食品类', desc)
+    desc = np.where(cond_drink,       '水饮类', desc)
+    desc = np.where(cond_dairy,       '冷藏乳品类', desc)
+    desc = np.where(cond_bake,        '烘焙类', desc)
+    desc = np.where(cond_egg,         '蛋类', desc)
+    desc = np.where(cond_cold & ~(cond_cooked_l2 | cond_egg | cond_bake | cond_dairy |
+                     cond_drink | cond_staple | cond_snack | cond_daily | cond_ice |
+                     cond_beef_mutton | cond_poultry), '冷藏加工及预制菜类', desc)
+
+    df['category_level1_id'] = desc
+
+
 class CustBuilder:
     def __init__(self, duck: DuckDBStore, api: ApiConnector):
         self._duck = duck
@@ -42,37 +84,17 @@ class CustBuilder:
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows built")
 
     def _extract_orders(self, start: str, end: str, yesterday: str) -> None:
-        """从 API 拉订单，Python 端做品类过滤 (A16 fix)"""
+        """从 API 拉订单，Python 端 JOIN dim_goods + 品类过滤 (A16) + 分类映射 (v2.1)
+
+        strategy_fm_dim_goods 在 StarRocks 中只存最新一天快照，API SQL 中 JOIN
+        会因为 inc_day 不匹配导致所有分类字段为 NULL。改为 Python 端 JOIN 本地 DuckDB
+        dim_goods（已由 Step 1 全量加载），保证分类数据始终可用。
+        """
         sql = f"""
         SELECT
             t1.business_date, t1.store_id, t1.order_id, t1.pay_at,
             t1.article_id, t1.order_status, t1.jielong_flag,
             t1.actual_amount, t1.channel, t1.day_clear,
-            t3.category_level2_description,
-            t3.category_level1_description,
-            IF(t3.category_level2_description IN ('蛋类','烘焙类'),
-               t3.category_level2_description,
-               IF(t3.category_level2_description IN ('冷藏奶制品类','饮料类'),
-                  '乳制品及水饮类',
-                  IF(t3.category_level1_description = '肉禽蛋类'
-                     AND t3.category_level2_description <> '蛋类',
-                     '肉禽类',
-                     IF(RIGHT(t3.category_level3_description, 2) = '熟食',
-                        '熟食类',
-                        IF(t3.category_level1_description IN ('冷藏及加工类','预制菜'),
-                           '冷藏加工及预制菜类',
-                           t3.category_level1_description
-                        )
-                     )
-                  )
-               )
-            )                                AS category_level1_id,
-            t3.category_level2_id,
-            t3.category_level3_id,
-            t3.category_level1_id            AS category_level1_id_raw,
-            t3.spu_id,
-            t3.blackwhite_pig_id,
-            t3.blackwhite_pig_name,
             h.store_flag
         FROM (
             SELECT
@@ -87,14 +109,6 @@ class CustBuilder:
             WHERE inc_day BETWEEN '{start}' AND '{end}'
         ) t1
         LEFT JOIN (
-            SELECT article_id, category_level1_description, category_level1_id,
-                   category_level2_id, category_level2_description,
-                   category_level3_id, category_level3_description,
-                   spu_id, blackwhite_pig_id, blackwhite_pig_name
-            FROM strategy_fm_dim_goods
-            WHERE inc_day = '{end}'
-        ) t3 ON t1.article_id = t3.article_id
-        LEFT JOIN (
             SELECT store_id, store_flag
             FROM default_catalog.ads_business_analysis.chdj_store_info
         ) h ON t1.store_id = h.store_id
@@ -103,15 +117,29 @@ class CustBuilder:
 
         df = self._api.query(sql)
 
+        # Python 端 JOIN 本地 dim_goods（避免 StarRocks 快照日期不匹配问题）
+        goods_df = self._duck._conn.execute("""
+            SELECT DISTINCT article_id, category_level1_description, category_level1_id,
+                   category_level2_id, category_level2_description,
+                   category_level3_id, category_level3_description,
+                   spu_id, blackwhite_pig_id, blackwhite_pig_name
+            FROM dim_goods
+        """).df()
+        df = df.merge(goods_df, on='article_id', how='left')
+
         # v10 A16 fix: Python 端排除物料类 (70-77)
         before = len(df)
-        if 'category_level1_id_raw' in df.columns:
+        if 'category_level1_id' in df.columns:
+            df['category_level1_id_raw'] = df['category_level1_id'].astype(str)
             df = df[~df['category_level1_id_raw'].isin(_EXCLUDED_CATS)]
         after = len(df)
         self._log.info(
             f"order_detail: {before} rows fetched, "
             f"{after} after category filter (excluded {before - after})"
         )
+
+        # v10 B1 fix: Python 端品类重映射 (master-data v2.1)
+        _remap_category_level1(df)
 
         self._duck.load_df(df, "order_detail", mode="replace")
 
