@@ -45,8 +45,6 @@ class SkuCostCalculator:
                 self_receive_amt,
                 compose_in_qty,
                 compose_out_qty,
-                compose_in_amt_src,
-                compose_out_amt_src,
                 init_stock_qty_src,
                 init_stock_amt_src,
                 avg_inbound_price,
@@ -140,22 +138,14 @@ class SkuCostCalculator:
             df['init_stock_amt'] = df['init_stock_amt_src'].clip(lower=0)
             df['is_first_day'] = 1
 
-        # 6. Python: compose 初始净额（用源表 amt，后续用加工关系修正）
+        # 6. compose 金额将在 Step 8 由加工关系纯推算
+        #    compose_in_amt: 配方推算 (qty × Σ(raw_qty/yield × raw_base_euc))
+        #    compose_out_amt: 价值守恒 (qty × base_euc)
+        #    完全不依赖源表 compose_in_amt_src / compose_out_amt_src
         df['compose_net_qty'] = df['compose_in_qty'] - df['compose_out_qty']
-        df['compose_in_amt'] = df['compose_in_amt_src'].fillna(0)
-        df['compose_out_amt'] = df['compose_out_amt_src'].fillna(0)
-        df['compose_net_amt'] = df['compose_in_amt'] - df['compose_out_amt']
-        # 第一层兜底: cost_price (系统标准成本)
-        fallback_cp = ((df['compose_net_amt'].abs() < 0.001) &
-                       (df['compose_net_qty'].abs() > 0.001) &
-                       (df['cost_price'] > 0))
-        df.loc[fallback_cp, 'compose_net_amt'] = (
-            df.loc[fallback_cp, 'compose_net_qty'] * df.loc[fallback_cp, 'cost_price'])
-        # 第二层兜底: avg_inbound_price (历史采购均价)
-        fallback_aip = ((df['compose_net_amt'].abs() < 0.001) &
-                        (df['compose_net_qty'].abs() > 0.001))
-        df.loc[fallback_aip, 'compose_net_amt'] = (
-            df.loc[fallback_aip, 'compose_net_qty'] * df.loc[fallback_aip, 'avg_inbound_price'])
+        df['compose_in_amt'] = 0.0
+        df['compose_out_amt'] = 0.0
+        df['compose_net_amt'] = 0.0
 
         # 7. 计算 base EUC（不含 compose，因为 compose_out 在公式中自抵消）
         #    base_euc = (init + recv + bom) / (init_q + recv_q + bom_q)
@@ -186,8 +176,10 @@ class SkuCostCalculator:
             df.loc[mask, 'cost_amt'] / df.loc[mask, 'cost_qty']
         )
 
-        # 对于只有 compose_out 没有进货的原料，base_euc 为 0 导致 EUC 也是 0
-        # 用 compose_out_amt / compose_out_qty 反推（相当于原料的单位消耗成本）
+        # 对于只有 compose_out 没有进货的原料
+        # base_euc > 0 → compose_out_amt = qty × base_euc (价值守恒) → euc = base_euc ✅
+        # base_euc = 0 → compose_out_amt = 0 → euc = 0 → 进入 EUC 兜底链
+        # 次日 base_euc > 0 后价值守恒自动生效
         no_base = (df['base_cost_qty'] <= 0) & (df['compose_out_qty'] > 0)
         df.loc[no_base, 'effective_unit_cost'] = (
             df.loc[no_base, 'compose_out_amt'] / df.loc[no_base, 'compose_out_qty']
@@ -296,7 +288,7 @@ class SkuCostCalculator:
         """
         relations = self._load_processing_relations()
         if not relations:
-            self._log.info("no processing relations loaded, keeping source compose amounts")
+            self._log.info("no processing relations loaded, compose amounts remain 0")
             df['_compose_corrected'] = False
             return df
 
@@ -317,6 +309,9 @@ class SkuCostCalculator:
         corrected_in = 0
 
         # ── 1. 原料 compose_out_amt = qty × base_euc (价值守恒) ──
+        #    base_euc > 0 → 价值守恒计算
+        #    base_euc = 0 → compose_out_amt 保持 0（首日或 EUC=0 SKU）
+        #    EUC 兜底链会在后续步骤提供估算，次日 base_euc>0 后自动修复
         out_mask = df['compose_out_qty'] > 0
         out_with_euc = out_mask & (df['base_euc'] > 0)
         df.loc[out_with_euc, 'compose_out_amt'] = (
@@ -324,10 +319,11 @@ class SkuCostCalculator:
         ).round(4)
         corrected_out = out_with_euc.sum()
 
-        # ── 2. 成品 compose_in_amt = compose_in_qty × 配方单位成本 (PRIMARY) ──
+        # ── 2. 成品 compose_in_amt = compose_in_qty × 配方单位成本 ──
         #    成品单位成本 = Σ(raw_qty / yield_qty × raw_base_euc)
-        #    有加工关系的成品：全部用配方推算，不使用源表值
-        #    无加工关系的成品：保留源表值（此类商品不受加工关系管理）
+        #    有加工关系 + 配方完整 → 配方推算
+        #    无加工关系 → compose_in_amt 保持 0（EUC 兜底链提供估算）
+        #    有加工关系但原料 euc 不全 → compose_in_amt 保持 0（次日原料修复后自动修复）
 
         # 构建原料 base_euc lookup（按 date × store × article）
         euc_lookup = {}
@@ -341,7 +337,10 @@ class SkuCostCalculator:
         for idx in in_indices:
             article_id = str(df.at[idx, 'article_id'])
             if article_id not in proc_map:
-                continue  # 无加工关系 → 保留源表值
+                # 无加工关系 → compose_in_amt 保持 0
+                # EUC 兜底链 (cost_price → current_price×0.40) 会在后续步骤提供估算
+                self._log.debug(f"compose_in SKU {article_id} 无加工关系, compose_in_amt=0")
+                continue
 
             store_id = str(df.at[idx, 'store_id'])
             biz_date = str(df.at[idx, 'business_date'])
