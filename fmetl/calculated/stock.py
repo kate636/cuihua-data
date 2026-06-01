@@ -232,8 +232,11 @@ class StockCalculator:
             df = df.merge(actual_df, on=merge_keys, how='left')
             df['actual_stock_qty'] = df['actual_stock_qty'].fillna(0)
             df['created_by'] = df['created_by'].fillna('系统')
-            # 人工盘点（非系统创建）或 系统快照中有实盘数 → 信任实盘值
-            df['is_counted'] = (df['created_by'] != '系统') | ((df['actual_stock_qty'] > 0) & (df['created_by'] == '系统'))
+            # 人工盘点（非系统创建）→ 信任实盘值
+            # 系统快照 (created_by='系统') 不作为盘点依据:
+            #   系统快照每日覆盖 ~1,400 SKU, 其 actual_stock_qty 与账面常有偏差,
+            #   若作为盘点会每天产生大量虚假 unknow_lost (如 5/16 +4,854)
+            df['is_counted'] = (df['created_by'] != '系统')
         else:
             df['actual_stock_qty'] = 0
             df['created_by'] = '系统'
