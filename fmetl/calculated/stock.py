@@ -41,8 +41,6 @@ class StockCalculator:
             SELECT
                 store_id, business_date, article_id, day_clear,
                 self_receive_qty, self_receive_amt,
-                compose_in_qty, compose_out_qty,
-                compose_in_amt_src, compose_out_amt_src,
                 sale_qty, sale_amt,
                 know_lost_qty,
                 init_stock_qty_src, init_stock_amt_src,
@@ -135,7 +133,8 @@ class StockCalculator:
         euc_df = conn.execute(f"""
             SELECT store_id, business_date, article_id,
                    effective_unit_cost, cost_source,
-                   compose_in_amt, compose_out_amt
+                   compose_in_amt, compose_out_amt,
+                   compose_in_qty, compose_out_qty
             FROM t_calc_sku_cost
             WHERE business_date = '{business_date}'
         """).df()
@@ -211,7 +210,6 @@ class StockCalculator:
                     'article_id': aid, 'day_clear': '1',
                     'self_receive_qty': 0, 'self_receive_amt': 0,
                     'compose_in_qty': 0, 'compose_out_qty': 0,
-                    'compose_in_amt_src': 0, 'compose_out_amt_src': 0,
                     'sale_qty': 0, 'sale_amt': 0, 'know_lost_qty': 0,
                     'init_stock_qty_src': 0, 'init_stock_amt_src': 0,
                     'avg_inbound_price': 0,
@@ -242,7 +240,7 @@ class StockCalculator:
             df['is_counted'] = False
 
         for c in ['self_receive_qty', 'self_receive_amt', 'compose_in_qty',
-                   'compose_out_qty', 'compose_in_amt_src', 'compose_out_amt_src',
+                   'compose_out_qty',
                    'sale_qty', 'sale_amt', 'know_lost_qty',
                    'outstock_unit_price', 'original_outstock_qty',
                    'outstock_unit_price_notax', 'outstock_cost_price',
@@ -259,10 +257,12 @@ class StockCalculator:
             if col not in df.columns:
                 df[col] = 0.0
 
-        # 优先用 sku_cost 修正后的 compose 金额，回退到源表值
-        # 必须在 fillna 之后：确保 compose_in_amt_src 的 NaN 已被填充为 0
-        df['compose_in_amt_corrected'] = df['compose_in_amt'].fillna(df['compose_in_amt_src'])
-        df['compose_out_amt_corrected'] = df['compose_out_amt'].fillna(df['compose_out_amt_src'])
+        # compose 金额和数量来自 sku_cost 加工关系推算，不再回退源表
+        df['compose_in_amt_corrected'] = df['compose_in_amt'].fillna(0)
+        df['compose_out_amt_corrected'] = df['compose_out_amt'].fillna(0)
+        # compose 数量也来自 sku_cost 推导（成品=sale+loss-init, 原料=配方反推）
+        df['compose_in_qty'] = df['compose_in_qty'].fillna(0)
+        df['compose_out_qty'] = df['compose_out_qty'].fillna(0)
 
         return self._process_day_core(df, prev_df, business_date)
 

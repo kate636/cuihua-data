@@ -43,8 +43,8 @@ class SkuCostCalculator:
                 article_id,
                 self_receive_qty,
                 self_receive_amt,
-                compose_in_qty,
-                compose_out_qty,
+                sale_qty,
+                know_lost_qty,
                 init_stock_qty_src,
                 init_stock_amt_src,
                 avg_inbound_price,
@@ -63,6 +63,7 @@ class SkuCostCalculator:
                     self_inbound_qty DOUBLE, self_inbound_amt DOUBLE,
                     compose_net_qty DOUBLE, compose_net_amt DOUBLE,
                     compose_in_amt DOUBLE, compose_out_amt DOUBLE,
+                    compose_in_qty DOUBLE, compose_out_qty DOUBLE,
                     bom_alloc_amt DOUBLE, bom_alloc_qty DOUBLE,
                     init_stock_qty DOUBLE, init_stock_amt DOUBLE,
                     avg_inbound_price DOUBLE, is_first_day INTEGER
@@ -138,10 +139,82 @@ class SkuCostCalculator:
             df['init_stock_amt'] = df['init_stock_amt_src'].clip(lower=0)
             df['is_first_day'] = 1
 
-        # 6. compose 金额将在 Step 8 由加工关系纯推算
-        #    compose_in_amt: 配方推算 (qty × Σ(raw_qty/yield × raw_base_euc))
-        #    compose_out_amt: 价值守恒 (qty × base_euc)
-        #    完全不依赖源表 compose_in_amt_src / compose_out_amt_src
+        # 6. 从业务行为推导 compose 数量（完全不依赖源表 compose_in_qty / compose_out_qty）
+        #    成品 compose_in_qty = max(0, sale + loss - init - recv)
+        #       - 成品没有直接收货(recv=0): 销售和损耗全来自加工产出
+        #       - 先消耗期初库存，不够的部分由加工产出补充
+        #    原料 compose_out_qty = Σ(成品 compose_in_qty × raw_qty / yield_qty)
+        #       - 从加工关系的配方比例反推原料消耗量
+        #    compose 金额在 Step 8 由加工关系推算
+        df['compose_in_qty'] = 0.0
+        df['compose_out_qty'] = 0.0
+
+        relations_qty = self._load_processing_relations()
+        if relations_qty:
+            from collections import defaultdict
+            # finished → [(raw_sku, raw_qty, yield_qty), ...]
+            proc_map_qty = defaultdict(list)
+            # raw → [(finished_sku, raw_qty, yield_qty), ...]
+            raw_to_finished = defaultdict(list)
+            for rel in relations_qty:
+                f = rel["finished_sku"]
+                r = rel["raw_sku"]
+                rq = float(rel["raw_qty"])
+                yq = float(rel["yield_qty"])
+                proc_map_qty[f].append({"raw_sku": r, "raw_qty": rq, "yield_qty": yq})
+                raw_to_finished[r].append({"finished_sku": f, "raw_qty": rq, "yield_qty": yq})
+
+            finished_set = set(proc_map_qty.keys())
+            derived_in_count = 0
+            derived_out_count = 0
+
+            # (a) 成品 compose_in_qty = max(0, sale + loss - init - recv)
+            for idx in df.index:
+                article_id = str(df.at[idx, 'article_id'])
+                if article_id not in finished_set:
+                    continue
+                sale = float(df.at[idx, 'sale_qty'])
+                loss = float(df.at[idx, 'know_lost_qty'])
+                init = float(df.at[idx, 'init_stock_qty'])
+                recv = float(df.at[idx, 'self_receive_qty'])
+                derived_in = max(0.0, round(sale + loss - init - recv, 4))
+                if derived_in > 0:
+                    df.at[idx, 'compose_in_qty'] = derived_in
+                    derived_in_count += 1
+
+            # (b) 原料 compose_out_qty = Σ(成品 compose_in × raw_qty / yield_qty)
+            for (biz_date, store_id), grp in df.groupby(['business_date', 'store_id']):
+                for idx in grp.index:
+                    article_id = str(df.at[idx, 'article_id'])
+                    if article_id not in raw_to_finished:
+                        continue
+                    total_out = 0.0
+                    for mapping in raw_to_finished[article_id]:
+                        finished = mapping['finished_sku']
+                        raw_qty = mapping['raw_qty']
+                        yield_qty = mapping['yield_qty']
+                        if yield_qty <= 0:
+                            continue
+                        finished_rows = df[
+                            (df['article_id'] == finished) &
+                            (df['business_date'] == biz_date) &
+                            (df['store_id'] == store_id)
+                        ]
+                        if len(finished_rows) > 0:
+                            finished_cin = float(finished_rows['compose_in_qty'].values[0])
+                            if finished_cin > 0:
+                                total_out += finished_cin * raw_qty / yield_qty
+                    if total_out > 0:
+                        df.at[idx, 'compose_out_qty'] = round(total_out, 4)
+                        derived_out_count += 1
+
+            self._log.info(
+                f"compose qty derived from biz events: "
+                f"{derived_in_count} compose_in rows, "
+                f"{derived_out_count} compose_out rows, "
+                f"{len(finished_set)} finished SKUs in PR"
+            )
+
         df['compose_net_qty'] = df['compose_in_qty'] - df['compose_out_qty']
         df['compose_in_amt'] = 0.0
         df['compose_out_amt'] = 0.0
@@ -230,6 +303,8 @@ class SkuCostCalculator:
                 compose_net_amt,
                 compose_in_amt,
                 compose_out_amt,
+                compose_in_qty,
+                compose_out_qty,
                 bom_alloc_amt,
                 bom_alloc_qty,
                 init_stock_qty,
