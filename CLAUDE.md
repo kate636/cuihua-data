@@ -6,6 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v10.0**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
 
+## Project Skills
+
+项目专属 skill 位于 `.cursor/skills/`，覆盖常用操作：
+
+| Skill | 用途 |
+|-------|------|
+| `master-data` | **品类映射唯一权威来源**，所有涉及分类的改动必读 |
+| `qdm-compare` | FM ETL vs QDM 基准表全指标对比验证 |
+| `etl-check` | ETL 健康检查（负库存/BOM/损耗/零成本/盘盈） |
+| `server-query` | 查询服务器 DuckDB 数据 |
+| `fm-data-query` | Food Mart 取数查询 |
+| `fm-platform` | FM 平台相关操作 |
+| `qdm-bi-api` | BI 平台 API 调用 |
+| `monthly-report` | 月度经营日报 |
+| `xlsx` | Excel 文件处理 |
+| `webapp-testing` | Web 应用测试 |
+| `skill-creator` | 创建新 skill |
+
+### 品类分类规则
+
+**以 `.cursor/skills/master-data/SKILL.md` 为唯一权威来源。** ETL `sku_dim.py` 中的分类重映射是旧版（v1），仅用于 FM 底表的历史兼容。做品类分析、对比验证、报表时，一律用 master-data 的中分类映射规则。
+
 ## Key Commands
 
 所有命令在仓库根目录 (`翠花数据/`) 下执行。

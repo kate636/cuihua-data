@@ -142,8 +142,7 @@ class ProfitCalculator:
         df['pre_inbound_amount'] = (
             df['receive_qty'] * df['dc_original_price'])
 
-        # ── 11. 写出结果 ─────────────────────────────────────────────
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
+        # ── 11. 写出结果（分区覆盖，保留历史数据）───────────────────
         out_cols = {
             'store_id': df['store_id'],
             'business_date': df['business_date'],
@@ -163,7 +162,12 @@ class ProfitCalculator:
             'effective_unit_cost': df['effective_unit_cost'],
         }
         out_df = pd.DataFrame(out_cols)
-        conn.execute(f"CREATE TABLE {self.TARGET_TABLE} AS SELECT * FROM out_df")
+        # 首次建表（空结构）
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {self.TARGET_TABLE} AS SELECT * FROM out_df LIMIT 0")
+        # 按日期分区覆盖
+        date_min, date_max = out_df['business_date'].min(), out_df['business_date'].max()
+        conn.execute(f"DELETE FROM {self.TARGET_TABLE} WHERE business_date BETWEEN '{date_min}' AND '{date_max}'")
+        conn.execute(f"INSERT INTO {self.TARGET_TABLE} SELECT * FROM out_df")
 
         rows = self._duck.row_count(self.TARGET_TABLE)
         self._log.info(

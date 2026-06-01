@@ -222,10 +222,8 @@ class SkuCostCalculator:
         # 恢复原始排序
         df = df.sort_index()
 
-        # 10. 写出结果
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
-        conn.execute(f"""
-            CREATE TABLE {self.TARGET_TABLE} AS
+        # 10. 写出结果（分区覆盖，保留历史数据）
+        sel_cols = f"""
             SELECT
                 store_id,
                 business_date,
@@ -247,7 +245,13 @@ class SkuCostCalculator:
                 avg_inbound_price,
                 is_first_day
             FROM df
-        """)
+        """
+        # 首次建表（空结构）
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {self.TARGET_TABLE} AS {sel_cols} LIMIT 0")
+        # 按日期分区覆盖
+        date_min, date_max = df['business_date'].min(), df['business_date'].max()
+        conn.execute(f"DELETE FROM {self.TARGET_TABLE} WHERE business_date BETWEEN '{date_min}' AND '{date_max}'")
+        conn.execute(f"INSERT INTO {self.TARGET_TABLE} {sel_cols}")
 
         rows = self._duck.row_count(self.TARGET_TABLE)
         first_day_cnt = int(df['is_first_day'].sum())

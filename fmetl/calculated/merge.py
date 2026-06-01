@@ -82,6 +82,7 @@ class AtomicMerger:
         """)
 
         # Step B: 合并宽表
+        # 依赖上游 atomic_* 表已积累历史数据，全量重建即可
         self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
         self._duck.execute(f"""
             CREATE TABLE {self.TARGET_TABLE} AS

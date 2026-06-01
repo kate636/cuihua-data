@@ -16,7 +16,7 @@ class InventoryDetailExtractor(BaseExtractor):
     TARGET_TABLE = "atomic_inventory_detail"
 
     def extract(self, start: str, end: str, yesterday: str, chunk: int = 7) -> None:
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
+        """分区写入模式，保留历史数据。"""
         super().extract(start=start, end=end, yesterday=yesterday, chunk=chunk)
 
     def _fetch_sql(self, start: str, end: str, yesterday: str) -> str:

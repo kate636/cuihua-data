@@ -30,7 +30,6 @@ class BomAllocCalculator:
 
     def run(self) -> None:
         self._log.info("calculating BOM allocation (v10) ...")
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
 
         # Step 1: BOM关系（只取 parent != sub 的行）
         bom_relations = self._conn.execute("""
@@ -316,6 +315,13 @@ class BomAllocCalculator:
         self._create_empty_table()
 
         if results:
+            # 删除本次要写入的日期范围（分区覆盖）
+            dates = sorted(set(r['business_date'] for r in results))
+            if dates:
+                self._conn.execute(
+                    f"DELETE FROM {self.TARGET_TABLE} "
+                    f"WHERE business_date BETWEEN '{dates[0]}' AND '{dates[-1]}'"
+                )
             insert_sql = f"""
                 INSERT INTO {self.TARGET_TABLE} (
                     store_id, business_date, parent_article_id, sub_article_id,

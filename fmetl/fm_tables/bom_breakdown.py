@@ -21,9 +21,7 @@ class BomBreakdownBuilder:
 
     def build(self, start: str, end: str) -> None:
         self._log.info(f"building {TARGET_DUCK_TABLE}: {start} ~ {end}")
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
-        self._duck.execute(f"""
-        CREATE TABLE {TARGET_DUCK_TABLE} AS
+        sel_sql = f"""
         SELECT
             ba.store_id,
             ba.business_date,
@@ -55,6 +53,11 @@ class BomBreakdownBuilder:
         LEFT JOIN dim_chdj_store_info ch ON ba.store_id = ch.store_id
         LEFT JOIN dim_store_profile sp   ON ba.store_id = sp.store_id
         WHERE ba.business_date BETWEEN '{start}' AND '{end}'
-        """)
+        """
+        # 首次建表（空结构）
+        self._duck.execute(f"CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS {sel_sql} LIMIT 0")
+        # 按日期分区覆盖
+        self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE business_date BETWEEN '{start}' AND '{end}'")
+        self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE} {sel_sql}")
         rows = self._duck.row_count(TARGET_DUCK_TABLE)
         self._log.info(f"{TARGET_DUCK_TABLE}: {rows} rows")

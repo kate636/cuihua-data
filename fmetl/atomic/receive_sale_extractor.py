@@ -74,8 +74,7 @@ class ReceiveSaleExtractor(BaseExtractor):
         """
 
     def extract(self, start: str, end: str, yesterday: str, chunk: int = 7) -> None:
-        """每次 extract 前 DROP 旧表，防止历史降级 schema 与正常 df 错位。"""
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
+        """分区写入模式，保留历史数据。"""
         try:
             super().extract(start=start, end=end, yesterday=yesterday, chunk=chunk)
             return

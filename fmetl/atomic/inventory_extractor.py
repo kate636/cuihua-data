@@ -16,8 +16,7 @@ class InventoryExtractor(BaseExtractor):
     TARGET_TABLE = "atomic_inventory"
 
     def extract(self, start: str, end: str, yesterday: str, chunk: int = 7) -> None:
-        """v10: 先 DROP 旧表（schema 变了），再走标准分区写入。"""
-        self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
+        """分区写入模式，保留历史数据。"""
         super().extract(start=start, end=end, yesterday=yesterday, chunk=chunk)
         # 防止 API 返回 0 行时下游 merge 崩溃
         self._ensure_table_exists(f"""
