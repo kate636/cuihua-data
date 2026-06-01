@@ -1,12 +1,12 @@
 # 加工金额纯加工关系计算 — EUC 修复第1点 (FIX-001)
 
-> 属于 EUC 兜底修复方案的一部分 | [修复索引 →](fixes/README.md)
+> 属于 EUC 兜底修复方案的一部分 | [修复索引 →](README.md)
 >
 > 修改文件: `fmetl/calculated/sku_cost.py`, `fmetl/calculated/stock.py`
 >
 > 核心理念: compose_in/compose_out 的**数量和金额**完全不依赖源表。数量从销售/损耗推导，金额由加工关系和价值守恒推算。
 >
-> 被依赖: [FIX-002 EUC兜底链](EUC计算链路与兜底修复方案_v10_2026-06-01.md)
+> 被依赖: [FIX-002 EUC兜底链](FIX-002-euc-fallback.md)
 
 ---
 

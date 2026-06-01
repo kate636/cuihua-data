@@ -54,15 +54,29 @@
 
 ---
 
+## 文件结构
+
+```
+fmetl/docs/fixes/
+├── README.md                       (本文件 — 索引)
+├── FIX-001-compose-pure-pr.md      (加工金额纯加工关系计算)
+├── FIX-002-euc-fallback.md         (EUC计算链路与兜底修复方案)
+├── FIX-003-init-stock-consistency.md (跨日init_stock查找不一致)
+├── FIX-004-bom-transfer.md         (BOM父品库存转移负毛利)
+└── FIX-005-amount-balance.md       (库存方程金额平衡分析)
+```
+
+---
+
 ## 修复清单
 
 ### FIX-001: 加工金额纯加工关系计算 ✅
 
 | 属性 | 值 |
 |------|-----|
-| **文档** | [加工金额纯加工关系计算_v10_2026-06-01.md](../加工金额纯加工关系计算_v10_2026-06-01.md) |
+| **文档** | [FIX-001-compose-pure-pr.md](FIX-001-compose-pure-pr.md) |
 | **审查报告** | §2.1 EUC 兜底链 — 第1点 |
-| **状态** | ✅ 已实现 (`277f296`) |
+| **状态** | ✅ 已实现 (`277f296`, `c2cb613`) |
 | **修改文件** | `fmetl/calculated/sku_cost.py`, `fmetl/calculated/stock.py` |
 | **优先级** | 🔴 P0 |
 
@@ -84,7 +98,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| **文档** | [EUC计算链路与兜底修复方案_v10_2026-06-01.md](../EUC计算链路与兜底修复方案_v10_2026-06-01.md) |
+| **文档** | [FIX-002-euc-fallback.md](FIX-002-euc-fallback.md) |
 | **审查报告** | §2.1 EUC 兜底链 — 第2点 |
 | **状态** | ⏳ 待实现 |
 | **修改文件** | `fmetl/calculated/sku_cost.py` |
@@ -105,7 +119,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| **文档** | [跨日init_stock查找不一致_v10_2026-06-01.md](../跨日init_stock查找不一致_v10_2026-06-01.md) |
+| **文档** | [FIX-003-init-stock-consistency.md](FIX-003-init-stock-consistency.md) |
 | **审查报告** | §2.2 |
 | **状态** | 🟡 低优先级 (当前数据不触发) |
 | **修改文件** | `fmetl/calculated/stock.py` |
@@ -124,7 +138,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| **文档** | [BOM父品库存转移负毛利_v10_2026-06-01.md](../BOM父品库存转移负毛利_v10_2026-06-01.md) |
+| **文档** | [FIX-004-bom-transfer.md](FIX-004-bom-transfer.md) |
 | **审查报告** | §2.3 |
 | **状态** | ⏳ 待实现 |
 | **修改文件** | `fmetl/calculated/stock.py` |
@@ -143,7 +157,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| **文档** | [库存方程金额平衡分析_v10_2026-06-01.md](../库存方程金额平衡分析_v10_2026-06-01.md) |
+| **文档** | [FIX-005-amount-balance.md](FIX-005-amount-balance.md) |
 | **审查报告** | §2.6 |
 | **状态** | 🟡 低优先级 |
 | **修改文件** | `fmetl/fm_tables/stock_roll.py`, 审查报告 |
