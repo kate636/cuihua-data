@@ -159,8 +159,7 @@ class LevelsResultBuilder:
             week_no, week_start_date, week_end_date, month_wid, year_wid
         """
         # 首次建表（空表结构，不触发数据查询）
-        self._duck.execute(f"DROP TABLE IF EXISTS {TARGET_DUCK_TABLE}")
-        self._duck.execute(f"CREATE TABLE {TARGET_DUCK_TABLE} AS {select_sql} LIMIT 0")
+        self._duck.execute(f"CREATE TABLE IF NOT EXISTS {TARGET_DUCK_TABLE} AS {select_sql} LIMIT 0")
         # 分区覆盖：删旧插新，保留其他日期的历史数据
         self._duck.execute(f"DELETE FROM {TARGET_DUCK_TABLE} WHERE 日期 BETWEEN '{start}' AND '{end}'")
         self._duck.execute(f"INSERT INTO {TARGET_DUCK_TABLE} {select_sql}")
