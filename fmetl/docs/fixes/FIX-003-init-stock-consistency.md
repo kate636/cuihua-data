@@ -1,5 +1,9 @@
-# §2.2 跨日 init_stock 查找不一致 — sku_cost.py vs stock.py
+# §2.2 跨日 init_stock 查找不一致 — sku_cost.py vs stock.py (FIX-003)
 
+> 状态: **📋 低优先级待实现** | 当前数据不触发 (0 SKU 切换 day_clear) | [修复索引 →](README.md)
+>
+> 修改文件: `fmetl/calculated/stock.py`
+>
 > 问题等级: 🔴 P0 (代码一致性)
 >
 > 当前数据影响: 15 行 amt 差异共 38.03 元 (微小)

@@ -1,8 +1,10 @@
 # FIX-009: is_counted 系统快照导致大量虚假库存核销
 
-> 审查报告 §3.5 | [修复索引 →](README.md)
+> 状态: **✅ 已实现** | Commit: `6ad7e91` | [修复索引 →](README.md)
 >
-> 状态: ✅ 已修复
+> 修改文件: `fmetl/calculated/stock.py` (1 行改动)
+>
+> 审查报告 §3.5 | 影响: 消除每日 ~1,400 SKU 虚假 unknow_lost (如 5/16 +4,854)
 >
 > 修改文件: `fmetl/calculated/stock.py`
 
