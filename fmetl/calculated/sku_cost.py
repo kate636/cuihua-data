@@ -45,6 +45,7 @@ class SkuCostCalculator:
                 self_receive_amt,
                 sale_qty,
                 know_lost_qty,
+                day_clear,
                 init_stock_qty_src,
                 init_stock_amt_src,
                 avg_inbound_price,
@@ -139,8 +140,25 @@ class SkuCostCalculator:
             df['init_stock_amt'] = df['init_stock_amt_src'].clip(lower=0)
             df['is_first_day'] = 1
 
+        # 5.5 加载盘点实际库存 (用于 compose 数量推导)
+        inv_detail = conn.execute("""
+            SELECT store_id, business_date, article_id,
+                   actual_stock_qty
+            FROM atomic_inventory_detail
+            WHERE actual_stock_qty > 0
+        """).df()
+        if not inv_detail.empty:
+            df = df.merge(inv_detail,
+                          on=['store_id', 'business_date', 'article_id'],
+                          how='left')
+            df['actual_stock_qty'] = df['actual_stock_qty'].fillna(0)
+        else:
+            df['actual_stock_qty'] = 0.0
+
         # 6. 从业务行为推导 compose 数量（完全不依赖源表 compose_in_qty / compose_out_qty）
         #    成品 compose_in_qty = max(0, sale + loss - init - recv)
+        #       - 日清品(day_clear='0'): init 通常≈0, compose_in ≈ sale + loss
+        #       - 有盘点(actual_stock_qty>0): compose_in = max(0, actual + sale + loss - init - recv)
         #       - 成品没有直接收货(recv=0): 销售和损耗全来自加工产出
         #       - 先消耗期初库存，不够的部分由加工产出补充
         #    原料 compose_out_qty = Σ(成品 compose_in_qty × raw_qty / yield_qty)
@@ -169,6 +187,7 @@ class SkuCostCalculator:
             derived_out_count = 0
 
             # (a) 成品 compose_in_qty = max(0, sale + loss - init - recv)
+            #     若有盘点实绩: compose_in_qty = max(0, actual + sale + loss - init - recv)
             for idx in df.index:
                 article_id = str(df.at[idx, 'article_id'])
                 if article_id not in finished_set:
@@ -177,7 +196,12 @@ class SkuCostCalculator:
                 loss = float(df.at[idx, 'know_lost_qty'])
                 init = float(df.at[idx, 'init_stock_qty'])
                 recv = float(df.at[idx, 'self_receive_qty'])
-                derived_in = max(0.0, round(sale + loss - init - recv, 4))
+                actual = float(df.at[idx, 'actual_stock_qty'])
+                if actual > 0:
+                    # 盘点场景: 已知期末库存 = actual, 反推生产量
+                    derived_in = max(0.0, round(actual + sale + loss - init - recv, 4))
+                else:
+                    derived_in = max(0.0, round(sale + loss - init - recv, 4))
                 if derived_in > 0:
                     df.at[idx, 'compose_in_qty'] = derived_in
                     derived_in_count += 1
