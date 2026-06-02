@@ -1,11 +1,11 @@
 """
-FM 分类汇总底表 (v10)
+FM 分类汇总底表 (v0.10)
 
 粒度: 门店 × 日期 × 多层级聚合
 输入: t_fm_sku_dim + t_fm_cust
 输出: t_fm_levels_sum
 
-v10 变更: 移除 store_profit_sales / store_profit_stock / store_profit_diff 列
+v0.10 变更: 移除 store_profit_sales / store_profit_stock / store_profit_diff 列
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ _ALL_CAT_COLS = [
     "article_id", "article_name",
 ]
 
-# v10: 移除 store_profit_sales / store_profit_stock / store_profit_diff
+# v0.10: 移除 store_profit_sales / store_profit_stock / store_profit_diff
 _METRIC_COLS = [
     "full_link_article_profit", "scm_fin_article_profit", "article_profit_amt",
     "pre_profit_amt", "sales_weight", "bf19_sales_weight", "total_sale_qty",

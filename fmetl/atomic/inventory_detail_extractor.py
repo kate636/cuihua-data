@@ -1,5 +1,5 @@
 """
-域②附 库存明细取数器 (v10 新增)
+域②附 库存明细取数器 (v0.10 新增)
 
 源表: strategy_fm_store_article_inventory_detail_di
 目标: DuckDB atomic_inventory_detail

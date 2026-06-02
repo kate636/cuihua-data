@@ -1,10 +1,10 @@
 """
-域② 库存域取数器 (v10)
+域② 库存域取数器 (v0.10)
 
 源表: strategy_fm_purchase_di
 目标: DuckDB atomic_inventory
 
-v10 变更: 只取 init_stock + avg_inbound_price + purchase_receive。
+v0.10 变更: 只取 init_stock + avg_inbound_price + purchase_receive。
 receive_qty/amt 主源从 receive_sale_di 取，purchase_di 作回退；
 end_stock_qty/amt 由 stock.py 自算。
 """

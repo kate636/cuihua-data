@@ -33,9 +33,9 @@
 - 按 `day_clear` 分组求 `SUM` 会天然翻倍（设计如此，非 bug）
 - 日清商品损耗计算：`期末库存负值 = 当日未售完报废`
 
-### 1.3 门店毛利计算公式 (v10)
+### 1.3 门店毛利计算公式 (v0.10)
 
-**v10 核心公式（含BOM，库存方程）**：
+**v0.10 核心公式（含BOM，库存方程）**：
 ```
 profit = sale - receive - bom_in + bom_out - compose_in + compose_out + end_stock - init_stock
 ```
@@ -886,7 +886,7 @@ effective_unit_cost = COALESCE(
 - **`sale_stock_qty`**：由上游库存方程计算得出，等价于 `purchase_di.end_stock_qty`
 - **`actual_stock_qty`**：门店实际盘点数量，仅在盘点日有差异
 - **`profit_loss_qty`**：当 ≠ 0 时，说明当天有盘点且系统库存与实际不符
-- **v10 用法**: `actual_stock_qty` + `created_by` 判定盘点: `created_by != '系统'` → is_counted（信任实盘值覆盖 end_stock）；`created_by = '系统'` → 继续用库存方程自算
+- **v0.10 用法**: `actual_stock_qty` + `created_by` 判定盘点: `created_by != '系统'` → is_counted（信任实盘值覆盖 end_stock）；`created_by = '系统'` → 继续用库存方程自算
 - 该表可用来验证 `t_calc_stock.end_stock_qty` 是否与上游系统库存一致
 
 ### 13.5 与 purchase_di 的关系
@@ -897,7 +897,7 @@ effective_unit_cost = COALESCE(
 | end_stock_qty | 有（每日结余） | **sale_stock_qty = 同一概念** |
 | 实盘库存 | 无 | **有（actual_stock_qty）** |
 | 盘点盈亏 | 无 | **有（profit_loss_qty）** |
-| 用途 | ETL 取 init_stock / avg_inbound_price / purchase_receive | **v10: 人工盘点判定 (is_counted)** |
+| 用途 | ETL 取 init_stock / avg_inbound_price / purchase_receive | **v0.10: 人工盘点判定 (is_counted)** |
 
 ---
 
@@ -930,7 +930,7 @@ effective_unit_cost = COALESCE(
 | 18 | `hive.dal.dal_store_order_receive_di` | `strategy_fm_order_receive_di` | `atomic_order_receive` | 17 |
 | 19 | `hive.dim.dim_store_article_convert_info_da` | `strategy_fm_dim_article_convert` | `atomic_article_convert` | 9 |
 | 20 | `hive.dim.dim_store_article_bom_relation` | `strategy_dim_store_article_bom_relation` | `atomic_bom_relation` | 17 |
-| 21 | `hive.ddl.ddl_transaction_store_article_inventory_detail_di` | `strategy_fm_store_article_inventory_detail_di` | `atomic_inventory_detail` (v10: 人工盘点判定) | 21 |
+| 21 | `hive.ddl.ddl_transaction_store_article_inventory_detail_di` | `strategy_fm_store_article_inventory_detail_di` | `atomic_inventory_detail` (v0.10: 人工盘点判定) | 21 |
 
 ### A.2 字段映射注意事项
 

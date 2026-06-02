@@ -1,10 +1,10 @@
 """
-原子层合并器 (v10)
+原子层合并器 (v0.10)
 
 将 10+ 个原子域合并成 t_atomic_wide。
 粒度: store_id × business_date × article_id × day_clear
 
-v10 变更:
+v0.10 变更:
   - 新增 self_receive_qty / self_receive_amt (从 receive_sale_di 自购行)
   - 保留 init_stock_qty / init_stock_amt / avg_inbound_price (从 atomic_inventory)
   - 移除旧 receive_qty / receive_amt (不再从 purchase_di 取)
@@ -24,7 +24,7 @@ class AtomicMerger:
         self._log = get_logger("AtomicMerger")
 
     def run(self, start: str, end: str) -> None:
-        self._log.info(f"merging atomic tables (v10): {start} ~ {end}")
+        self._log.info(f"merging atomic tables (v0.10): {start} ~ {end}")
 
         # Step A: 提取进货数据（含自购行 + BOM父品进货行）
         #   - 自购行: article_id = sale_article_id, 聚合 SUM
@@ -133,12 +133,12 @@ class AtomicMerger:
                     COALESCE(s.bf12_sale_amt, 0)            AS bf12_sale_amt,
                     COALESCE(s.bf19_sale_piece_qty, 0)      AS bf19_sale_piece_qty,
                     s.last_sysdate,
-                    -- 域② 库存域 (v10: 只取 init_stock + avg_inbound_price)
+                    -- 域② 库存域 (v0.10: 只取 init_stock + avg_inbound_price)
                     COALESCE(p.init_stock_qty, 0)           AS init_stock_qty_src,
                     COALESCE(p.init_stock_amt, 0)           AS init_stock_amt_src,
                     COALESCE(p.avg_inbound_price, 0)        AS avg_inbound_price
                 FROM (
-                    -- v10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
+                    -- v0.10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
                     -- 防止与 inventory 的 FULL OUTER JOIN 产生笛卡尔积
                     SELECT
                         store_id, business_date, article_id,
@@ -165,7 +165,7 @@ class AtomicMerger:
                     GROUP BY store_id, business_date, article_id
                 ) s
                 FULL OUTER JOIN (
-                    -- v10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
+                    -- v0.10 fix: GROUP BY (store, date, article) 消除 day_clear 维度差异
                     SELECT
                         store_id, business_date, article_id,
                         MAX(day_clear) AS day_clear,
@@ -188,7 +188,7 @@ class AtomicMerger:
             wide_joined AS (
             SELECT
                 base.*,
-                -- v10: 自购数据 (主源 receive_sale_di, 回退 purchase_di 但排除 BOM 子品)
+                -- v0.10: 自购数据 (主源 receive_sale_di, 回退 purchase_di 但排除 BOM 子品)
                 CASE WHEN COALESCE(sr.self_receive_qty, 0) > 0
                      THEN sr.self_receive_qty
                      WHEN COALESCE(bs.article_id, '') != '' THEN 0
@@ -417,7 +417,7 @@ class AtomicMerger:
             WHERE w.article_id IS NULL
               AND sr.self_receive_qty > 0
         """)
-        # v10 fix: 日清覆盖使用 dim_day_clear_override 辅助表（从 dim_goods 派生）
+        # v0.10 fix: 日清覆盖使用 dim_day_clear_override 辅助表（从 dim_goods 派生）
         # 避免 merge.py 直接依赖 dim_goods（dim_goods 关联统一在 FM 底表层完成）
         # 猪肉类业务日清: dim标非日清但鲜肉不过夜
         # 牛肉类不在此列: purchase_di的init_stock不为0, 日清会导致巨额亏损

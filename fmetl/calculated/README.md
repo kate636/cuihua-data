@@ -43,7 +43,7 @@ t_atomic_wide  ← merge.py (全SQL)
    + LEFT JOIN atomic_price
 ```
 
-### 关键新增列 (v10)
+### 关键新增列 (v0.10)
 
 | 字段 | 来源 | 说明 |
 |------|------|------|
@@ -58,10 +58,10 @@ t_atomic_wide  ← merge.py (全SQL)
 #### 销售域 (来自 atomic_sales, 32字段)
 `sale_qty`, `sale_piece_qty`, `return_sale_qty`, `gift_qty`, `online_sale_qty`, `offline_sale_qty`, `bf19_sale_qty`, `af19_sale_qty`, `bf12_sale_qty`, `sales_weight`, `sale_amt`, `original_price_sale_amt`, `vip_discount_amt`, `hour_discount_amt`, `actual_amount`, `return_sale_amt`, `member_discount_amt`, `discount_amt`, `member_sale_amt`, `bf19_member_sale_amt`, `offline_original_amt`, `store_paylevel_discount`, `company_paylevel_discount`, `af19_sale_amt`, `bf19_sale_amt`, `bf19_offline_sale_amt`, `bf12_sale_amt`, `bf19_sale_piece_qty`, `last_sysdate`
 
-#### 库存域 (v10简化, 3字段)
+#### 库存域 (v0.10简化, 3字段)
 `init_stock_qty_src`, `init_stock_amt_src`, `avg_inbound_price`
 
-#### 自购域 (v10新增, 2字段)
+#### 自购域 (v0.10新增, 2字段)
 `self_receive_qty`, `self_receive_amt`
 
 #### 供应链域 (来自 atomic_scm, 28字段)
@@ -210,7 +210,7 @@ ELSE (首日, 无历史):
     is_first_day   = 1 (全部标记为首日)
 ```
 
-#### 加工净额 (v10 compose correction)
+#### 加工净额 (v0.10 compose correction)
 
 加工成品成本由**加工关系**配方推算，不再使用 QDM 源表金额：
 
@@ -277,10 +277,10 @@ wide_df (t_atomic_wide)          ← 基础数据
   + bom_in_df (t_calc_bom_alloc, GROUP BY sub)    ← BOM流入
   + bom_out_df (t_calc_bom_alloc, GROUP BY parent) ← BOM流出
   + prev_df (t_calc_stock, 日期+1day)              ← 昨日库存
-  + 缺失BOM父品补全                                ← v10新增
+  + 缺失BOM父品补全                                ← v0.10新增
 ```
 
-### BOM父品补全 (v10新增)
+### BOM父品补全 (v0.10新增)
 
 如果某个 BOM 父品只在 `t_calc_bom_alloc` 中有 bom_out 但不在 `t_atomic_wide` 中，自动创建一行（所有非BOM字段为0），确保 bom_out 不会丢失。这保证了 BOM 对称性 (Σbom_in = Σbom_out)。
 
@@ -297,7 +297,7 @@ eq_end_qty = init_stock_qty
            - know_lost_qty      (已知损耗流出)
 ```
 
-### 分支逻辑 (v10 6分支)
+### 分支逻辑 (v0.10 6分支)
 
 | 优先级 | 条件 | end_stock_qty | unknow_lost_qty | 语义 |
 |--------|------|---------------|-----------------|------|
@@ -308,7 +308,7 @@ eq_end_qty = init_stock_qty
 | 5 | `actual_stock_qty > eq` | `actual_stock_qty` | `eq - actual` (负=盘盈) | 系统快照盘盈检测 |
 | 6 | 其他 | `eq` | 0 | 正常 |
 
-> **v10 修复**: is_counted 从仅人工盘点(`created_by != '系统'`)扩展到包含系统快照(`actual>0`)。分支5新增盘盈检测：系统记录的实盘超过方程计算值时自动识别盘盈。
+> **v0.10 修复**: is_counted 从仅人工盘点(`created_by != '系统'`)扩展到包含系统快照(`actual>0`)。分支5新增盘盈检测：系统记录的实盘超过方程计算值时自动识别盘盈。
 
 ### 金额派生
 
@@ -396,7 +396,7 @@ df['unknow_lost_qty'] = np.round(unknow_qty, 6)
 | `t_calc_stock` | 全量库存+SCM字段 | 主力计算 |
 | `t_atomic_wide` | original_price_sale_amt, allowance_amt, original_price, dc_original_price, outstock_cost_price_notax, return_cost_price_notax, original_outstock_qty, return_stock_qty | 价格字段补充 |
 
-### 核心毛利公式 (v10)
+### 核心毛利公式 (v0.10)
 
 ```
 profit_amt = sale_amt
@@ -407,7 +407,7 @@ profit_amt = sale_amt
            - lost_amt
 ```
 
-### 销售成本 (v10 统一公式)
+### 销售成本 (v0.10 统一公式)
 
 ```
 日清/非日清统一: sale_cost_amt = sale_qty × effective_unit_cost
@@ -455,7 +455,7 @@ pre_inbound_amount = receive_qty × dc_original_price
 
 | 字段 | 公式 | 说明 |
 |------|------|------|
-| `profit_amt` | 见核心公式 | 门店毛利额 (v10唯一毛利口径) ← A11修复 |
+| `profit_amt` | 见核心公式 | 门店毛利额 (v0.10唯一毛利口径) ← A11修复 |
 | `sale_cost_amt` | 见销售成本公式 | 销售成本 |
 | `pre_profit_amt` | `original_price_sale_amt - expected_cost` | 预期毛利额 (原价口径) |
 | `allowance_amt_profit` | `sale - receive + allowance + end - init` | 补贴后毛利 |

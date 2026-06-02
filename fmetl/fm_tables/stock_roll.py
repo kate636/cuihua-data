@@ -1,5 +1,5 @@
 """
-t_fm_stock_roll — 库存滚动展开表 (v10)
+t_fm_stock_roll — 库存滚动展开表 (v0.10)
 
 四流分离展示:
   init + receive + bom_in - bom_out + compose_in - compose_out

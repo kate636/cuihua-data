@@ -163,7 +163,7 @@
 | `discount_amt` | `SUM(discount_amt)` | 折扣总额 |
 | `vip_discount_amt` | `SUM(vip_discount_amt)` | 会员折扣额 |
 | `hour_discount_amt` | `SUM(hour_discount_amt)` | 时段折扣额 |
-| `member_discount_amt` | `SUM(vip_discount_amt)` | 会员优惠额 (v10: 同 vip_discount_amt) |
+| `member_discount_amt` | `SUM(vip_discount_amt)` | 会员优惠额 (v0.10: 同 vip_discount_amt) |
 | `store_paylevel_discount` | `SUM(COALESCE(store_paylevel_discount, 0))` | 门店支付级折扣 |
 | `company_paylevel_discount` | `SUM(COALESCE(company_paylevel_discount, 0))` | 公司支付级折扣 |
 
@@ -181,10 +181,10 @@
 
 ---
 
-### 域② atomic_inventory — 库存域 (7字段, v10简化)
+### 域② atomic_inventory — 库存域 (7字段, v0.10简化)
 
 **源表**: `strategy_fm_purchase_di`
-**v10变更**: 只提取 init_stock + avg_inbound_price，不再取 receive/end_stock
+**v0.10变更**: 只提取 init_stock + avg_inbound_price，不再取 receive/end_stock
 
 | 字段 | SQL来源 | 说明 |
 |------|---------|------|
@@ -285,7 +285,7 @@ END
 | `unknow_lost_qty_src` | `SUM(unknow_lost_qty)` | 未知损耗数量 (源表值) |
 | `unknow_lost_amt_src` | `SUM(unknow_lost_amt)` | 未知损耗金额 (源表值) |
 
-> **v10注意**: 标 `_src` 后缀的字段为源表原始值。在计算层中，未知损耗会由库存方程重新推导 (stock.py)，不再直接使用源表值。
+> **v0.10注意**: 标 `_src` 后缀的字段为源表原始值。在计算层中，未知损耗会由库存方程重新推导 (stock.py)，不再直接使用源表值。
 
 ---
 
@@ -342,7 +342,7 @@ END
 |------|---------|------|
 | `cost_price` | `MAX(cost_price)` | 成本价 (取当日最大值) |
 
-> **v10注意**: cost_price 在 v10 中不再参与 euc 计算 (A6 修复)。euc 统一用 avg_inbound_price 定价 compose。
+> **v0.10注意**: cost_price 在 v0.10 中不再参与 euc 计算 (A6 修复)。euc 统一用 avg_inbound_price 定价 compose。
 
 ---
 
@@ -362,7 +362,7 @@ END
 ### 域⑪ atomic_receive_sale — 进货销售域 (19字段, BOM核心)
 
 **源表**: `strategy_fm_receive_sale_di`
-**v10关键**: 此表是 BOM 分摊和自购数据的唯一数据源。
+**v0.10关键**: 此表是 BOM 分摊和自购数据的唯一数据源。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -396,10 +396,10 @@ END
 
 ---
 
-### atomic_bom_relation — BOM关系表 (11字段, v10观测用)
+### atomic_bom_relation — BOM关系表 (11字段, v0.10观测用)
 
 **源表**: `strategy_dim_store_article_bom_relation`
-**v10状态**: 仅提取观测，不参与计算。BOM分摊核心数据来自 `atomic_receive_sale`。
+**v0.10状态**: 仅提取观测，不参与计算。BOM分摊核心数据来自 `atomic_receive_sale`。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|

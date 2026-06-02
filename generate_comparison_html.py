@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-生成 v10 vs QDM 逐日 SKU 对比 HTML。
+生成 v0.10 vs QDM 逐日 SKU 对比 HTML。
 数据来源:
-  - v10: 本地 DuckDB (t_calc_stock + t_calc_profit + t_calc_sku_cost)
+  - v0.10: 本地 DuckDB (t_calc_stock + t_calc_profit + t_calc_sku_cost)
   - QDM: API 直查 default_catalog...dal_transaction_chdj_store_sale_article_sale_info_di
 
 用法: python3 generate_comparison_html.py [start_date] [end_date]
@@ -77,9 +77,9 @@ def fetch_qdm(start_date, end_date):
     return qdm
 
 
-# ════════════════════════ 2. 提取 v10 本地数据 ════════════════════════
-def fetch_v10(start_date, end_date):
-    """从本地 DuckDB 提取 v10 计算层数据 (去重)"""
+# ════════════════════════ 2. 提取 v0.10 本地数据 ════════════════════════
+def fetch_fm(start_date, end_date):
+    """从本地 DuckDB 提取 v0.10 计算层数据 (去重)"""
     conn = duckdb.connect(str(DUCKDB_PATH), read_only=True)
 
     # t_calc_stock (去重)
@@ -168,24 +168,24 @@ def fetch_v10(start_date, end_date):
         lambda t: ('bp' if '订购码' in t else '') + (' bs' if '销售码' in t else '') + (' cp' if '加工' in t else '')
     ).str.strip()
 
-    print(f"v10: {len(df)} rows, {df['business_date'].nunique()} days, {df['article_id'].nunique()} SKUs")
+    print(f"v0.10: {len(df)} rows, {df['business_date'].nunique()} days, {df['article_id'].nunique()} SKUs")
     return df
 
 
-# ════════════════════════ 3. 合并 v10 + QDM → JSON ════════════════════════
-def build_comparison(v10_df, qdm_df):
-    """合并 v10 和 QDM 数据, 产出对比 JSON"""
+# ════════════════════════ 3. 合并 v0.10 + QDM → JSON ════════════════════════
+def build_comparison(fm_df, qdm_df):
+    """合并 v0.10 和 QDM 数据, 产出对比 JSON"""
     import pandas as pd
 
     # 统一 day_clear 类型
-    v10_df['day_clear'] = v10_df['day_clear'].astype(str)
+    fm_df['day_clear'] = fm_df['day_clear'].astype(str)
     if qdm_df is not None:
         qdm_df['day_clear'] = qdm_df['day_clear'].astype(str)
 
     # 合并键
     keys = ['store_id', 'business_date', 'article_id', 'day_clear']
 
-    # 字段映射: 对比名 → (v10_amt, v10_qty, qdm_amt, qdm_qty)
+    # 字段映射: 对比名 → (fm_amt, fm_qty, qdm_amt, qdm_qty)
     field_map = [
         ('销售额',   'sale_amt', 'sale_qty', 'sale_amt', 'sale_qty'),
         ('进货',     'receive_amt', 'receive_qty', 'receive_amt', 'receive_qty'),
@@ -203,20 +203,20 @@ def build_comparison(v10_df, qdm_df):
     ]
 
     rows = []
-    dates = sorted(v10_df['business_date'].unique())
+    dates = sorted(fm_df['business_date'].unique())
 
     for d in dates:
-        v10_day = v10_df[v10_df['business_date'] == d]
+        fm_day = fm_df[fm_df['business_date'] == d]
         qdm_day = qdm_df[qdm_df['business_date'] == d] if qdm_df is not None else None
 
-        # 合并 v10 和 QDM
+        # 合并 v0.10 和 QDM
         if qdm_day is not None and len(qdm_day) > 0:
-            merged = v10_day.merge(qdm_day, on=keys, how='outer', suffixes=('_v10', '_qdm'))
+            merged = fm_day.merge(qdm_day, on=keys, how='outer', suffixes=('_v0.10', '_qdm'))
         else:
-            merged = v10_day.copy()
-            for c in v10_day.columns:
+            merged = fm_day.copy()
+            for c in fm_day.columns:
                 if c not in keys:
-                    merged[f'{c}_v10'] = merged[c]
+                    merged[f'{c}_v0.10'] = merged[c]
 
         # 对每个 SKU (取非日清行优先)
         for aid, grp in merged.groupby('article_id'):
@@ -227,19 +227,19 @@ def build_comparison(v10_df, qdm_df):
             row = {
                 'date': str(d),
                 'id': str(aid),
-                'nm': str(base.get('article_name_v10', base.get('article_name', ''))),
-                'cat': str(base.get('cat_v10', base.get('cat', '?'))),
-                'tag': str(base.get('tag_v10', base.get('tag', ''))),
-                'cls': str(base.get('cls_v10', base.get('cls', ''))),
-                'euc': round(float(grp['effective_unit_cost_v10'].mean()) if 'effective_unit_cost_v10' in grp.columns
+                'nm': str(base.get('article_name_v0.10', base.get('article_name', ''))),
+                'cat': str(base.get('cat_v0.10', base.get('cat', '?'))),
+                'tag': str(base.get('tag_v0.10', base.get('tag', ''))),
+                'cls': str(base.get('cls_v0.10', base.get('cls', ''))),
+                'euc': round(float(grp['effective_unit_cost_v0.10'].mean()) if 'effective_unit_cost_v0.10' in grp.columns
                        else float(grp['effective_unit_cost'].mean()) if 'effective_unit_cost' in grp.columns
                        else 0, 4),
             }
 
-            for name, v10_a, v10_q, qdm_a, qdm_q in field_map:
-                # merge 后 v10列带 _v10 后缀, QDM列带 _qdm 后缀
-                vA_col = f'{v10_a}_v10' if v10_a else None
-                vQ_col = f'{v10_q}_v10' if v10_q else None
+            for name, fm_a, fm_q, qdm_a, qdm_q in field_map:
+                # merge 后 v0.10列带 _v0.10 后缀, QDM列带 _qdm 后缀
+                vA_col = f'{fm_a}_v0.10' if fm_a else None
+                vQ_col = f'{fm_q}_v0.10' if fm_q else None
                 qA_col = f'{qdm_a}_qdm' if qdm_a else None
                 qQ_col = f'{qdm_q}_qdm' if qdm_q else None
 
@@ -249,7 +249,7 @@ def build_comparison(v10_df, qdm_df):
                 qQ = float(grp[qQ_col].sum()) if qQ_col and qQ_col in grp.columns else None
 
                 dA = round(vA - qA, 4) if (qA is not None) else None
-                dQ = round(vQ - qQ, 4) if (qQ is not None and v10_q) else None
+                dQ = round(vQ - qQ, 4) if (qQ is not None and fm_q) else None
 
                 row[name] = {
                     'vA': round(vA, 4), 'vQ': round(vQ, 4),
@@ -269,7 +269,7 @@ HTML_TEMPLATE = r'''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>v10 vs QDM 每日对比</title>
+<title>v0.10 vs QDM 每日对比</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,"Microsoft YaHei",sans-serif;font-size:12px;background:#f5f5f5;color:#333}
@@ -309,12 +309,12 @@ tr.tot td.stk,tr.tot td.tc{background:#fafafa!important}
 </head>
 <body>
 <div class="hdr">
-  <h1>SKU全字段对比 v10 vs QDM</h1>
+  <h1>SKU全字段对比 v0.10 vs QDM</h1>
   <s id="dateLabel">全部日期(日均)</s>
 </div>
 <div class="fm">
   <span class="e">门店毛利</span> = <span class="p">+销售额</span> <span class="m">&minus;进货</span> <span class="m">&minus;BOM入</span> <span class="p">+BOM出</span> <span class="m">&minus;加工入</span> <span class="p">+加工出</span> <span class="p">+期末库存</span> <span class="m">&minus;期初库存</span>
-  <span class="x">[v10=计算层 | Q=QDM直查 dal_transaction_* 表]</span>
+  <span class="x">[v0.10=计算层 | Q=QDM直查 dal_transaction_* 表]</span>
 </div>
 <div class="leg">
   <span class="lbp">订购码</span><span class="lbs">销售码</span><span class="lcp">加工</span>
@@ -338,7 +338,7 @@ tr.tot td.stk,tr.tot td.tc{background:#fafafa!important}
 <div class="cards" id="cards"></div>
 <div class="tbl-outer"><div class="tbl-inner"><table><thead>
 <tr><th class="stk c1">编码</th><th class="stk c2">名称</th><th class="stk c3">分类</th><th class="tc">标记</th><th class="fc" colspan="6">+ 销售额</th><th class="fc" colspan="6">&minus; 进货</th><th class="fc" colspan="2">&minus; BOM入</th><th class="fc" colspan="2">+ BOM出</th><th class="fc" colspan="6">&minus; 加工入</th><th class="fc" colspan="6">+ 加工出</th><th class="rc" colspan="2"> 库存转出</th><th class="rc" colspan="2"> 库存转入</th><th class="fc" colspan="6">&minus; 期初库存</th><th class="fc" colspan="6">+ 期末库存</th><th class="rc" colspan="6"> 已知损耗</th><th class="rc" colspan="6"> 未知损耗</th><th class="fc" colspan="3">= 门店毛利</th><th class="fc">euc</th></tr>
-<tr><th class="stk c1"></th><th class="stk c2"></th><th class="stk c3"></th><th class="tc"></th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>v10量</th><th>v10额</th><th>v10量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>v10量</th><th>v10额</th><th>v10量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10量</th><th>Q量</th><th>&Delta;量</th><th>v10额</th><th>Q额</th><th>&Delta;额</th><th>v10</th></tr>
+<tr><th class="stk c1"></th><th class="stk c2"></th><th class="stk c3"></th><th class="tc"></th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>v0.10量</th><th>v0.10额</th><th>v0.10量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>v0.10量</th><th>v0.10额</th><th>v0.10量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10量</th><th>Q量</th><th>&Delta;量</th><th>v0.10额</th><th>Q额</th><th>&Delta;额</th><th>v0.10</th></tr>
 </thead><tbody id="body"></tbody></table></div></div>
 
 <script>
@@ -524,8 +524,8 @@ function f() {
 
   var tp=tot['门店毛利'].s4A-tot['门店毛利'].sQA,tu=tot['未知损耗'].s4A-tot['未知损耗'].sQA,te=tot['期末库存'].s4A-tot['期末库存'].sQA;
   document.getElementById('cards').innerHTML=
-    '<div class="cd"><div class="vl">'+tot['销售额'].s4A.toFixed(0)+'</div><div class="lb">v10&S卖'+'</div></div>'+
-    '<div class="cd"><div class="vl" style="color:'+(Math.abs(tp)>100?(tp>0?'#cf1322':'#389e0d'):'#333')+'">'+(tp>0?'+':'')+tp.toFixed(1)+'</div><div class="lb">S毛利差 v10-Q'+'</div></div>'+
+    '<div class="cd"><div class="vl">'+tot['销售额'].s4A.toFixed(0)+'</div><div class="lb">v0.10&S卖'+'</div></div>'+
+    '<div class="cd"><div class="vl" style="color:'+(Math.abs(tp)>100?(tp>0?'#cf1322':'#389e0d'):'#333')+'">'+(tp>0?'+':'')+tp.toFixed(1)+'</div><div class="lb">S毛利差 v0.10-Q'+'</div></div>'+
     '<div class="cd"><div class="vl" style="color:'+(Math.abs(tu)>100?'#cf1322':'#333')+'">'+(tu>0?'+':'')+tu.toFixed(1)+'</div><div class="lb">S未知损耗差'+'</div></div>'+
     '<div class="cd"><div class="vl" style="color:'+(Math.abs(te)>1000?'#cf1322':'#333')+'">'+(te>0?'+':'')+te.toFixed(1)+'</div><div class="lb">S期末库存差'+'</div></div>'+
     '<div class="cd"><div class="vl">'+dayCount+'</div><div class="lb">天数</div></div>';
@@ -549,17 +549,17 @@ if __name__ == '__main__':
     end_date = sys.argv[2] if len(sys.argv) > 2 else '2026-05-20'
 
     print("=" * 60)
-    print(f"v10 vs QDM 对比报告: {start_date} ~ {end_date}")
+    print(f"v0.10 vs QDM 对比报告: {start_date} ~ {end_date}")
     print("=" * 60)
 
     # 1. 拉取 QDM
     qdm = fetch_qdm(start_date, end_date)
 
-    # 2. 提取 v10
-    v10 = fetch_v10(start_date, end_date)
+    # 2. 提取 FM
+    fm = fetch_fm(start_date, end_date)
 
     # 3. 合并对比
-    rows, dates = build_comparison(v10, qdm)
+    rows, dates = build_comparison(fm, qdm)
 
     # 4. 生成 HTML
     dates_json = json.dumps(dates)
@@ -571,7 +571,7 @@ if __name__ == '__main__':
     html = html.replace('__DATA__', data_json)
     html = html.replace('__CATEGORIES__', cat_options)
 
-    outpath = OUTPUT_DIR / f'v10_vs_QDM_{start_date}_{end_date}.html'
+    outpath = OUTPUT_DIR / f'v0.10_vs_QDM_{start_date}_{end_date}.html'
     outpath.write_text(html, encoding='utf-8')
     mb = outpath.stat().st_size / (1024 * 1024)
     print(f"\n完成! ({mb:.1f} MB)")

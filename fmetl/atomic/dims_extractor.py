@@ -29,8 +29,8 @@ class DimsExtractor:
 
     def extract_all(self, yesterday: str, start: str, end: str) -> None:
         """提取所有维度表快照。"""
-        self._extract_goods(end)  # v10 fix: 用end确保dim_goods是最新日期
-        self._build_day_clear_override()  # v10 fix: 从dim_goods派生日清覆盖白名单
+        self._extract_goods(end)  # v0.10 fix: 用end确保dim_goods是最新日期
+        self._build_day_clear_override()  # v0.10 fix: 从dim_goods派生日清覆盖白名单
         self._extract_store_list(start, end)
         self._extract_day_clear(start, end)
         self._extract_store_profile(yesterday)

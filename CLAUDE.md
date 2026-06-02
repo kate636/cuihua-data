@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v10.0**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
+**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v0.10**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
 
 ## Project Skills
 
@@ -187,7 +187,7 @@ ORDER BY ABS(diff) DESC
 
 ---
 
-## Architecture: 3-Layer ETL (v10.0)
+## Architecture: 3-Layer ETL (v0.10)
 
 ### 设计原则
 - **简单SQL，复杂逻辑Python**: SQL 仅做 SELECT/JOIN/GROUP BY/WHERE。计算、分支、窗口函数在 Python（pandas + NumPy）完成
@@ -456,7 +456,7 @@ class MyExtractor(BaseExtractor):
 ```
 
 ### Calculator 模式 (Python 计算)
-v10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Calculator 读取 DuckDB 数据为 DataFrame → pandas/NumPy 计算 → 写回 DuckDB。
+v0.10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Calculator 读取 DuckDB 数据为 DataFrame → pandas/NumPy 计算 → 写回 DuckDB。
 
 ### 日期分片 & 写入模式
 `BaseExtractor.extract()` 按 7 天 chunk 拆分，逐片 API 请求后用 `replace_partition` 模式写入（先删后插，幂等）。`DuckDBStore.load_df()` 支持 `replace_partition`（默认）、`replace`、`append` 三种模式。
@@ -465,7 +465,7 @@ v10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。Ca
 
 ```
 翠花数据/
-├── fmetl/                    # 主 ETL Pipeline v10.0
+├── fmetl/                    # 主 ETL Pipeline v0.10
 │   ├── executor.py          # 主入口 (13步)
 │   ├── config/              # API凭证配置
 │   ├── connectors/          # ApiConnector + DuckDBStore
@@ -661,7 +661,7 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 QDM 的 `lost_amt` 可以为负（盘盈/inventory gain），FM 的库存方程在"正常"分支
 不产生负损耗。QDM 盘盈是运营记录（净库存调整），FM 损耗是方程残差。
 
-### v10 修复
+### v0.10 修复
 
 1. **is_counted 扩展**: 不仅 `created_by != '系统'` 触发，系统快照中 `actual_stock_qty > 0`
    的记录也会触发盘点逻辑（`is_counted = True`）
@@ -710,7 +710,7 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 
 ## Key Documents
 
-- [fmetl/README.md](fmetl/README.md) — v10.0 完整pipeline说明 (13步, 核心公式, 修复对照表)
-- [fmetl/docs/ETL_v10_完整处理逻辑.md](fmetl/docs/ETL_v10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
+- [fmetl/README.md](fmetl/README.md) — v0.10 完整pipeline说明 (13步, 核心公式, 修复对照表)
+- [fmetl/docs/ETL_v0.10_完整处理逻辑.md](fmetl/docs/ETL_v0.10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
 - [fmetl/docs/strategy_fm_字段手册_完整版.md](fmetl/docs/strategy_fm_字段手册_完整版.md) — QDM源表完整字段手册
-- [fmetl/docs/差异问题与待办事项_v10.md](fmetl/docs/差异问题与待办事项_v10.md) — QDM对比差异分析 + 行动计划
+- [fmetl/docs/差异问题与待办事项_v0.10.md](fmetl/docs/差异问题与待办事项_v0.10.md) — QDM对比差异分析 + 行动计划

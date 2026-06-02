@@ -1,10 +1,10 @@
 """
-FM 结果层 (v10)
+FM 结果层 (v0.10)
 
 输入: t_fm_levels_sum
 输出: t_fm_levels_result (中文列名 + 比率 KPI)
 
-v10: 移除 store_profit_sales/store_profit_stock/store_profit_diff
+v0.10: 移除 store_profit_sales/store_profit_stock/store_profit_diff
 """
 
 from __future__ import annotations

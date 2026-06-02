@@ -1,5 +1,5 @@
 """
-t_calc_stock — 库存与金额中枢 (v10 Python 重写，合并原 stock + amounts)
+t_calc_stock — 库存与金额中枢 (v0.10 Python 重写，合并原 stock + amounts)
 
 四流合一的库存方程:
   eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_lost
@@ -34,7 +34,7 @@ class StockCalculator:
         self._log = get_logger("StockCalculator")
 
     def run(self) -> None:
-        self._log.info("calculating stock & amounts (v10 Python, four-flow, sequential days) ...")
+        self._log.info("calculating stock & amounts (v0.10 Python, four-flow, sequential days) ...")
         conn = self._duck._conn
 
         wide_df = conn.execute("""
@@ -298,7 +298,7 @@ class StockCalculator:
             df['is_first_day'] = 1
 
         # ── compose 金额 ───────────────────────────────────────────
-        # v10 compose correction: 优先用 sku_cost 修正值（加工关系推算），回退源表
+        # v0.10 compose correction: 优先用 sku_cost 修正值（加工关系推算），回退源表
         df['compose_in_amt'] = df['compose_in_amt_corrected'].fillna(0)
         df['compose_out_amt'] = df['compose_out_amt_corrected'].fillna(0)
         df['receive_amt'] = df['self_receive_amt']
@@ -432,7 +432,7 @@ class StockCalculator:
                                (df['business_date'] == pr['business_date']),
                                'end_stock_amt'] = 0.0
 
-                        # v10 fix: 不重复增加父品 bom_out_amt/qty
+                        # v0.10 fix: 不重复增加父品 bom_out_amt/qty
                         # BOM alloc 已将 100% 母品成本分摊给子品, stock_transfer 清零
                         # end_stock 后 bom_out 已等于 receive_amt, 再加 transfer 会重复记账
 
@@ -522,7 +522,7 @@ class StockCalculator:
     # 详细日志
     # ═══════════════════════════════════════════════════════════════
     def _log_detail(self, df: pd.DataFrame) -> None:
-        # v10 fix: dim_goods 分类关联延迟到 FM 底表层，计算层不再引用
+        # v0.10 fix: dim_goods 分类关联延迟到 FM 底表层，计算层不再引用
         df['cat'] = '?'
 
         bom_parents = df[df['bom_out_amt'].abs() > 0.01]

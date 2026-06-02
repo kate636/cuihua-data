@@ -210,12 +210,12 @@ df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
        'end_stock_qty'] = 0.0
 df.loc[parent_mask & ..., 'end_stock_amt'] = 0.0
 
-# v10 fix: 不重复增加父品 bom_out_amt/qty
+# v0.10 fix: 不重复增加父品 bom_out_amt/qty
 # BOM alloc 已将 100% 母品成本分摊给子品, stock_transfer 清零
 # end_stock 后 bom_out 已等于 receive_amt, 再加 transfer 会重复记账
 
 # 修改后:
-# v10 fix: end_stock 清零，同时增加 bom_out 以保持利润方程平衡
+# v0.10 fix: end_stock 清零，同时增加 bom_out 以保持利润方程平衡
 # stock_transfer 的本质是父品将残留库存分给子品 = 额外的 BOM 流出
 df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
        (df['store_id'] == pr['store_id']) &
@@ -307,7 +307,7 @@ df['profit_amt'] = (
 - 改动范围最小 (2行)
 - transfer 确实可视为 "延迟的 BOM 流出"
 - 不需要改动 profit.py 的通用公式
-- 已在 v10 架构中预留了这个扩展 (原注释提到"不重复增加"，改为"增加"即可)
+- 已在 v0.10 架构中预留了这个扩展 (原注释提到"不重复增加"，改为"增加"即可)
 
 ---
 

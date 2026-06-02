@@ -1,5 +1,5 @@
 """
-FM ETL v10.0 主执行器
+FM ETL v0.10 主执行器
 
 用法:
     python -m fmetl.executor 2026-04-23 2026-04-23
@@ -9,14 +9,14 @@ FM ETL v10.0 主执行器
 
 凭证: QDM_ACCESS_KEY / QDM_SECRET_KEY (.env 或环境变量)
 
-Pipeline (v10.0, 13 步):
+Pipeline (v0.10, 13 步):
   Step 1   维度表快照
   Step 2   13 个原子域抽数
   Step 3   原子宽表合并 (t_atomic_wide)
-  Step 4   BOM 分摊 (t_calc_bom_alloc)          ← v10 修复共享组 + 负值保护
-  Step 5   SKU 有效单位成本 (t_calc_sku_cost)    ← v10 Python 重写
-  Step 6   库存与金额 (t_calc_stock)             ← v10 四流合一，Python 重写
-  Step 7   门店毛利 (t_calc_profit)              ← v10 Python 重写，新公式
+  Step 4   BOM 分摊 (t_calc_bom_alloc)          ← v0.10 修复共享组 + 负值保护
+  Step 5   SKU 有效单位成本 (t_calc_sku_cost)    ← v0.10 Python 重写
+  Step 6   库存与金额 (t_calc_stock)             ← v0.10 四流合一，Python 重写
+  Step 7   门店毛利 (t_calc_profit)              ← v0.10 Python 重写，新公式
   Step 8   FM 商品维度底表 (t_fm_sku_dim)
   Step 9   FM 客数 (t_fm_cust)
   Step 10  FM 分类汇总 (t_fm_levels_sum)
@@ -62,7 +62,7 @@ def run(start: str, end: str, stages: str = "all") -> None:
     cfg = get_settings()
     yesterday = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
 
-    _log.info(f"═══ FM ETL v10.0 START  {start} ~ {end}  (stage={stages}) ═══")
+    _log.info(f"═══ FM ETL v0.10 START  {start} ~ {end}  (stage={stages}) ═══")
     t0 = time.time()
 
     api  = ApiConnector(cfg)
@@ -83,7 +83,7 @@ def run(start: str, end: str, stages: str = "all") -> None:
         duck.close()
 
     elapsed = time.time() - t0
-    _log.info(f"═══ FM ETL v10.0 DONE  elapsed={elapsed:.1f}s ═══")
+    _log.info(f"═══ FM ETL v0.10 DONE  elapsed={elapsed:.1f}s ═══")
 
 
 def _run_atomic(api, duck, start, end, yesterday):
@@ -126,16 +126,16 @@ def _run_merge(duck, start, end):
 
 
 def _run_calc(duck):
-    _step("Step 4: BOM 分摊 → t_calc_bom_alloc [v10 修复]")
+    _step("Step 4: BOM 分摊 → t_calc_bom_alloc [v0.10 修复]")
     BomAllocCalculator(duck).run()
 
-    _step("Step 5: SKU 有效单位成本 → t_calc_sku_cost [v10 Python]")
+    _step("Step 5: SKU 有效单位成本 → t_calc_sku_cost [v0.10 Python]")
     SkuCostCalculator(duck).run()
 
-    _step("Step 6: 库存与金额 → t_calc_stock [v10 四流合一 Python]")
+    _step("Step 6: 库存与金额 → t_calc_stock [v0.10 四流合一 Python]")
     StockCalculator(duck).run()
 
-    _step("Step 7: 门店毛利 → t_calc_profit [v10 Python 新公式]")
+    _step("Step 7: 门店毛利 → t_calc_profit [v0.10 Python 新公式]")
     ProfitCalculator(duck).run()  # debug_categories 仅在排查单品类时传入
 
 

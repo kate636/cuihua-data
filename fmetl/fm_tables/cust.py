@@ -1,12 +1,12 @@
 """
-FM 客数底表 (v10)
+FM 客数底表 (v0.10)
 
 粒度: 门店 × 日期 × day_clear × level_description × level_id
 输入: strategy_fm_sales_di (via API) + dim_goods
 输出: t_fm_cust
 
-v10 修复 (A16): Python JOIN dim_goods 后排除 70-77 品类物料
-v10 修复 (B1): 分类映射从 SQL IF 嵌套迁移到 Python pandas（避免 QDM API 12 层嵌套失败）
+v0.10 修复 (A16): Python JOIN dim_goods 后排除 70-77 品类物料
+v0.10 修复 (B1): 分类映射从 SQL IF 嵌套迁移到 Python pandas（避免 QDM API 12 层嵌套失败）
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ class CustBuilder:
         """).df()
         df = df.merge(goods_df, on='article_id', how='left')
 
-        # v10 A16 fix: Python 端排除物料类 (70-77)
+        # v0.10 A16 fix: Python 端排除物料类 (70-77)
         before = len(df)
         if 'category_level1_id' in df.columns:
             df['category_level1_id_raw'] = df['category_level1_id'].astype(str)
@@ -138,7 +138,7 @@ class CustBuilder:
             f"{after} after category filter (excluded {before - after})"
         )
 
-        # v10 B1 fix: Python 端品类重映射 (master-data v2.1)
+        # v0.10 B1 fix: Python 端品类重映射 (master-data v2.1)
         _remap_category_level1(df)
 
         self._duck.load_df(df, "order_detail", mode="replace")

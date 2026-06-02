@@ -1,7 +1,7 @@
 """
-t_calc_profit — 门店毛利 (v10 Python 重写)
+t_calc_profit — 门店毛利 (v0.10 Python 重写)
 
-v10 核心公式:
+v0.10 核心公式:
   profit = sale
          - receive - bom_in + bom_out
          - compose_in + compose_out
@@ -12,7 +12,7 @@ sale_cost_amt:
   日清: receive + bom_in - bom_out + compose_in - compose_out - lost
   非日清: sale_qty × euc
 
-v10 删除冗余: 不再区分 profit_amt / store_profit_stock，只保留一个 profit_amt
+v0.10 删除冗余: 不再区分 profit_amt / store_profit_stock，只保留一个 profit_amt
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class ProfitCalculator:
 
     def run(self) -> None:
         """计算门店毛利。大分类诊断已迁移至 FM 底表层 (sku_dim.py)。"""
-        self._log.info("calculating profit (v10 Python) ...")
+        self._log.info("calculating profit (v0.10 Python) ...")
         conn = self._duck._conn
 
         # ── 1. 加载 t_calc_stock ─────────────────────────────────────
@@ -175,6 +175,6 @@ class ProfitCalculator:
             f"Σprofit={df['profit_amt'].sum():.2f}"
         )
 
-        # v10 fix: 大分类毛利汇总已迁移到 FM 底表层 (sku_dim.py)
+        # v0.10 fix: 大分类毛利汇总已迁移到 FM 底表层 (sku_dim.py)
         # 计算层不再依赖 dim_goods 做分类诊断
 

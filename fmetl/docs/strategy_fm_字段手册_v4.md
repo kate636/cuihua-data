@@ -1,6 +1,6 @@
-# FM ETL v10 字段手册
+# FM ETL v0.10 字段手册
 
-> **版本**: v4 (v10.0) / 2026-05-08
+> **版本**: v4 (v0.10) / 2026-05-08
 > **范围**: ETL 产出的 FM 底表 + 计算层中间表
 > **源表参考**: v3 完整版字段手册 (fm_etl_v3/docs/)
 
@@ -28,7 +28,7 @@
 
 ⚠ 查询"全天合计"必须 `WHERE day_clear='2'`。GROUP BY day_clear 再 SUM 会翻倍。
 
-### 1.3 门店毛利公式 (v10)
+### 1.3 门店毛利公式 (v0.10)
 
 **核心公式** (四流合一):
 ```
@@ -432,7 +432,7 @@ euc = cost_amt / cost_qty  (仅当 cost_qty > 0)
 | `sub_qty_actual` / `sub_qty_source` | 子品实际消耗量 |
 | `sub_alloc_amt` / `sub_unit_cost` | 子品分摊额/单价 |
 
-**v10 关键修复**:
+**v0.10 关键修复**:
 - A13: 共享组 parent_inbound_qty 取组总 qty
 - A14: split_need_qty = max(0, consume - self_inbound)
 - A18: 共享子品按进货额比例拆分为两行, 各父品承担自身份额
@@ -505,7 +505,7 @@ bom_alloc_qty (parent units) = split_need_qty (sub units) × conv_ratio
 
 ---
 
-## 九、v10 修复完全对照表
+## 九、v0.10 修复完全对照表
 
 | # | 异常 | 修复位置 | 修复方案 |
 |---|---|---|---|
@@ -533,5 +533,5 @@ bom_alloc_qty (parent units) = split_need_qty (sub units) × conv_ratio
 ---
 
 *生成时间: 2026-05-08*
-*版本: v4 (v10.0)*
+*版本: v4 (v0.10)*
 *数据来源: fmetl ETL 管线输出*

@@ -1,4 +1,4 @@
-# fmetl v10.0 — 翠花当家数据管道
+# fmetl v0.10 — 翠花当家数据管道
 
 ## 目录
 
@@ -9,7 +9,7 @@
 5. [完整计算逻辑流程](#5-完整计算逻辑流程)
 6. [13步流程详解](#6-13步流程详解)
 7. [QDM源表→DuckDB表映射](#7-源表映射)
-8. [v10修复对照表](#8-v10修复对照表)
+8. [v0.10修复对照表](#8-v0.10修复对照表)
 9. [day_clear字段说明](#9-day_clear字段说明)
 10. [验证方案](#10-验证方案)
 11. [环境配置](#11-环境配置)
@@ -43,7 +43,7 @@
 
 这组分层完整落到 DuckDB 表里：`atomic_*` 对应 Layer -2，`t_calc_*` 对应 Layer -1，`t_fm_*` 是最终对外的 Layer 0。
 
-**v10 新增设计原则**：
+**v0.10 新增设计原则**：
 
 | 原则 | 说明 |
 |------|------|
@@ -52,9 +52,9 @@
 | **四流分离** | 进货(receive)、拆分入(bom_in)、拆分出(bom_out)、加工入/出(compose_in/out) 各自独立列，一目了然 |
 | **跨日链式传递** | 今日期初库存 = 昨日期末库存，通过 `t_calc_stock` 逐日滚动 |
 
-### 1.3 从 v9 到 v10 的迭代
+### 1.3 从 v9 到 v0.10 的迭代
 
-| 方面 | v9（旧） | v10（现在） |
+| 方面 | v9（旧） | v0.10（现在） |
 |------|---------|------------|
 | 计算引擎 | SQL 内嵌复杂 CASE/窗口函数 | **Python pandas + NumPy** 计算，SQL 仅拉数据 |
 | 计算模块 | 7 张 calc 表 (inventory + avg_price + amounts + ...) | **4 张 calc 表** (删除 3 个冗余模块，合并到 stock.py) |
@@ -87,49 +87,103 @@
 
 ## 2. 系统架构与硬性红线
 
+### 2.1 部署架构
+
 ```
-┌─── 本地 Mac (开发) ────────────┐
-│ Cursor 改代码                  │
-│   │                            │
-│   │ git push                   │
-│   ▼                            │
-└─── GitHub 私有仓库 cuihua-data ┘
-            │
-            │  每日 08:50 git pull --ff-only
-            ▼
-┌─── 阿里云 ECS 47.115.213.115 (广州) ─────────────────────┐
-│                                                         │
-│  /opt/fm/etl/cuihua-data/    代码（git clone）          │
-│  /opt/fm/data/fm.duckdb      唯一数据文件（不上 GitHub）│
-│  /opt/fm/logs/               ETL + API 日志             │
-│                                                         │
-│   cron 08:50                                            │
-│     ↓                                                   │
-│   daily_run.sh                                          │
-│     ↓                                                   │
-│   python -m fmetl.executor 昨天 昨天               │
-│     │                                                   │
-│     │ 独占写                                            │
-│     ▼                                                   │
-│   /opt/fm/data/fm.duckdb  ←─── 读 (read_only=True) ──┐  │
-│                                                      │  │
-│   /opt/fm/data/fm.duckdb  ←─── 读 (read_only=True)      │
-│                                                         │
-│   nginx :8080                                           │
-│     ├─ /reports/       静态报告页面                     │
-│     └─ /api/proc-rel/  → 127.0.0.1:5003 (加工关系API)   │
-│                    ▲                                 │  │
-└────────────────────┼─────────────────────────────────┘  │
-                     │                                    │
-            ┌────────────┼────────────┐                   │
-            │            │            │                   │
+                         ┌─── 翠花经营监控平台 (FM Platform) ───┐
+                         │  http://47.115.213.115:8080/reports/  │
+                         │                                       │
+                         │  ┌─ 报表看板                         │
+                         │  │  经营日报 / 毛利分析 / 损耗归因    │
+                         │  │  AI SKU 诊断                      │
+                         │  ├─ 加工关系管理 (网页端)             │
+                         │  │  业务填写原料→成品配方            │
+                         │  │  /reports/processing-relation.html │
+                         │  └─ 加工关系 API (Flask, :5003)       │
+                         │     SQLite 存储, systemd 保活         │
+                         └──────────┬────────────────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    │               │               │
+              BI API 查源表    nginx 反向代理    读取底表
+              (StarRocks)     /api/proc-rel/   (DuckDB)
+                    │               │               │
+    ┌───────────────┼───────────────┼───────────────┼──────────────┐
+    │                                         阿里云 ECS (广州)    │
+    │                                         47.115.213.115       │
+    │                                                              │
+    │  ┌───────────────────────────────────────────────────────┐  │
+    │  │              fmetl v0.10 ETL 管道                     │  │
+    │  │                                                       │  │
+    │  │  sync_strategy_fm.sql (手动)                          │  │
+    │  │    Hive → StarRocks 21张源表同步                      │  │
+    │  │            │                                          │  │
+    │  │            ▼                                          │  │
+    │  │  ① atomic_* (15张) ← BI API 拉取                     │  │
+    │  │  ② t_atomic_wide (82字段) ← merge                     │  │
+    │  │  ③ t_calc_bom_alloc (BOM分摊, Python 8步)            │  │
+    │  │  ④ t_calc_sku_cost (加权成本, 跨日链)                │  │
+    │  │  ⑤ t_calc_stock (四流合一, 库存方程, 中枢)           │  │
+    │  │  ⑥ t_calc_profit (门店毛利, 含BOM+SCM)               │  │
+    │  │  ⑦ t_fm_* (6张底表) → /opt/fm/data/fm.duckdb         │  │
+    │  │                                                       │  │
+    │  │  验证: 负库存/BOM对称/方程平衡/QDM对比                │  │
+    │  └───────────────────────────────────────────────────────┘  │
+    │                                                              │
+    │  /opt/fm/etl/cuihua-data/   代码 (git clone)                │
+    │  /opt/fm/data/fm.duckdb     数据文件 (不上 GitHub)          │
+    │  /opt/fm/logs/              ETL 日志                        │
+    │                                                              │
+    │  cron 08:50: cd /opt/fm/etl && git pull && 跑ETL            │
+    └──────────────────────────────────────────────────────────────┘
+                    │
+                    │ git push
+                    ▼
+    ┌──────────────────────────────┐
+    │  GitHub 私有仓库              │
+    │  kate636/cuihua-data          │
+    └──────────────────────────────┘
+                    │
+                    │ git push / pull
+                    ▼
+    ┌──────────────────────────────┐
+    │  本地 Mac (开发)              │
+    │  Cursor + Claude Code         │
+    │  三 agent 流程:               │
+    │    设计 → 编码 → 审查         │
+    │  持久记忆 + Skill 体系        │
+    └──────────────────────────────┘
 ```
 
-### 两条硬性红线
+### 2.2 系统互动关系
+
+| 组件 | 如何互动 | 方向 |
+|------|---------|:---:|
+| StarRocks 源表 → ETL | BI API 拉取 21 张 strategy_fm_* 表，7天chunk分区写入 | 拉 |
+| Hive → StarRocks | sync_strategy_fm.sql 每日手动执行，从 Hive 同步到商分库 | 推 |
+| 加工关系 → ETL | API 优先 (nginx :8080/api/proc-rel/)，失败回退本地 JSON 缓存，成功后自动写回缓存 | 拉 |
+| ETL → DuckDB | 13 步计算产出 6 张底表，写入 /opt/fm/data/fm.duckdb | 写 |
+| DuckDB → FM 看板 | nginx :8080 静态报告 + DuckDB 直连查询 | 读 |
+| 本地 → 服务器 | git push → GitHub → cron pull，全量重刷后 scp DuckDB | 推 |
+| 持久记忆/Skill → Agent | 新 session 启动时自动加载 13 条记忆 + 22+ Skill | 自动 |
+
+### 2.3 迭代路径
+
+```
+v3 (旧版) ──→ v4 (BOM重写) ──→ v0.10 (架构重构)
+  SQL计算        scripts/下9版     三层分离
+  7张calc表      临时脚本验证       4张calc表
+                                  三agent流程
+                                  修复文档体系
+```
+
+BOM 分摊逻辑在 `fm_etl_v3/scripts/` 下迭代了 9 版临时脚本，每版输出详细中间计算结果逐行验证，确认正确后才集成到 ETL 主流程。
+
+### 2.4 两条硬性红线
 
 | 红线 | 强制手段 |
 |---|---|
-| **数据库绝不上 GitHub** | `.gitignore` 排除 `data/` / `*.duckdb` / `*.duckdb.wal`；云端 `.env` 也不入库 |
+| **数据库绝不上 GitHub** | `.gitignore` 排除 `data/` / `*.duckdb` / `*.duckdb.wal`；`.env` 也不入库 |
 | **现有看板一律不动** | `/opt/fm/reports/` 保持现状；nginx :8080 已配置 `/reports/` 和 `/api/proc-rel/` |
 
 ---
@@ -408,7 +462,7 @@ fmetl/
 
 ### BOM 分摊完整流程（Σ总权重 + 共享组识别 + 单位归一化）
 
-BOM (Bill of Materials) 是 v10 最复杂的计算模块。核心问题：当一个父品（如"大白猪A级"）拆分为多个子品（五花肉、前腿肉...）销售时，如何将父品的进货成本合理分摊到各子品？
+BOM (Bill of Materials) 是 v0.10 最复杂的计算模块。核心问题：当一个父品（如"大白猪A级"）拆分为多个子品（五花肉、前腿肉...）销售时，如何将父品的进货成本合理分摊到各子品？
 
 **数据源**：唯一使用 `atomic_receive_sale`（`strategy_fm_receive_sale_di`），不再使用 `atomic_bom_relation`。
 
@@ -457,7 +511,7 @@ BOM (Bill of Materials) 是 v10 最复杂的计算模块。核心问题：当一
 
   IF self_inbound_qty > 0 (Type A):
       split_need_weight = max(0, consume_weight - self_inbound_weight)
-      split_need_qty   = max(0, consume_qty - self_inbound_qty)     ← v10 A14: 防负
+      split_need_qty   = max(0, consume_qty - self_inbound_qty)     ← v0.10 A14: 防负
   ELSE (Type B/C):
       split_need_weight = consume_weight
       split_need_qty   = consume_qty
@@ -471,13 +525,13 @@ BOM (Bill of Materials) 是 v10 最复杂的计算模块。核心问题：当一
   alloc_ratio = split_need_weight / Σ总权重
   bom_alloc_amt = alloc_ratio × 组总 parent_inbound_amount
 
-  【共享子品分拆】(v10 A18):
+  【共享子品分拆】(v0.10 A18):
     共享子品（同时属于两个parent）按各 parent 进货额比例分拆:
     p0_ratio = parent_A.amt / (parent_A.amt + parent_B.amt)
     p1_ratio = parent_B.amt / (parent_A.amt + parent_B.amt)
     → 生成两行: (parent_A, sub, bom_alloc_amt×p0_ratio) + (parent_B, sub, bom_alloc_amt×p1_ratio)
 
-  【单位归一化】(v10 A19):
+  【单位归一化】(v0.10 A19):
     bom_alloc_qty = split_need_qty × (parent_qty / sum_sub_qty) × qty_split_ratio
     例: 海大虾 1箱=12kg, 子品消耗10kg → bom_out = 10 × (1/12) = 0.833箱
     目的: 保证库存方程各列单位一致 (全部用父品单位)
@@ -710,7 +764,7 @@ Day T+1:
 
 ---
 
-## 8. v10修复对照表
+## 8. v0.10修复对照表
 
 | # | 异常描述 | 影响 | 修复位置 | 修复方案 |
 |---|---------|------|---------|---------|
@@ -783,7 +837,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 
 ### 与 QDM 对比
 
-选取 3 个 SKU (20003470, 20015855, 21292699) 对比 v10 输出 vs QDM `strategy_fm_levels_result`:
+选取 3 个 SKU (20003470, 20015855, 21292699) 对比 v0.10 输出 vs QDM `strategy_fm_levels_result`:
 
 | 指标 | 期望差异 | 原因 |
 |------|---------|------|
@@ -791,7 +845,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 | 进货额 (inbound_amount) | 完全一致 | 源表相同 |
 | 期初库存额 | 完全一致 | 首日源表相同 |
 | 期末库存额 | < 0.5% | 浮点精度差异 |
-| 门店毛利额 | 有偏差 | v10 新公式含 BOM (A10/A12 修复) |
+| 门店毛利额 | 有偏差 | v0.10 新公式含 BOM (A10/A12 修复) |
 
 ### 2026-04-23 验证结果
 
@@ -803,7 +857,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 - ✅ BOM 对称: Σbom_in = Σbom_out
 - ✅ 核心金额 (sale/inbound/init/end) 匹配 QDM，差异 < 0.3%
 - ⚠️ 猪肉类毛利 v4=431 vs QDM=545 (差距-114, 来自 euc=0 的BOM加工品和共享组权重计算差异)
-- ⚠️ 毛利偏离 QDM — 预期内 (v10 纳入 BOM 毛利, A10/A12/A17-A19)
+- ⚠️ 毛利偏离 QDM — 预期内 (v0.10 纳入 BOM 毛利, A10/A12/A17-A19)
 
 ---
 

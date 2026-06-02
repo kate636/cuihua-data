@@ -1,5 +1,5 @@
 """
-t_fm_bom_breakdown — BOM 分摊溯源表 (v10)
+t_fm_bom_breakdown — BOM 分摊溯源表 (v0.10)
 
 粒度: (store, date, parent, sub)
 输入: t_calc_bom_alloc + dim_goods + dim_chdj_store_info + dim_store_profile

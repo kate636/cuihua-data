@@ -1,5 +1,5 @@
 """
-t_calc_bom_alloc — BOM 分摊事实表 (v10)
+t_calc_bom_alloc — BOM 分摊事实表 (v0.10)
 
 核心逻辑:
   1. 消耗权重 = (sale_qty + know_lost_qty) × list_price
@@ -9,7 +9,7 @@ t_calc_bom_alloc — BOM 分摊事实表 (v10)
   5. 分配占比 = 拆分需求权重 / Σ总权重
   6. bom_alloc_amt = 分配占比 × 组总进货额
 
-v10 修复:
+v0.10 修复:
   A13: 共享组 parent_inbound_qty 取组总 qty，非第一个 parent
   A14: split_need_qty = max(0, consume_qty - self_inbound_qty) 防负
 """
@@ -29,7 +29,7 @@ class BomAllocCalculator:
         self._conn = duck._conn
 
     def run(self) -> None:
-        self._log.info("calculating BOM allocation (v10) ...")
+        self._log.info("calculating BOM allocation (v0.10) ...")
 
         # Step 1: BOM关系（只取 parent != sub 的行）
         bom_relations = self._conn.execute("""
@@ -375,7 +375,7 @@ class BomAllocCalculator:
         self_inbound_weight_val = self_inbound_qty_val * list_price_val
         is_type_a_val = weight_info.get('is_type_a', False)
 
-        # v10 A14 fix: max(0, ...) 防负值
+        # v0.10 A14 fix: max(0, ...) 防负值
         if is_type_a_val:
             split_need_qty_val = max(0.0, consume_qty_val - self_inbound_qty_val)
             split_need_weight = max(0.0, consume_weight_val - self_inbound_weight_val)
@@ -383,7 +383,7 @@ class BomAllocCalculator:
             split_need_qty_val = consume_qty_val
             split_need_weight = consume_weight_val
 
-        # v10 fix: 按总产量(非销量)分配母品成本到子品
+        # v0.10 fix: 按总产量(非销量)分配母品成本到子品
         # alloc_ratio 已编码成本分配权重，qty 同比例从总产量分配
         sum_sub = parent_sum_sub_qty if parent_sum_sub_qty else parent_qty
         bom_alloc_qty_parent = alloc_ratio * parent_qty

@@ -1,11 +1,11 @@
 """
-FM 商品维度底表 (v10)
+FM 商品维度底表 (v0.10)
 
 粒度: 门店 × 日期 × article_id × day_clear
 输入: t_atomic_wide + t_calc_stock + t_calc_profit + dim_*
 输出: t_fm_sku_dim
 
-v10 变更:
+v0.10 变更:
   - 类别重映射从 SQL CASE WHEN 移到 Python
   - inbound 统一从 t_calc_stock 取
 """

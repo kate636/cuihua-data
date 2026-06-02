@@ -1,7 +1,7 @@
 """
-t_calc_sku_cost — SKU 有效单位成本 (v10 Python 重写)
+t_calc_sku_cost — SKU 有效单位成本 (v0.10 Python 重写)
 
-v10 算法（加权平均，含期初库存）:
+v0.10 算法（加权平均，含期初库存）:
   cost_amt = init_stock_amt + self_receive_amt + compose_net_amt + bom_alloc_amt
   cost_qty = init_stock_qty + self_receive_qty + compose_net_qty + bom_alloc_qty
   euc = cost_amt / cost_qty
@@ -32,7 +32,7 @@ class SkuCostCalculator:
         self._log = get_logger("SkuCostCalculator")
 
     def run(self) -> None:
-        self._log.info("calculating SKU effective unit cost (v10 Python) ...")
+        self._log.info("calculating SKU effective unit cost (v0.10 Python) ...")
         conn = self._duck._conn
 
         # 1. 从 t_atomic_wide 取基础数据

@@ -17,7 +17,7 @@
 
 SKU 维度全量宽表，合并 t_atomic_wide + t_calc_stock + t_calc_profit + 7 张维度表。
 
-**v10 变更:**
+**v0.10 变更:**
 - 类别重映射从 SQL CASE WHEN 移到 Python `_remap_category()`
 - inbound 统一从 t_calc_stock 取（A15 修复）
 
@@ -33,13 +33,13 @@ SKU 维度全量宽表，合并 t_atomic_wide + t_calc_stock + t_calc_profit + 7
 
 ## t_fm_cust
 
-客数聚合表。**v10 修复 A16**: Python 端 JOIN dim_goods 排除品类 70-77（物料类）。
+客数聚合表。**v0.10 修复 A16**: Python 端 JOIN dim_goods 排除品类 70-77（物料类）。
 
 ## t_fm_levels_sum
 
 多级分类汇总：门店 / 大类 / 中类 / 小类 / SPU / 黑白猪 / SKU。
 
-**v10**: 移除 store_profit_sales / store_profit_stock / store_profit_diff（不再区分双口径）。
+**v0.10**: 移除 store_profit_sales / store_profit_stock / store_profit_diff（不再区分双口径）。
 
 ## t_fm_levels_result
 
@@ -57,16 +57,16 @@ SKU 维度全量宽表，合并 t_atomic_wide + t_calc_stock + t_calc_profit + 7
 | 采购价 | SUM(out_stock_amt_cb) / SUM(purchase_weight) |
 | 平均售价 | SUM(total_sale_amt) / SUM(sales_weight) |
 
-**v10**: 移除门店毛利额_销售方程 / 门店毛利额_库存方程 / 门店毛利口径差异。
+**v0.10**: 移除门店毛利额_销售方程 / 门店毛利额_库存方程 / 门店毛利口径差异。
 
 ## t_fm_bom_breakdown
 
 BOM 分摊溯源表，粒度 (store, date, parent, sub)。
 
-**v10**: 适配新字段 cost_rate_source。
+**v0.10**: 适配新字段 cost_rate_source。
 
 ## t_fm_stock_roll
 
 库存八要素滚动展示：期初 → 四流入 → 三流出 → 销售 → 损耗 → 期末，含 balance_qty 校验列。
 
-**v10**: 四流分离展示（receive / bom_in / bom_out / compose_in / compose_out 各自独立列）。
+**v0.10**: 四流分离展示（receive / bom_in / bom_out / compose_in / compose_out 各自独立列）。
