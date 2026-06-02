@@ -76,16 +76,39 @@ class DimsExtractor:
 
     def _build_day_clear_override(self) -> None:
         """基于 dim_goods 构建日清覆盖白名单（仅 article_id），供 merge.py 使用。
-        将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。"""
+        将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。
+
+        烘焙类清单从 FM 经营平台 API 拉取（业务自行维护），
+        猪肉类/熟食类按分类规则自动覆盖。"""
+        import requests
+
+        BAKERY_FALLBACK = [
+            '21333774','21333798','21334108','21334115','21334146','21334153','21334160',
+            '21334177','21334184','21334191','21334207','21334221','21336645','21346026',
+            '21346033','21346040','21346057','21346064','21346583','21346590','21346705',
+            '21346729','21346736','21346743',
+        ]
+
+        # 从日清品清单 API 拉取烘焙类 SKU
+        bakery_skus = BAKERY_FALLBACK
+        try:
+            resp = requests.get(
+                "http://127.0.0.1:5006/api/dayclear/list",
+                params={"type": "烘焙类", "active_only": "1"},
+                timeout=5,
+            )
+            if resp.ok:
+                items = resp.json()
+                if items:
+                    bakery_skus = [item["article_id"] for item in items]
+                    self._log.info(f"dayclear API: {len(bakery_skus)} bakery SKUs fetched")
+            else:
+                self._log.warning(f"dayclear API returned {resp.status_code}, using fallback")
+        except Exception as e:
+            self._log.warning(f"dayclear API unavailable ({e}), using fallback list")
+
         try:
             self._duck.execute("DROP TABLE IF EXISTS dim_day_clear_override")
-            # 烘焙日清白名单（业务临时补充，后续产品侧维护）
-            bakery_skus = [
-                '21333774','21333798','21334108','21334115','21334146','21334153','21334160',
-                '21334177','21334184','21334191','21334207','21334221','21336645','21346026',
-                '21346033','21346040','21346057','21346064','21346583','21346590','21346705',
-                '21346729','21346736','21346743',
-            ]
             bakery_list = "', '".join(bakery_skus)
             self._duck.execute(f"""
                 CREATE TABLE dim_day_clear_override AS
@@ -99,7 +122,7 @@ class DimsExtractor:
                 FROM dim_goods WHERE article_id IN ('{bakery_list}')
             """)
             cnt = self._duck.row_count("dim_day_clear_override")
-            self._log.info(f"dim_day_clear_override built: {cnt} SKUs")
+            self._log.info(f"dim_day_clear_override built: {cnt} SKUs (bakery: {len(bakery_skus)})")
         except Exception as e:
             self._log.warning(f"dim_day_clear_override build skipped: {e}")
 
