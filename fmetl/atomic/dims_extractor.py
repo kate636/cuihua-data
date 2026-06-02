@@ -79,7 +79,7 @@ class DimsExtractor:
         将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。
 
         烘焙类清单从 FM 经营平台 API 拉取（业务自行维护），
-        猪肉类/熟食类按分类规则自动覆盖。"""
+        猪肉类/熟食类按分类规则自动覆盖（对齐 master-data v2.3）。"""
         import requests
 
         BAKERY_FALLBACK = [
@@ -116,7 +116,9 @@ class DimsExtractor:
                 FROM dim_goods WHERE category_level1_description = '猪肉类'
                 UNION ALL
                 SELECT DISTINCT article_id, '熟食类' AS override_type
-                FROM dim_goods WHERE category_level3_description LIKE '%熟食'
+                FROM dim_goods WHERE category_level1_description = '熟食类'
+                   OR category_level3_description LIKE '%熟食'
+                   OR (category_level1_description = '预制菜' AND sale_unit = '千克')
                 UNION ALL
                 SELECT DISTINCT article_id, '烘焙类' AS override_type
                 FROM dim_goods WHERE article_id IN ('{bakery_list}')
