@@ -172,7 +172,7 @@ def _sync_processing_candidates(duck):
     except Exception:
         return
 
-    # 查询有销售的加工类 SKU（烘焙、熟食、方便速食、即食/即热/即烹）
+    # 查询有销售的加工类 SKU（品类按 master-data v2.3 映射为报告品类）
     try:
         df = conn.execute("""
             WITH sku_sales AS (
@@ -183,7 +183,8 @@ def _sync_processing_candidates(duck):
                 WHERE (g.category_level2_description = '烘焙类'
                        OR g.category_level3_description LIKE '%熟食'
                        OR g.category_level2_description = '方便速食类'
-                       OR g.category_level2_description IN ('即食类','即热类','即烹类'))
+                       OR g.category_level2_description IN ('即食类','即热类','即烹类')
+                       OR (g.category_level1_description = '预制菜' AND g.sale_unit = '千克'))
                   AND p.pre_sale_amt > 0
                 GROUP BY p.article_id
             )
@@ -191,6 +192,8 @@ def _sync_processing_candidates(duck):
                    CASE
                         WHEN g.category_level2_description = '烘焙类' THEN '烘焙类'
                         WHEN g.category_level3_description LIKE '%熟食' THEN '熟食类'
+                        WHEN g.category_level2_description IN ('即烹类','即热类') THEN '熟食类'
+                        WHEN (g.category_level1_description = '预制菜' AND g.sale_unit = '千克') THEN '熟食类'
                         WHEN g.category_level2_description = '方便速食类' THEN '方便速食类'
                         ELSE g.category_level2_description
                    END as category_type,
