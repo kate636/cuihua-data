@@ -75,42 +75,32 @@ class DimsExtractor:
             self._log.warning(f"dim_goods: no data in last 7 days, keeping existing ({existing} rows)")
 
     def _build_day_clear_override(self) -> None:
-        """基于 dim_goods 构建日清覆盖白名单（仅 article_id），供 merge.py 使用。
-        将 merge.py 对 dim_goods 的依赖隔离到此辅助表中。
-
-        烘焙类清单从 FM 经营平台 API 拉取（业务自行维护），
-        猪肉类/熟食类按分类规则自动覆盖（对齐 master-data v2.3）。"""
+        """构建日清覆盖白名单，供 merge.py 使用。
+        分类规则（猪肉/熟食）从 dim_goods 自动派生；
+        手动录入从 FM 日清标签管理 API 拉取。"""
         import requests
 
-        BAKERY_FALLBACK = [
-            '21333774','21333798','21334108','21334115','21334146','21334153','21334160',
-            '21334177','21334184','21334191','21334207','21334221','21336645','21346026',
-            '21346033','21346040','21346057','21346064','21346583','21346590','21346705',
-            '21346729','21346736','21346743',
-        ]
-
-        # 从日清品清单 API 拉取烘焙类 SKU
-        bakery_skus = BAKERY_FALLBACK
+        # 从日清标签管理 API 拉取全部手动录入的日清 SKU
+        manual_items = []
         try:
             resp = requests.get(
                 "http://127.0.0.1:5006/api/dayclear/list",
-                params={"type": "烘焙类", "active_only": "1"},
+                params={"manual_only": "1"},
                 timeout=5,
             )
             if resp.ok:
-                items = resp.json()
-                if items:
-                    bakery_skus = [item["article_id"] for item in items]
-                    self._log.info(f"dayclear API: {len(bakery_skus)} bakery SKUs fetched")
+                manual_items = resp.json()
+                self._log.info(f"dayclear API: {len(manual_items)} manual SKUs fetched")
             else:
-                self._log.warning(f"dayclear API returned {resp.status_code}, using fallback")
+                self._log.warning(f"dayclear API returned {resp.status_code}")
         except Exception as e:
-            self._log.warning(f"dayclear API unavailable ({e}), using fallback list")
+            self._log.warning(f"dayclear API unavailable ({e})")
 
         try:
             self._duck.execute("DROP TABLE IF EXISTS dim_day_clear_override")
-            bakery_list = "', '".join(bakery_skus)
-            self._duck.execute(f"""
+
+            # 分类规则：猪肉类、熟食类（对齐 master-data v2.3）
+            self._duck.execute("""
                 CREATE TABLE dim_day_clear_override AS
                 SELECT DISTINCT article_id, '猪肉类' AS override_type
                 FROM dim_goods WHERE category_level1_description = '猪肉类'
@@ -118,13 +108,18 @@ class DimsExtractor:
                 SELECT DISTINCT article_id, '熟食类' AS override_type
                 FROM dim_goods WHERE category_level1_description = '熟食类'
                    OR category_level3_description LIKE '%熟食'
+                   OR category_level2_description IN ('即烹类', '即热类')
                    OR (category_level1_description = '预制菜' AND sale_unit = '千克')
-                UNION ALL
-                SELECT DISTINCT article_id, '烘焙类' AS override_type
-                FROM dim_goods WHERE article_id IN ('{bakery_list}')
             """)
+
+            # 手动录入追加
+            if manual_items:
+                import pandas as pd
+                df = pd.DataFrame(manual_items)
+                self._duck.load_df(df, "dim_day_clear_override", mode="append")
+
             cnt = self._duck.row_count("dim_day_clear_override")
-            self._log.info(f"dim_day_clear_override built: {cnt} SKUs (bakery: {len(bakery_skus)})")
+            self._log.info(f"dim_day_clear_override built: {cnt} SKUs (manual: {len(manual_items)})")
         except Exception as e:
             self._log.warning(f"dim_day_clear_override build skipped: {e}")
 
