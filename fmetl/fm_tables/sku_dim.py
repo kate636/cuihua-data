@@ -168,6 +168,9 @@ class SkuDimBuilder:
         cond_cooked_l2   = (c2.isin(['即烹类', '即热类']))
         # v2.2: 预制菜按斤销售 (sale_unit='千克') 的归入熟食类 (如烧腊、卤水、盐焗鸡等)
         cond_prepared_kg = (c1 == '预制菜') & (sale_unit == '千克')
+        # v2.3: 小分类名含"熟食"的归入熟食类 (如酱卤类熟食、烧腊类熟食、盐焗类熟食)
+        c3 = df['category_level3_description'].fillna('')
+        cond_cooked_l3 = c3.str.contains('熟食', na=False)
         # 1:1 直通
         cond_1to1 = c1.isin(['猪肉类', '蔬菜类', '熟食类', '水果类', '烘焙类', '水产类', '蛋类'])
         # 冷藏加工及预制菜类 (排除已被上述规则重映射的)
@@ -177,13 +180,14 @@ class SkuDimBuilder:
         df['category_level1_id_remap'] = c1_id.where(cond_1to1 & ~(
             cond_egg|cond_bake|cond_dairy|cond_drink|cond_staple|cond_snack|
             cond_daily|cond_ice|cond_beef_mutton|cond_poultry|
-            cond_cooked_l2|cond_prepared_kg|cond_cold
+            cond_cooked_l2|cond_prepared_kg|cond_cooked_l3|cond_cold
         ), '')
 
         # Description: 按优先级从高到低 (最先匹配的生效)
         desc = c1.copy()
         desc = np.where(cond_cooked_l2,   '熟食类', desc)
         desc = np.where(cond_prepared_kg, '熟食类', desc)
+        desc = np.where(cond_cooked_l3,   '熟食类', desc)
         desc = np.where(cond_poultry,     '禽类', desc)
         desc = np.where(cond_beef_mutton, '牛羊类', desc)
         desc = np.where(cond_daily,       '日杂用品类', desc)
@@ -194,9 +198,9 @@ class SkuDimBuilder:
         desc = np.where(cond_dairy,       '冷藏乳品类', desc)
         desc = np.where(cond_bake,        '烘焙类', desc)
         desc = np.where(cond_egg,         '蛋类', desc)
-        desc = np.where(cond_cold & ~(cond_cooked_l2|cond_prepared_kg|cond_egg|
-                         cond_bake|cond_dairy|cond_drink|cond_staple|cond_snack|
-                         cond_daily|cond_ice|cond_beef_mutton|cond_poultry),
+        desc = np.where(cond_cold & ~(cond_cooked_l2|cond_prepared_kg|cond_cooked_l3|
+                         cond_egg|cond_bake|cond_dairy|cond_drink|cond_staple|
+                         cond_snack|cond_daily|cond_ice|cond_beef_mutton|cond_poultry),
                          '冷藏加工及预制菜类', desc)
         df['category_level1_description_remap'] = desc
 
