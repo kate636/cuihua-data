@@ -146,12 +146,13 @@ class SkuDimBuilder:
             if c in df.columns:
                 df[c] = df[c].fillna('')
 
-        # 7. Python: 类别重映射 — master-data v2.1 中分类映射
+        # 7. Python: 类别重映射 — master-data v2.3 中分类映射
         c2 = df['category_level2_description'].fillna('')
         c1 = df['category_level1_description'].fillna('')
         c1_id = df['category_level1_id'].fillna('')
+        sale_unit = df['sale_unit'].fillna('')
 
-        # 中分类映射规则（master-data v2.1）
+        # 中分类映射规则（master-data v2.3）
         cond_egg         = (c2 == '蛋类')
         cond_bake        = (c2 == '烘焙类')
         cond_dairy       = (c2 == '冷藏奶制品类')
@@ -159,26 +160,30 @@ class SkuDimBuilder:
         cond_staple      = (c2.isin(['方便速食类', '调味品类', '粮油副食类']))
         cond_snack       = (c2 == '休闲零食类')
         cond_daily       = (c2 == '日杂用品类')
-        # TODO: master-data v2.1 要求冷冻类通过 SKU 清单映射 (config/frozen_skus.json, 126 SKU)
+        # TODO: master-data v2.3 要求冷冻类通过 SKU 清单映射 (config/frozen_skus.json, 126 SKU)
         # 当前 JSON 文件不存在，使用中分类映射作为临时方案
         cond_ice         = (c2 == '冰品类')
         cond_beef_mutton = (c2.isin(['牛肉类', '羊肉类']))
         cond_poultry     = (c2.isin(['鸡类', '鸭类', '其他禽类']))
         cond_cooked_l2   = (c2.isin(['即烹类', '即热类']))
+        # v2.2: 预制菜按斤销售 (sale_unit='千克') 的归入熟食类 (如烧腊、卤水、盐焗鸡等)
+        cond_prepared_kg = (c1 == '预制菜') & (sale_unit == '千克')
         # 1:1 直通
         cond_1to1 = c1.isin(['猪肉类', '蔬菜类', '熟食类', '水果类', '烘焙类', '水产类', '蛋类'])
-        # 冷藏加工及预制菜类
+        # 冷藏加工及预制菜类 (排除已被上述规则重映射的)
         cond_cold = c1.isin(['冷藏及加工类', '预制菜', '冷藏加工及预制菜类'])
 
         # ID: 只有1:1直通保留原ID，其余为空
         df['category_level1_id_remap'] = c1_id.where(cond_1to1 & ~(
             cond_egg|cond_bake|cond_dairy|cond_drink|cond_staple|cond_snack|
-            cond_daily|cond_ice|cond_beef_mutton|cond_poultry|cond_cooked_l2|cond_cold
+            cond_daily|cond_ice|cond_beef_mutton|cond_poultry|
+            cond_cooked_l2|cond_prepared_kg|cond_cold
         ), '')
 
         # Description: 按优先级从高到低 (最先匹配的生效)
         desc = c1.copy()
-        desc = np.where(cond_cooked_l2,  '熟食类', desc)
+        desc = np.where(cond_cooked_l2,   '熟食类', desc)
+        desc = np.where(cond_prepared_kg, '熟食类', desc)
         desc = np.where(cond_poultry,     '禽类', desc)
         desc = np.where(cond_beef_mutton, '牛羊类', desc)
         desc = np.where(cond_daily,       '日杂用品类', desc)
@@ -189,9 +194,10 @@ class SkuDimBuilder:
         desc = np.where(cond_dairy,       '冷藏乳品类', desc)
         desc = np.where(cond_bake,        '烘焙类', desc)
         desc = np.where(cond_egg,         '蛋类', desc)
-        desc = np.where(cond_cold & ~(cond_cooked_l2|cond_egg|cond_bake|cond_dairy|
-                         cond_drink|cond_staple|cond_snack|cond_daily|cond_ice|
-                         cond_beef_mutton|cond_poultry), '冷藏加工及预制菜类', desc)
+        desc = np.where(cond_cold & ~(cond_cooked_l2|cond_prepared_kg|cond_egg|
+                         cond_bake|cond_dairy|cond_drink|cond_staple|cond_snack|
+                         cond_daily|cond_ice|cond_beef_mutton|cond_poultry),
+                         '冷藏加工及预制菜类', desc)
         df['category_level1_description_remap'] = desc
 
         # 8. Python: 衍生字段
