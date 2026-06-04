@@ -18,7 +18,7 @@
 SKU 维度全量宽表，合并 t_atomic_wide + t_calc_stock + t_calc_profit + 7 张维度表。
 
 **v0.10 变更:**
-- 类别重映射从 SQL CASE WHEN 移到 Python `_remap_category()`
+- 类别重映射通过 `numpy.where` 向量化实现（v3 遗留的 `_remap_category()` 函数已不再使用）
 - inbound 统一从 t_calc_stock 取（A15 修复）
 
 **关键字段:**

@@ -84,7 +84,7 @@ t_atomic_wide  ← merge.py (全SQL)
 
 ---
 
-## 二、bom_alloc.py — t_calc_bom_alloc (28字段)
+## 二、bom_alloc.py — t_calc_bom_alloc (27字段)
 
 **功能**: 将 BOM 父品的进货成本按权重分摊到各个子品。
 
@@ -327,8 +327,8 @@ lost_amt = know_lost_amt + unknow_lost_amt
 
 ```
 receive_qty/amt   = self_receive_qty/amt (passthrough, 源表值) ← A4修复
-compose_in_amt    = compose_in_qty × avg_inbound_price
-compose_out_amt   = compose_out_qty × avg_inbound_price
+compose_in_amt    = 来自 sku_cost 加工关系配方推算（成品=Σ(raw_qty/yield_qty×raw_euc)）
+compose_out_amt   = 来自 sku_cost 价值守恒计算（compose_out_qty × base_euc）
 sale_qty/amt      = passthrough from wide
 ```
 
@@ -404,8 +404,9 @@ profit_amt = sale_amt
            - bom_in_amt + bom_out_amt            ← A10修复: 包含BOM
            - compose_in_amt + compose_out_amt
            + end_stock_amt - init_stock_amt
-           - lost_amt
 ```
+
+> 损耗已通过库存方程反映在 end_stock 中（end减少→成本增加→利润减少），不再额外减去 lost_amt。
 
 ### 销售成本 (v0.10 统一公式)
 

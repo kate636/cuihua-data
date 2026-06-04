@@ -212,7 +212,7 @@ ORDER BY ABS(diff) DESC
                               ↓ build
 ┌──────────────────────────────────────────────────────────────────┐
 │ Layer 0: t_fm_* (FM底表) — 最终产出                             │
-│   t_fm_sku_dim       → SKU级完整宽表 (~60字段)                  │
+│   t_fm_sku_dim       → SKU级完整宽表 (~80字段)                  │
 │   t_fm_cust          → 客数聚合                                  │
 │   t_fm_levels_sum    → 7级分类汇总 (数量/金额)                   │
 │   t_fm_levels_result → 平台对接表 (中文列名 + 比率KPI)           │
@@ -228,7 +228,7 @@ ORDER BY ABS(diff) DESC
 - 毛利公式纳入 BOM 流入/流出
 - 新增 `atomic_inventory_detail` 源表（人工盘点判定）
 
-## Pipeline 13 Steps
+## Pipeline 14 Steps (13 步主流程 + Step 14 加工候选同步)
 
 | Step | Module | Output |
 |---|---|---|
@@ -245,6 +245,7 @@ ORDER BY ABS(diff) DESC
 | 11 | `LevelsResultBuilder` | `t_fm_levels_result` |
 | 12 | `BomBreakdownBuilder` | `t_fm_bom_breakdown` |
 | 13 | `StockRollBuilder` | `t_fm_stock_roll` |
+| 14 | `_sync_processing_candidates` | 加工候选 SKU 同步到云端（烘焙/熟食/方便速食类按销售额排序） |
 
 ### 步骤间依赖
 ```
@@ -266,6 +267,7 @@ Step 2 (atomic) ──→ Step 3 (merge) ──→ Step 4 (bom_alloc) ──┐ 
 
 Step 4 (bom_alloc) ────────────────────→ Step 12 (bom_breakdown)
 Step 6 (stock) ────────────────────────→ Step 13 (stock_roll)
+Step 1-7 ──────────────────────────────→ Step 14 (sync processing candidates → cloud)
 ```
 
 ## Core Business Logic
@@ -295,16 +297,18 @@ eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_
 
 分支 (优先级从高到低):
   1. is_counted (人工盘点, created_by != '系统')
-     → end=actual_stock_qty, unknow=max(0, eq-actual)
+     → end=actual_stock_qty, unknow=eq-actual (允许负值=盘盈)
   2. day_clear='0' (软日清)
      → 新供给 = receive + bom_in - bom_out + compose_in - compose_out
      → end = max(0, init - max(0, (sale+klost) - 新供给))
-     → unknow = max(0, 新供给 - sale - klost)
+     → unknow = 新供给 - sale - klost (允许负值=消耗期初库存)
   3. eq < 0 (负库存保护)
      → end=0, unknow=-eq
   4. know_lost_qty > 0 (有已知损耗)
      → end=eq, unknow=0
-  5. 其他 (正常)
+  5. actual_stock_qty > eq + 0.001 (系统快照盘盈检测)
+     → end=actual_stock_qty, unknow=eq-actual (负值=盘盈)
+  6. 其他 (正常)
      → end=eq, unknow=0
 ```
 
@@ -344,7 +348,7 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 **日清覆盖**（merge.py 强制设置 day_clear='0'，通过 `dim_day_clear_override` 辅助表）:
 - 猪肉类 (`category_level1_description = '猪肉类'`)
 - 熟食类 (`category_level3_description LIKE '%熟食'`)
-- 烘焙类 (24个现烤面包/点心 SKU，详见 Deployment > 日清覆盖规则)
+- 烘焙类 + 业务手动录入 (从 FM 日清标签管理 API `?manual_only=1` 拉取，不再硬编码)
 - 鲜牛肉**已移除**（purchase_di 的 init_stock ≠ 0，日清会导致巨额虚假亏损）
 
 ## Data Source Tables
@@ -466,7 +470,7 @@ v0.10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。
 ```
 翠花数据/
 ├── fmetl/                    # 主 ETL Pipeline v0.10
-│   ├── executor.py          # 主入口 (13步)
+│   ├── executor.py          # 主入口 (14步)
 │   ├── config/              # API凭证配置
 │   ├── connectors/          # ApiConnector + DuckDBStore
 │   ├── atomic/              # Step 1-2: 原子域提取 (16个extractor文件)
@@ -630,27 +634,10 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 |:---|------|------|
 | 猪肉类 | `category_level1_description = '猪肉类'` | dim_goods 派生 |
 | 熟食类 | `category_level3_description LIKE '%熟食'` | dim_goods 派生 |
-| 烘焙类 | 24 个 SKU 硬编码列表 | 业务临时补充 |
-
-### 烘焙日清 SKU 清单
-
-```
-21333774 愤怒的小章鱼(C)    21333798 核桃马里奥(C)
-21334108 丹麦芝士金枪鱼(C)  21334115 南瓜软欧(C)
-21334146 茶香果物(C)        21334153 凤梨鸡扒三文治(C)
-21334160 伯爵红茶(C)        21334177 今生挚爱(C)
-21334184 岩烧榴莲(C)        21334191 芋泥麻薯软欧(C)
-21334207 招牌榴莲软欧(C)    21334221 原味可颂(C)
-21336645 巴伐利亚碱水结(C)  21346026 半个核桃马里奥(C)
-21346033 半个伯爵红茶(C)    21346040 半个今生挚爱(C)
-21346057 半个招牌榴莲软欧(C) 21346064 半个茶香果物(C)
-21346583 现烤老婆饼(C)      21346590 丹麦菠萝包(C)
-21346705 现烤榴莲酥(C)      21346729 原味麻花(C)
-21346736 北海道吐司(C)      21346743 椰蓉古法奶油包(C)
-```
+| 烘焙类 + 手动录入 | 从 FM 日清标签管理 API `?manual_only=1` 拉取 | v0.4.3 改为 API，不再硬编码 |
 
 > 注意: 鲜牛肉**不在**日清覆盖中（purchase_di 的 init_stock ≠ 0，日清会导致虚假亏损）
-> 烘焙日清清单为业务临时补充，后续需产品侧建立持续维护机制
+> 日清手动录入通过 `/api/dayclear/toggle` 端点管理，ETL 通过 `/api/dayclear/list?manual_only=1` 拉取
 
 ---
 

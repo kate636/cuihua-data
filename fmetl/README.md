@@ -308,7 +308,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 
 ```
 fmetl/
-├── executor.py               # 主入口，13步调度
+├── executor.py               # 主入口，14步调度（13步主流程 + Step 14 加工候选同步）
 ├── config/                   # API 凭证 (.env → Pydantic Settings)
 ├── connectors/               # ApiConnector (重试) + DuckDBStore (本地)
 ├── utils/                    # get_logger 日志工具
@@ -396,7 +396,7 @@ fmetl/
 │ ③ 从 t_calc_stock (昨天) 取期初库存 → 今天 init_stock                    │
 │    【跨日链式】昨日 end → 今日 init → LAG(+1天)                          │
 │    【首日】无昨天数据 → 直接用 atomic_inventory 源表值                    │
-│ ④ compose 净额: net_qty = in - out, net_amt = net_qty × avg_inbound_price│
+│ ④ compose 净额: 配方推算（成品=Σ(raw_qty/yield_qty×raw_euc), 原料=价值守恒）│
 │ ⑤ 加权平均:                                                             │
 │    cost_amt = init_stock_amt + self_receive_amt + compose_net_amt        │
 │             + bom_alloc_amt                                              │
@@ -617,7 +617,7 @@ t_calc_bom_alloc
 
 **金额统一规则**：
 - receive_amt = 源表值 (receive_sale_di.inbound_amount)，不用 euc
-- compose_amt = qty × avg_inbound_price
+- compose_amt = 加工关系配方推算（v0.10 不再使用 avg_inbound_price）
 - know_lost_amt / unknow_lost_amt / end_stock_amt = qty × euc
 
 ### 跨日链式依赖
@@ -773,7 +773,7 @@ Day T+1:
 | A3 | 库存方程缺少 BOM 项 | 方程不完整 | stock.py | 新增 +bom_in -bom_out |
 | A4 | receive_amt 用 euc 计算 | 进货额不准确 | merge.py | 直接用 receive_sale_di 源表 inbound_amount |
 | A5 | init_stock 每天重算 | 库存不连续 | sku_cost.py | 取昨天 t_calc_stock.end_stock |
-| A6 | compose 两套定价 (cost_price vs avg_inbound_price) | 不一致 | sku_cost.py | 统一用 avg_inbound_price |
+| A6 | compose 两套定价 (cost_price vs avg_inbound_price) | 不一致 | sku_cost.py | 改用加工关系配方推算，不再用 cost_price 或 avg_inbound_price |
 | A7 | 盘点分支用 know_lost_amt > 0 | 零损耗时误判为盘点 | stock.py | 改用 know_lost_qty > 0 |
 | A8 | 首日 init_amt = qty × price | 金额误差 | sku_cost.py | 直接用源表 init_stock_amt_src |
 | A9 | prev_end JOIN 限制 day_clear | 跨日匹配遗漏 | sku_cost.py | Python merge 不过滤 day_clear |

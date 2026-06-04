@@ -6,11 +6,11 @@ v0.10 核心公式:
          - receive - bom_in + bom_out
          - compose_in + compose_out
          + end - init
-         - lost
 
-sale_cost_amt:
-  日清: receive + bom_in - bom_out + compose_in - compose_out - lost
-  非日清: sale_qty × euc
+  注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt。
+
+sale_cost_amt (日清/非日清统一):
+  sale_cost_amt = sale_qty × euc
 
 v0.10 删除冗余: 不再区分 profit_amt / store_profit_stock，只保留一个 profit_amt
 """
