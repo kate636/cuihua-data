@@ -10,7 +10,7 @@
 
 | FIX | 问题 | 状态 | ETL验证 | 修改文件 | Commit |
 |-----|------|:---:|:---:|------|--------|
-| FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ | sku_cost.py, stock.py | `277f296` `c2cb613` |
+| FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ 全月 | sku_cost.py, stock.py | `277f296` `c2cb613` |
 | FIX-002 | EUC 兜底链完善 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
 | FIX-004 | BOM 父品转移负毛利 | ⏳ 待实现 | — | stock.py | — |

@@ -82,19 +82,25 @@ class DimsExtractor:
 
         # 从日清标签管理 API 拉取全部手动录入的日清 SKU
         manual_items = []
-        try:
-            resp = requests.get(
-                "http://127.0.0.1:5006/api/dayclear/list",
-                params={"manual_only": "1"},
-                timeout=5,
-            )
-            if resp.ok:
-                manual_items = resp.json()
-                self._log.info(f"dayclear API: {len(manual_items)} manual SKUs fetched")
-            else:
-                self._log.warning(f"dayclear API returned {resp.status_code}")
-        except Exception as e:
-            self._log.warning(f"dayclear API unavailable ({e})")
+        api_urls = [
+            "http://127.0.0.1:5006/api/dayclear/list",        # 服务器本地
+            "http://47.115.213.115:8080/api/dayclear/list",   # nginx 远程（本地开发回退）
+        ]
+        for url in api_urls:
+            try:
+                resp = requests.get(
+                    url,
+                    params={"manual_only": "1"},
+                    timeout=5,
+                )
+                if resp.ok:
+                    manual_items = resp.json()
+                    self._log.info(f"dayclear API ({url}): {len(manual_items)} manual SKUs fetched")
+                    break
+            except Exception:
+                continue
+        if not manual_items:
+            self._log.warning("dayclear API unreachable via all URLs")
 
         try:
             self._duck.execute("DROP TABLE IF EXISTS dim_day_clear_override")
