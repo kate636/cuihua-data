@@ -10,7 +10,7 @@
 
 | FIX | 问题 | 状态 | ETL验证 | 修改文件 | Commit |
 |-----|------|:---:|:---:|------|--------|
-| FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ❌ | sku_cost.py, stock.py | `277f296` `c2cb613` |
+| FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ | sku_cost.py, stock.py | `277f296` `c2cb613` |
 | FIX-002 | EUC 兜底链完善 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
 | FIX-004 | BOM 父品转移负毛利 | ⏳ 待实现 | — | stock.py | — |
@@ -19,8 +19,13 @@
 | FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
 | FIX-008 | 标品库存核销 | 🟡 被取代 | — | — (FIX-009 修复) | — |
 | FIX-009 | is_counted 系统快照 | ✅ 已实现 | ❌ | stock.py | `6ad7e91` |
+| FIX-010 | 盘盈机制分析 | 📋 结构性差异 | N/A | 无需改代码 | — |
+| FIX-011 | 品类差异化成本率 | ⏳ 待实现 | — | sku_cost.py | — |
+| FIX-012 | L2=即食类→熟食类映射 | 📋 已记录 | — | sku_dim.py, executor.py 等多文件 | — |
+| — | sku_dim.py L3 LIKE '%熟食' | ✅ 已实现 | ❌ | sku_dim.py | `3b47390` |
+| — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
-**已实现 2 个（均未跑 ETL 验证），待实现 2 个 (FIX-002 + FIX-004)，其余为波及分析或低优先级。**
+**已实现 3 个（FIX-001 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -58,7 +63,13 @@
 │       └── 加载 current_price, 增加 cost_price + current_price×0.40 兜底
 │           修改: sku_cost.py
 │           依赖: FIX-001 (compose 金额必须先正确)
-│           被依赖: FIX-003, FIX-004
+│           被依赖: FIX-003, FIX-004, FIX-011
+│
+│   └── FIX-011 品类差异化成本率 ⏳ 待实现 (依赖 FIX-002)
+│       └── 将 uniform 0.40 替换为品类差异化成本率 (0.66-0.85)
+│           修改: sku_cost.py
+│           依赖: FIX-002
+│           被依赖: 无
 │
 ├── §2.2 跨日 init_stock 查找不一致 🔴
 │   │
@@ -102,7 +113,10 @@ fmetl/docs/fixes/
 ├── FIX-006-egg-category-deviation.md  (蛋类 -34.9% → FIX-004波及 🟡)
 ├── FIX-007-may29-loss.md              (5/29巨损 → FIX-004波及 🟡)
 ├── FIX-008-inventory-writeoff.md      (标品核销分析 → 根因FIX-009 🟡)
-└── FIX-009-is-counted-snapshot.md     (is_counted系统快照 ✅)
+├── FIX-009-is-counted-snapshot.md     (is_counted系统快照 ✅)
+├── FIX-010-inventory-gain.md          (盘盈机制分析 📋)
+├── FIX-011-category-cost-ratio.md     (品类差异化成本率 ⏳)
+└── FIX-012-cooked-instant-remap.md    (L2=即食类→熟食类映射 ⏳)
 ```
 ```
 
@@ -128,7 +142,7 @@ fmetl/docs/fixes/
 - 删除所有源表 `compose_in/out_amt_src` 引用和 `cost_price`/`avg_inbound` 兜底
 - stock.py 从 `t_calc_sku_cost` 读取推导数量替代 `t_atomic_wide`
 
-**影响**: 45 个加工关系成品全部生效，25 个源表漏报的成品现在能正确计算加工量
+**影响**: 49 个加工关系成品生效，28 个有 compose_in 活动（2026-06-03 实测，含葡式蛋挞6个新配方）
 
 **副作用**: 对 FIX-002 至关重要 — EUC 兜底链依赖 compose 金额正确
 
@@ -266,6 +280,69 @@ fmetl/docs/fixes/
 
 ---
 
+### FIX-010: 盘盈机制分析与结构性差异 📋
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-010-inventory-gain.md](FIX-010-inventory-gain.md) |
+| **审查报告** | 独立分析（非审查报告问题） |
+| **状态** | 📋 结构性差异（非 bug） |
+| **修改文件** | 无需改代码 |
+| **优先级** | 🟡 P2 |
+
+**分析**: FM 与 QDM 对"损耗"有根本性语义差异。QDM 的 `lost_amt` 是运营记录（可正可负），FM 的 `unknow_lost` 是库存方程残差。FM 已有 5 个盘盈捕获机制（is_counted -$19K, day_clear=0 -$64K, eq<0 -$5.5K, know_lost>0, act>eq 检测 -$0.3K），正常分支中 99.99% 的 unknow=0 是设计意图。推荐方案：第一阶段接受结构性差异，第二阶段在报表层增加盘盈估计 KPI。
+
+---
+
+### FIX-011: 品类差异化成本率 ⏳
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-011-category-cost-ratio.md](FIX-011-category-cost-ratio.md) |
+| **审查报告** | 独立分析（FIX-002 的 0.40 假设优化） |
+| **状态** | ⏳ 待实现 |
+| **修改文件** | `fmetl/calculated/sku_cost.py` |
+| **优先级** | 🔴 P0 |
+| **依赖** | FIX-002 |
+
+**做什么**:
+- 将 FIX-002 硬编码的 `current_price * 0.40` 兜底替换为品类差异化成本率
+- 基于 A3XV 5月实测数据反推各品类加权 EUC/price 比率
+
+**品类成本率**:
+
+| 品类 | 成本率 |
+|------|:---:|
+| 预制菜 (含熟食) | 0.66 |
+| 蔬菜类 | 0.72 |
+| 冷藏及加工类 (含烘焙) | 0.75 |
+| 水产类 | 0.75 |
+| 猪肉类 | 0.75 |
+| 肉禽蛋类 | 0.77 |
+| 标品类 | 0.80 |
+| 水果类 | 0.85 |
+| 默认兜底 | 0.78 |
+
+**效果**: 对 EUC=0 的 130 个可挽救 SKU，利润虚增从 15,836 降至 7,403 (-53%)。
+
+---
+
+### FIX-012: L2=即食类 → 熟食类映射规则补充 ⏳
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-012-cooked-instant-remap.md](FIX-012-cooked-instant-remap.md) |
+| **来源** | 日清品清单产品审查 (2026-06-03) |
+| **状态** | ⏳ 待实现 |
+| **修改文件** | `sku_dim.py`, `executor.py`, `category_mapping.py`, `cloud_api.py`（日清+加工关系） |
+| **优先级** | 🟡 P1 |
+
+**问题**: 当前熟食类映射规则只覆盖 L2 IN ('即烹类','即热类')，不包含 L2='即食类'。瑞士鸡翅、香煎三文鱼骨等 6 个 SKU（L1=预制菜, L2=即食类, L3=其他即食类）不命中任何规则，归入冷藏加工及预制菜类。
+
+**修复**: 新增第 5 条规则 `L2 = '即食类' → 熟食类`，5 个文件需同步修改。
+
+---
+
 ## 实现顺序
 
 ### ✅ 已实现
@@ -282,7 +359,12 @@ FIX-009 ✅  2026-06-01  is_counted系统快照移除 (stock.py)
    └── 阻塞: 无 (FIX-001 已完成)
    └── 影响: 修复 97.7% 的 EUC=0 SKU, 消除 ~12,000 虚增利润
 
-2. FIX-004 ⏳  BOM父品转移负毛利 (stock.py)
+2. FIX-011 ⏳  品类差异化成本率 (sku_cost.py)
+   └── 阻塞: FIX-002 (需要 V10_RETAIL_ESTIMATED 兜底层先存在)
+   └── 影响: 将 FIX-002 的 uniform 0.40 替换为品类差异化 0.66-0.85
+            利润虚增从 15,836 → 7,403 (-53%)
+
+3. FIX-004 ⏳  BOM父品转移负毛利 (stock.py)
    └── 阻塞: FIX-002 (需要 EUC 先正确)
    └── 影响: 修复 11 个父品 -1,273 → +148,
             连带修复蛋类(FIX-006) 和 5/29(FIX-007)

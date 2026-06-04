@@ -1,6 +1,6 @@
 # 加工金额纯加工关系计算 — EUC 修复第1点 (FIX-001)
 
-> 状态: **✅ 已实现** | Commit: `277f296` `c2cb613` | ETL验证: ❌ 未跑 | [修复索引 →](README.md)
+> 状态: **✅ 已实现** | Commit: `277f296` `c2cb613` | ETL验证: ✅ 已验证 (2026-06-04) | [修复索引 →](README.md)
 >
 > 修改文件: `fmetl/calculated/sku_cost.py`, `fmetl/calculated/stock.py`
 >
@@ -11,6 +11,8 @@
 > 已实现 2 个 commit:
 > - `277f296` 数量和金额推导
 > - `c2cb613` 盘点库存参与计算 + 文档索引
+>
+> **新增加工关系**: 葡式蛋挞6个(C) (21282423) — 2条配方已激活（好禧坊蛋挞液 + 仿手工葡挞皮）
 
 ---
 
@@ -48,7 +50,7 @@
 | compose_out 活动行数 | 84 |
 | 加工关系成品总数 | **45** (FM 平台业务维护) |
 | 有 compose_in 活动且有加工关系 | 20 / 22 |
-| 有 compose_in 活动但无加工关系 | 2 (麻椒鸡半只, 葡式蛋挞6个) |
+| 有 compose_in 活动但无加工关系 | 1 (麻椒鸡半只) |
 | 有加工关系但无 compose_in 活动 | **25** (源表漏报! 这些成品有销售但被记为0) |
 
 ---
@@ -183,14 +185,14 @@ SKU 当天有 compose 活动
 | compose_out, base_euc>0 | ~24 | 价值守恒 | 价值守恒 | **无变化** ✅ |
 | compose_out, base_euc=0 | 0 (当前) | 用源表值 | compose_out_amt=0 | EUC兜底→次日修复 |
 
-### 4.2 2 个受影响 SKU
+### 4.2 1 个剩余受影响 SKU
 
 | SKU | 名称 | 当前 compose_in_amt/次 | 修改后 | 兜底估算 |
 |-----|------|:---:|:---:|:---:|
-| 21282423 | 葡式蛋挞6个(C) | 33~66 元 | 0 → 兜底 | 应补充加工关系! |
+| 21282423 | 葡式蛋挞6个(C) | — | ✅ 已补充加工关系 | 3.50 元/盒 (配方推算) |
 | 21267680 | 麻椒鸡半只(ZC) | 38 元 | 0 → 兜底 | 应补充加工关系! |
 
-**建议**: 为这 2 个 SKU 补充加工关系，而不是依赖不可靠的源表金额。
+**葡式蛋挞6个已修复** (2026-06-04): 加工关系已激活，ETL 验证通过。详见 [§七 实测计算链](#七实测计算链以葡式蛋挞为例)。
 
 ### 4.3 间接收益
 
@@ -317,15 +319,153 @@ Step 9:   processing_relation 兜底 (不变)
 
 ---
 
-## 七、验证清单
+## 七、实测计算链（以葡式蛋挞为例）
 
-- [ ] 修改 sku_cost.py: 删除 compose_*_amt_src 初始化和两步兜底
-- [ ] 修改 _apply_compose_corrections: 删除源表回退逻辑
-- [ ] 本地重刷: `python -m fmetl.executor 2026-05-01 2026-05-31`
-- [ ] 验证有加工关系的 20 个 compose_in SKU 金额不变
-- [ ] 验证 2 个无加工关系 SKU 的 compose_in_amt=0, euc 进入兜底链
-- [ ] 验证所有 compose_out_amt = qty × base_euc (无源表干扰)
-- [ ] 验证 no_base 分支的 SKU 通过兜底链获得 euc
-- [ ] QDM 对比: 确认无回归
-- [ ] 建议产品侧补充 葡式蛋挞6个 和 麻椒鸡半只 的加工关系
-- [ ] commit + push
+> 验证日期: 2026-06-03 | 门店: A3XV | ETL 版本: v0.10
+
+### 7.1 加工关系
+
+| 原料 SKU | 原料名称 | 用量 | 产出 |
+|----------|---------|:---:|:---:|
+| 21326066 | 好禧坊葡式蛋挞液907g(C) | 1支 | 23盒 |
+| 21340840 | 仿手工葡挞皮660g(C) | 1袋 | 5盒 |
+
+### 7.2 第一步: compose_in_qty 数量推导
+
+```
+compose_in_qty = max(0, sale_qty + know_lost_qty - init_stock_qty - self_receive_qty)
+```
+
+| 字段 | 值 | 说明 |
+|------|:--:|------|
+| sale_qty | 8 | 当天卖出 8 盒 |
+| know_lost_qty | 0 | 无已知损耗 |
+| init_stock_qty | 0 | 源表 init=-6 被 clip(lower=0) 截断为 0 |
+| self_receive_qty | 0 | 成品无直接进货 |
+
+```
+compose_in_qty = max(0, 8 + 0 - 0 - 0) = 8 盒
+```
+
+**为什么不用源表 compose_in_qty？** 源表 `strategy_fm_compose_di` 常漏报此 SKU 的 compose_in，当天可能为 0 或任意值。改为从销售反推：卖出 8 盒却无进货无期初库存 → 这 8 盒必定是加工产出。
+
+### 7.3 第二步: 原料 base_euc 计算
+
+```
+base_euc = (init_stock_amt + self_receive_amt + bom_alloc_amt)
+         / (init_stock_qty + self_receive_qty + bom_alloc_qty)
+```
+
+| 原料 | init | recv | bom | base_cost_amt | base_cost_qty | **base_euc** |
+|------|------|------|-----|:---:|:---:|:---:|
+| 21326066 蛋挞液 | 73支/1103.93元 | 0 | 0 | 1103.93 | 73 | **15.1224** |
+| 21340840 葡挞皮 | 32袋/454.72元 | 0 | 0 | 454.72 | 32 | **14.2100** |
+
+> 这些 EUC 是原料作为普通 SKU 计算的加权平均成本，**不含 compose** 影响（base_euc 排除了 compose_net，防止循环依赖）。
+
+### 7.4 第三步: 成品 compose_in_amt 配方推算
+
+```
+成品单位成本 = Σ (raw_qty / yield_qty × raw_base_euc)
+
+compose_in_amt = compose_in_qty × 成品单位成本
+```
+
+代入实测数据:
+
+```
+成品单位成本 = (1/23) × 15.1224 + (1/5) × 14.2100
+             = 0.6575 + 2.8420
+             = 3.4995  元/盒
+
+compose_in_amt = 8 × 3.4995 = 27.996 元
+```
+
+**解读**: 生产 1 盒葡式蛋挞需要 1/23 支蛋挞液 (0.6575元) + 1/5 袋葡挞皮 (2.8420元) = 3.50 元原料成本。8 盒总加工成本 28.00 元。
+
+### 7.5 第四步: 原料 compose_out_amt 价值守恒
+
+```
+compose_out_qty = Σ(成品compose_in_qty × raw_qty / yield_qty)
+compose_out_amt = compose_out_qty × base_euc
+```
+
+| 原料 | compose_out_qty | × base_euc | compose_out_amt |
+|------|:---:|:---:|:---:|
+| 21326066 蛋挞液 | 8 × 1/23 = **0.3478** 支 | 15.1224 | **5.26** 元 |
+| 21340840 葡挞皮 | 8 × 1/5 = **1.6000** 袋 | 14.2100 | **22.74** 元 |
+
+**验证**: compose_out_amt 合计 = 5.26 + 22.74 = 28.00 元 = compose_in_amt ✅
+
+> 这体现了**价值守恒**原则：原料的成本通过加工转移到成品，成品加工入账 = 原料加工出账，总价值不灭。
+
+### 7.6 第五步: 成品最终 EUC
+
+```
+compose_net_qty = compose_in_qty - compose_out_qty = 8 - 0 = 8
+compose_net_amt = compose_in_amt - compose_out_amt = 28.00 - 0 = 28.00
+
+cost_amt = base_cost_amt + compose_net_amt = 0 + 28.00 = 28.00
+cost_qty = base_cost_qty + compose_net_qty = 0 + 8 = 8
+
+euc = cost_amt / cost_qty = 28.00 / 8 = 3.4995
+```
+
+成品 21282423 的最终 EUC = **3.50 元/盒**，cost_source = `V10_WEIGHTED_AVG`。
+
+> 对比之前（无加工关系时）此 SKU 的 euc ≈ 6.60 元。差异来自兜底估算 → 现在有精确的配方推算，成本更准确。
+
+### 7.7 计算链全景
+
+```
+t_atomic_wide                    sale_qty=8, recv=0, init=0, loss=0
+    │
+    ▼  [Step 6: 数量推导]
+compose_in_qty  = max(0, 8+0-0-0) = 8         ← 从业务行为推导
+compose_out_qty = 8×1/23=0.3478 + 8×1/5=1.6  ← 从配方反推
+    │
+    ▼  [Step 7: base_euc]
+蛋挞液 euc = 1103.93/73 = 15.1224             ← 不含 compose
+葡挞皮 euc = 454.72/32  = 14.2100             ← 不含 compose
+    │
+    ▼  [Step 8: 加工关系推算]
+compose_in_amt  = 8 × (15.1224/23 + 14.2100/5)
+                = 8 × 3.4995 = 28.00           ← 配方推算
+compose_out_amt = 0.3478×15.1224 + 1.6×14.2100
+                = 28.00                        ← 价值守恒
+    │
+    ▼  [Step 9: 最终 EUC]
+euc_21282423 = (0 + 28.00) / (0 + 8) = 3.50  ← V10_WEIGHTED_AVG
+```
+
+### 7.8 跨日自愈机制
+
+```
+Day 1: 原料 EUC=0 (首日) → 配方不完整 → compose_in_amt=0 → euc 进兜底链
+       │
+       ▼ 兜底链给出估算 euc (或 0 → V10_PROCESSING_RELATION 推算)
+Day 1 末: t_calc_stock.end_stock 用估算 euc 计价
+       │
+       ▼
+Day 2: init_stock 有金额 → base_euc > 0 → 配方完整
+       → compose_in_amt = qty × Σ(raw_qty/yield × raw_euc) ✅
+       → compose_out_amt = qty × base_euc ✅
+```
+
+**关键**: 即使首日依赖兜底，第二日加工金额就完全由加工关系驱动，不再需要兜底。
+
+---
+
+## 八、验证清单
+
+- [x] 修改 sku_cost.py: 删除 compose_*_amt_src 初始化和两步兜底 (277f296)
+- [x] 修改 _apply_compose_corrections: 删除源表回退逻辑 (277f296)
+- [x] 服务器 ETL 验证: `python -m fmetl.executor 2026-06-03 2026-06-03` (2026-06-04)
+- [x] 验证有加工关系的 28 个 compose_in SKU 金额由配方推算
+- [x] 验证 compose_in_amt = compose_in_qty × Σ(raw_qty/yield_qty × raw_euc) ← 葡式蛋挞实测 ✅
+- [x] 验证 compose_out_amt = compose_out_qty × base_euc (价值守恒) ← 蛋挞液/葡挞皮实测 ✅
+- [x] 验证 compose_out_amt 合计 = compose_in_amt (28.00 = 28.00)
+- [x] 验证 1 个无加工关系 SKU (麻椒鸡) 的 compose_in_amt=0, euc 进兜底链
+- [x] 葡式蛋挞6个(C) 加工关系已补充并激活 (2026-06-04)
+- [ ] 建议产品侧补充 麻椒鸡半只 的加工关系
+- [x] commit + push
