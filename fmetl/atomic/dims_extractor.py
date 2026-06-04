@@ -112,10 +112,12 @@ class DimsExtractor:
                    OR (category_level1_description = '预制菜' AND sale_unit = '千克')
             """)
 
-            # 手动录入追加
+            # 手动录入追加（只取 article_id + override_type，对齐表结构）
             if manual_items:
                 import pandas as pd
                 df = pd.DataFrame(manual_items)
+                # API 返回字段较多，只保留表需要的两列
+                df = df[['article_id', 'override_type']].copy()
                 self._duck.load_df(df, "dim_day_clear_override", mode="append")
 
             cnt = self._duck.row_count("dim_day_clear_override")
