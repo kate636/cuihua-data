@@ -473,7 +473,7 @@ v0.10 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。
 │   ├── calculated/          # Step 3-7: 计算层 (5个模块, Python核心)
 │   ├── fm_tables/           # Step 8-13: FM底表 (6张)
 │   ├── utils/               # 日志/日期/重试工具
-│   ├── docs/                # 完整处理逻辑 + 字段手册
+│   ├── docs/                # 架构/参考/审查/修复 (4个子目录)
 │   └── fm_etl_v3/           # 旧版 v3.0 (历史版本, 保留参考)
 │
 ├── _archived/               # 历史归档 (deploy/tests/docs/旧版脚本等)
@@ -711,6 +711,17 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 ## Key Documents
 
 - [fmetl/README.md](fmetl/README.md) — v0.10 完整pipeline说明 (13步, 核心公式, 修复对照表)
-- [fmetl/docs/ETL_v0.10_完整处理逻辑.md](fmetl/docs/ETL_v0.10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
-- [fmetl/docs/strategy_fm_字段手册_完整版.md](fmetl/docs/strategy_fm_字段手册_完整版.md) — QDM源表完整字段手册
-- [fmetl/docs/差异问题与待办事项_v0.10.md](fmetl/docs/差异问题与待办事项_v0.10.md) — QDM对比差异分析 + 行动计划
+- [fmetl/docs/architecture/ETL_v0.10_完整处理逻辑.md](fmetl/docs/architecture/ETL_v0.10_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
+- [fmetl/docs/references/strategy_fm_字段手册_完整版.md](fmetl/docs/references/strategy_fm_字段手册_完整版.md) — 唯一权威源表字段手册
+- [fmetl/docs/references/strategy_fm_字段手册_BOM版.md](fmetl/docs/references/strategy_fm_字段手册_BOM版.md) — BOM专用字段手册
+- [fmetl/docs/reviews/差异问题与待办事项_v0.10.md](fmetl/docs/reviews/差异问题与待办事项_v0.10.md) — QDM对比差异分析 + 行动计划
+- [fmetl/docs/fixes/README.md](fmetl/docs/fixes/README.md) — 修复记录索引 + 依赖关系图
+- [fmetl/docs/README.md](fmetl/docs/README.md) — 文档导航索引
+
+## Documentation Conventions
+
+- **CLAUDE.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
+- **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
+- **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
+- **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本
+- **修复记录**: 每次 bug fix 写 `docs/fixes/FIX-NNN-short-name.md`，更新 `fixes/README.md` 索引

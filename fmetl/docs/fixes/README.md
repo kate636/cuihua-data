@@ -22,10 +22,11 @@
 | FIX-010 | 盘盈机制分析 | 📋 结构性差异 | N/A | 无需改代码 | — |
 | FIX-011 | 品类差异化成本率 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-012 | L2=即食类→熟食类映射 | 📋 已记录 | — | sku_dim.py, executor.py 等多文件 | — |
+| FIX-013 | compose 部分原料 euc=0 整体归零 | ✅ 已实现 | ✅ 全月 | sku_cost.py | `7dab133` |
 | — | sku_dim.py L3 LIKE '%熟食' | ✅ 已实现 | ❌ | sku_dim.py | `3b47390` |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
-**已实现 3 个（FIX-001 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
+**已实现 4 个（FIX-001, FIX-013 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -57,6 +58,12 @@
 │   │   └── compose 数量和金额完全不依赖源表，从业务行为推导
 │   │       修改: sku_cost.py, stock.py
 │   │       依赖: 无
+│   │       被依赖: FIX-002, FIX-013
+│   │
+│   ├── FIX-013 compose 部分原料 euc=0 不归零 ✅ 已实现
+│   │   └── compose_in_amt 仅用 euc>0 的原料推算，跳过 euc=0 的原料
+│   │       修改: sku_cost.py
+│   │       依赖: FIX-001
 │   │       被依赖: FIX-002
 │   │
 │   └── FIX-002 EUC 兜底链完善 ⏳ 待实现
@@ -116,7 +123,8 @@ fmetl/docs/fixes/
 ├── FIX-009-is-counted-snapshot.md     (is_counted系统快照 ✅)
 ├── FIX-010-inventory-gain.md          (盘盈机制分析 📋)
 ├── FIX-011-category-cost-ratio.md     (品类差异化成本率 ⏳)
-└── FIX-012-cooked-instant-remap.md    (L2=即食类→熟食类映射 ⏳)
+├── FIX-012-cooked-instant-remap.md    (L2=即食类→熟食类映射 📋)
+└── FIX-013-compose-partial-euc.md     (compose 部分原料 euc=0 不归零 ✅)
 ```
 ```
 
@@ -343,6 +351,27 @@ fmetl/docs/fixes/
 
 ---
 
+---
+
+### FIX-013: compose 部分原料 euc=0 不归零 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-013-compose-partial-euc.md](FIX-013-compose-partial-euc.md) |
+| **来源** | 葡式蛋挞加工数据审查 (2026-06-04) |
+| **状态** | ✅ 已实现 (`7dab133`) |
+| **修改文件** | `fmetl/calculated/sku_cost.py` |
+| **优先级** | 🔴 P0 |
+| **依赖** | FIX-001 |
+
+**问题**: `all_raw_found` 要求所有原料都有 base_euc 才计算 compose_in_amt，一个原料缺货（葡挞皮 euc=0）→ 蛋挞液成本也被丢弃。蛋挞 34 天中 27 天 compose_in_amt=0。
+
+**修复**: 移除 `and all_raw_found` 条件。`finished_unit_cost` 本身只累加 euc>0 的原料，不需要额外全局开关。
+
+**效果**: 蛋挞 compose 有成本天数 3/33→30/33，月成本 ¥335→¥1,563。
+
+---
+
 ## 实现顺序
 
 ### ✅ 已实现
@@ -392,7 +421,7 @@ FIX-005 📋  金额平衡公式     (审查报告公式 bug, 不影响 ETL 正�
 | 文档 | 路径 |
 |------|------|
 | 项目总览 | [CLAUDE.md](../../../CLAUDE.md) |
-| ETL 完整处理逻辑 | [ETL_v0.10_完整处理逻辑.md](../ETL_v0.10_完整处理逻辑.md) |
-| 差异问题与待办 | [差异问题与待办事项_v0.10.md](../差异问题与待办事项_v0.10.md) |
-| 全面审查报告 | [全面审查报告_v0.10_2026-06-01.md](../全面审查报告_v0.10_2026-06-01.md) |
-| 源表字段手册 | [strategy_fm_字段手册_完整版.md](../strategy_fm_字段手册_完整版.md) |
+| ETL 完整处理逻辑 | [architecture/ETL_v0.10_完整处理逻辑.md](../architecture/ETL_v0.10_完整处理逻辑.md) |
+| 差异问题与待办 | [reviews/差异问题与待办事项_v0.10.md](../reviews/差异问题与待办事项_v0.10.md) |
+| 全面审查报告 | [reviews/全面审查报告_v0.10_2026-06-01.md](../reviews/全面审查报告_v0.10_2026-06-01.md) |
+| 源表字段手册 | [references/strategy_fm_字段手册_完整版.md](../references/strategy_fm_字段手册_完整版.md) |
