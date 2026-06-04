@@ -422,7 +422,7 @@ class SkuCostCalculator:
         #    成品单位成本 = Σ(raw_qty / yield_qty × raw_base_euc)
         #    有加工关系 + 配方完整 → 配方推算
         #    无加工关系 → compose_in_amt 保持 0（EUC 兜底链提供估算）
-        #    有加工关系但原料 euc 不全 → compose_in_amt 保持 0（次日原料修复后自动修复）
+        #    有加工关系但部分原料 euc=0 → 只用 euc>0 的原料推算（跳过 euc=0 的原料）
 
         # 构建原料 base_euc lookup（按 date × store × article）
         euc_lookup = {}
@@ -473,7 +473,7 @@ class SkuCostCalculator:
                 if raw_euc > 0:
                     finished_unit_cost += (raw_qty / yield_qty) * raw_euc
 
-            if finished_unit_cost > 0 and all_raw_found:
+            if finished_unit_cost > 0:
                 new_amt = round(compose_in_qty * finished_unit_cost, 4)
                 old_amt = df.at[idx, 'compose_in_amt']
                 df.at[idx, 'compose_in_amt'] = new_amt
