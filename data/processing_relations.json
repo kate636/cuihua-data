@@ -31,7 +31,7 @@
       "raw_sku": "20856762",
       "raw_unit": "kg",
       "yield_qty": 1.0,
-      "yield_unit": "kg"
+      "yield_unit": "千克"
     },
     {
       "category_type": "熟食类",
@@ -42,7 +42,7 @@
       "raw_sku": "20038175",
       "raw_unit": "kg",
       "yield_qty": 1.0,
-      "yield_unit": "kg"
+      "yield_unit": "千克"
     },
     {
       "category_type": "熟食类",
@@ -53,10 +53,10 @@
       "raw_sku": "21000362",
       "raw_unit": "kg",
       "yield_qty": 1.0,
-      "yield_unit": "kg"
+      "yield_unit": "千克"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "原味地道烤香肠",
       "finished_sku": "21220333",
       "raw_name": "御味香地道肠700g(C)",
@@ -64,7 +64,7 @@
       "raw_sku": "21340017",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "根"
     },
     {
       "category_type": "熟食类",
@@ -78,7 +78,29 @@
       "yield_unit": "半只"
     },
     {
-      "category_type": "即食类",
+      "category_type": "烘焙类",
+      "finished_name": "葡式蛋挞6个(C)",
+      "finished_sku": "21282423",
+      "raw_name": "好禧坊葡式蛋挞液907g(C)",
+      "raw_qty": 1.0,
+      "raw_sku": "21326066",
+      "raw_unit": "KG",
+      "yield_qty": 3.33,
+      "yield_unit": "盒"
+    },
+    {
+      "category_type": "烘焙类",
+      "finished_name": "葡式蛋挞6个(C)",
+      "finished_sku": "21282423",
+      "raw_name": "仿手工葡挞皮660g(C)",
+      "raw_qty": 1.0,
+      "raw_sku": "21340840",
+      "raw_unit": "袋",
+      "yield_qty": 5.0,
+      "yield_unit": "盒"
+    },
+    {
+      "category_type": "饮料类",
       "finished_name": "黄金鱼蛋(C)",
       "finished_sku": "21283055",
       "raw_name": "黄金鱼蛋500g(C)",
@@ -86,10 +108,10 @@
       "raw_sku": "21339950",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "份"
+      "yield_unit": "瓶"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "蔓越莓贝果(C)",
       "finished_sku": "21306259",
       "raw_name": "蔓越莓贝果5个(C)",
@@ -100,7 +122,7 @@
       "yield_unit": "个"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "安佳黄油千层花边挞(C)",
       "finished_sku": "21311277",
       "raw_name": "奥昆千层花边挞20个/袋600g(C)",
@@ -111,7 +133,7 @@
       "yield_unit": "盒"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "安佳黄油千层花边挞(C)",
       "finished_sku": "21311277",
       "raw_name": "奥昆葡式蛋挞液907g(C)",
@@ -122,7 +144,18 @@
       "yield_unit": "盒"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
+      "finished_name": "咸蛋黄流心芋泥包(C)",
+      "finished_sku": "21311468",
+      "raw_name": "咸蛋黄流心芋泥包9个(C)",
+      "raw_qty": 1.0,
+      "raw_sku": "21282775",
+      "raw_unit": "袋",
+      "yield_qty": 9.0,
+      "yield_unit": "份"
+    },
+    {
+      "category_type": "烘焙类",
       "finished_name": "奶香片3个装(C)",
       "finished_sku": "21311543",
       "raw_name": "奶香片(C)",
@@ -133,7 +166,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "现烤蓝莓甜甜圈(C)",
       "finished_sku": "21311604",
       "raw_name": "蓝莓甜甜圈(C)",
@@ -144,7 +177,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "迷你原味甜甜圈6个装(C)",
       "finished_sku": "21311659",
       "raw_name": "迷你原味甜甜圈(C)",
@@ -155,7 +188,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "巧克力双拼甜甜圈80g(C)",
       "finished_sku": "21317910",
       "raw_name": "多哥夫白巧克力味涂层迷你甜甜圈200g(C)",
@@ -166,7 +199,7 @@
       "yield_unit": "盒"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "巧克力双拼甜甜圈80g(C)",
       "finished_sku": "21317910",
       "raw_name": "多哥夫黑巧克力味涂层迷你甜甜圈200g(C)",
@@ -177,7 +210,7 @@
       "yield_unit": "盒"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "糯叽叽紫薯麻薯(C)",
       "finished_sku": "21326028",
       "raw_name": "奥昆紫薯麻薯600g(C)",
@@ -188,7 +221,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "QQ原味麻薯(C)",
       "finished_sku": "21326042",
       "raw_name": "奥昆麻薯胚30",
@@ -199,7 +232,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手作坚果酸法包(C)",
       "finished_sku": "21337994",
       "raw_name": "坚果酸法包(C)",
@@ -210,7 +243,7 @@
       "yield_unit": "个"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手工原味小麻花(C)",
       "finished_sku": "21339431",
       "raw_name": "谷麦坊葱香味小麻花10kg(C)",
@@ -221,7 +254,7 @@
       "yield_unit": "袋"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手工广式鸡仔饼(C)",
       "finished_sku": "21339455",
       "raw_name": "谷麦坊鸡仔饼10kg(C)",
@@ -232,7 +265,7 @@
       "yield_unit": "袋"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手工黑芝麻酥(C)",
       "finished_sku": "21339479",
       "raw_name": "谷麦坊黑芝麻酥4kg(C)",
@@ -243,7 +276,7 @@
       "yield_unit": "袋"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手工龙耳酥(C)",
       "finished_sku": "21339486",
       "raw_name": "谷麦坊龙耳酥10kg(C)",
@@ -254,7 +287,7 @@
       "yield_unit": "袋"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "手作橄榄菜腊肠恰巴塔(C)",
       "finished_sku": "21339608",
       "raw_name": "橄榄菜腊肠恰巴塔(C)",
@@ -265,7 +298,7 @@
       "yield_unit": "个"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "脆皮芝士香肠(C)",
       "finished_sku": "21339943",
       "raw_name": "脆皮芝士香肠1.6kg(C)",
@@ -273,10 +306,10 @@
       "raw_sku": "21339936",
       "raw_unit": "袋",
       "yield_qty": 20.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "奥尔良手枪腿(C)",
       "finished_sku": "21339981",
       "raw_name": "奥尔良手枪腿1kg(C)",
@@ -284,10 +317,10 @@
       "raw_sku": "21340116",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "豆腐素包(C)",
       "finished_sku": "21339998",
       "raw_name": "豆腐素包800g(C)",
@@ -295,10 +328,10 @@
       "raw_sku": "21340000",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "⻢拉糕(C)",
       "finished_sku": "21340031",
       "raw_name": "⻢拉糕2.4kg(C)",
@@ -306,10 +339,10 @@
       "raw_sku": "21340048",
       "raw_unit": "袋",
       "yield_qty": 30.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "糯米烧麦(C)",
       "finished_sku": "21340055",
       "raw_name": "糯米烧麦1kg(C)",
@@ -317,10 +350,10 @@
       "raw_sku": "21340161",
       "raw_unit": "袋",
       "yield_qty": 20.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "长沙大香肠(C)",
       "finished_sku": "21340079",
       "raw_name": "⻓沙大香肠400g(C)",
@@ -328,10 +361,10 @@
       "raw_sku": "21340185",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "手撕红糖馒头(C)",
       "finished_sku": "21340086",
       "raw_name": "手撕红糖馒头850g(C)",
@@ -339,10 +372,10 @@
       "raw_sku": "21339974",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "照烧脆骨丸串(C)",
       "finished_sku": "21340093",
       "raw_name": "照烧脆骨丸串800g(C)",
@@ -350,10 +383,10 @@
       "raw_sku": "21340062",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "黑椒柠檬味鸡肉串(C)",
       "finished_sku": "21340130",
       "raw_name": "黑椒柠檬味鸡肉串350g(C)",
@@ -361,10 +394,10 @@
       "raw_sku": "21340147",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "牛肉⻛味馅饼(C)",
       "finished_sku": "21340178",
       "raw_name": "牛肉风味馅饼700g(C)",
@@ -372,10 +405,10 @@
       "raw_sku": "21340123",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "名古屋唐扬串(C)",
       "finished_sku": "21340215",
       "raw_name": "名古屋唐扬串500g(C)",
@@ -383,10 +416,10 @@
       "raw_sku": "21340208",
       "raw_unit": "袋",
       "yield_qty": 5.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "土豆饼(C)",
       "finished_sku": "21340222",
       "raw_name": "土豆饼800g(C)",
@@ -394,10 +427,10 @@
       "raw_sku": "21340192",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "盐味鸡肉串(C)",
       "finished_sku": "21340239",
       "raw_name": "盐味鸡肉串600g(C)",
@@ -405,10 +438,10 @@
       "raw_sku": "21340109",
       "raw_unit": "袋",
       "yield_qty": 10.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "培根鸡蛋卷饼(C)",
       "finished_sku": "21340246",
       "raw_name": "培根鸡蛋卷饼1.56kg(C)",
@@ -416,10 +449,10 @@
       "raw_sku": "21340024",
       "raw_unit": "袋",
       "yield_qty": 12.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "串烧牛肉肉夹馍(C)",
       "finished_sku": "21340260",
       "raw_name": "串烧牛肉肉夹馍1.2kg(C)",
@@ -427,10 +460,10 @@
       "raw_sku": "21340253",
       "raw_unit": "袋",
       "yield_qty": 12.0,
-      "yield_unit": "个"
+      "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "水晶虾饺(C)",
       "finished_sku": "21340277",
       "raw_name": "水晶虾饺300g(C)",
@@ -441,7 +474,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "冷藏加工及预制菜类",
       "finished_name": "虾仁烧卖(C)",
       "finished_sku": "21340307",
       "raw_name": "虾仁烧卖360g(C)",
@@ -452,7 +485,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "酱味凤爪(C)",
       "finished_sku": "21340314",
       "raw_name": "酱味凤爪2.5kg(C)",
@@ -463,7 +496,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "豉汁排骨(C)",
       "finished_sku": "21340345",
       "raw_name": "豉汁排骨2.5kg(C)",
@@ -474,7 +507,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "酱味金钱肚(C)",
       "finished_sku": "21340369",
       "raw_name": "酱味金钱肚2.5kg(C)",
@@ -485,7 +518,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "即食类",
+      "category_type": "熟食类",
       "finished_name": "黑椒牛仔骨(C)",
       "finished_sku": "21340376",
       "raw_name": "黑椒牛仔骨2.5kg(C)",
@@ -496,7 +529,7 @@
       "yield_unit": "份"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "现烤老婆饼(C)",
       "finished_sku": "21346583",
       "raw_name": "起酥老婆饼(C)",
@@ -507,7 +540,7 @@
       "yield_unit": "个"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "丹麦菠萝包(C)",
       "finished_sku": "21346590",
       "raw_name": "丹麦菠萝包48个(C)",
@@ -518,7 +551,7 @@
       "yield_unit": "个"
     },
     {
-      "category_type": "",
+      "category_type": "烘焙类",
       "finished_name": "椰蓉古法奶油包(C)",
       "finished_sku": "21346743",
       "raw_name": "古早咸奶油包9个(C)",
@@ -526,6 +559,28 @@
       "raw_sku": "21282171",
       "raw_unit": "袋",
       "yield_qty": 9.0,
+      "yield_unit": "个"
+    },
+    {
+      "category_type": "烘焙类",
+      "finished_name": "芝芝牛肉包(C)",
+      "finished_sku": "21349836",
+      "raw_name": "芝芝牛肉包70g*3(C)",
+      "raw_qty": 1.0,
+      "raw_sku": "21349850",
+      "raw_unit": "袋",
+      "yield_qty": 3.0,
+      "yield_unit": "个"
+    },
+    {
+      "category_type": "烘焙类",
+      "finished_name": "芝士肠仔包plus(C)",
+      "finished_sku": "21349843",
+      "raw_name": "芝士肠仔包plus130g*4(C)",
+      "raw_qty": 1.0,
+      "raw_sku": "21349867",
+      "raw_unit": "袋",
+      "yield_qty": 4.0,
       "yield_unit": "个"
     }
   ]
