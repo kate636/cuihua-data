@@ -23,6 +23,7 @@
 | FIX-011 | 品类差异化成本率 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-012 | L2=即食类→熟食类映射 | 📋 已记录 | — | sku_dim.py, executor.py 等多文件 | — |
 | FIX-013 | compose 部分原料 euc=0 整体归零 | ✅ 已实现 | ✅ 全月 | sku_cost.py | `7dab133` |
+| FIX-014 | 烘焙类 FM vs QDM 完整对比 | 📋 分析报告 | ✅ 已验证 | — | — |
 | — | sku_dim.py L3 LIKE '%熟食' | ✅ 已实现 | ❌ | sku_dim.py | `3b47390` |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
@@ -124,7 +125,8 @@ fmetl/docs/fixes/
 ├── FIX-010-inventory-gain.md          (盘盈机制分析 📋)
 ├── FIX-011-category-cost-ratio.md     (品类差异化成本率 ⏳)
 ├── FIX-012-cooked-instant-remap.md    (L2=即食类→熟食类映射 📋)
-└── FIX-013-compose-partial-euc.md     (compose 部分原料 euc=0 不归零 ✅)
+├── FIX-013-compose-partial-euc.md     (compose 部分原料 euc=0 不归零 ✅)
+└── FIX-014-bakery-qdm-comparison.md   (烘焙类FM vs QDM完整对比 📋)
 ```
 ```
 
@@ -369,6 +371,32 @@ fmetl/docs/fixes/
 **修复**: 移除 `and all_raw_found` 条件。`finished_unit_cost` 本身只累加 euc>0 的原料，不需要额外全局开关。
 
 **效果**: 蛋挞 compose 有成本天数 3/33→30/33，月成本 ¥335→¥1,563。
+
+---
+
+### FIX-014: 烘焙类 FM vs QDM 完整对比 📋
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-014-bakery-qdm-comparison.md](FIX-014-bakery-qdm-comparison.md) |
+| **来源** | 加工关系补全 + QDM对比表切换验证 (2026-06-05) |
+| **状态** | 📋 分析报告（无需改代码） |
+| **修改文件** | 无 |
+| **优先级** | 📋 分析报告 |
+
+**做了什么**:
+- 切换 QDM 对比表为 `strategy_fm_levels_result`（SKU级），销售数据完全一致
+- 对两边应用统一的 master-data v2.3 品类重映射
+- 烘焙类 210 SKU 分为加工组(45)和非加工组(165)逐SKU对比
+- 全量销售额 FM=QDM=56,321，毛利 FM=+11,944(21.2%) vs QDM=+7,675(13.6%)
+
+**核心发现**:
+- 加工组差异 +712 (+25%)：FM原料→成品成本转移正确，组合利差在可接受范围
+- 非加工组差异 +3,557 (+64%)：根因是BOM子品在QDM中被记为巨额亏损
+- 典型BOM虚亏：北海道吐司 QDM=-1267、蓝彪奶油 QDM=-670、速冻榴莲酥 QDM=-206
+- FM通过BOM分摊消除了这些虚亏
+
+**结论**: FM烘焙类综合毛利率21.2%合理，差异来自BOM+加工关系的成本归集方式不同，非计算错误。
 
 ---
 
