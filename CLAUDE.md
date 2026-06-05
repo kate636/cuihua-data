@@ -87,7 +87,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 - **目的**: 用 fmetl 替换现有 QDM ETL 链路
 - **验收标准**: 门店 + 大分类维度的门店毛利额与 QDM 数据基本一致（SKU 级允许差异，因计算方式不同）
 - **新 ETL 核心价值**: BOM 正确性、重刷数据便捷性、指标灵活性
-- **QDM 基准表**: `default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`
+- **QDM 基准表**: `default_catalog.ads_business_analysis.strategy_fm_levels_result` (SKU级: `level_description='sku'`)
 
 ### Agent 1: 设计 (Design Architect)
 
@@ -148,7 +148,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 - [ ] 父品 profit = 0（BOM 父品不应产生独立毛利）
 
 **C. QDM 对比校验**（核心验收）
-- [ ] 以 `dal_transaction_chdj_store_sale_article_sale_info_di` 为基准
+- [ ] 以 `strategy_fm_levels_result` (SKU级) 为基准，应用相同品类重映射
 - [ ] **门店 × 大分类** 粒度: 毛利额偏差在可接受范围（默认 ±5%，具体以设计文档为准）
 - [ ] **门店 × 日期** 粒度: 总毛利额偏差
 - [ ] 差异较大的门店/分类需要标注并分析原因
@@ -156,26 +156,20 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 
 **对比 SQL 模板**:
 ```sql
--- 门店 × 大分类 毛利额对比
-WITH fmetl AS (
-  SELECT store_id, category_level1_id, SUM(profit_amt) as fmetl_profit
-  FROM t_calc_profit GROUP BY store_id, category_level1_id
-),
-qdm AS (
-  SELECT shop_id as store_id, category_level1_id,
-         SUM(<毛利字段>) as qdm_profit
-  FROM default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di
-  WHERE business_date = '<日期>'
-  GROUP BY shop_id, category_level1_id
-)
-SELECT f.store_id, f.category_level1_id,
-       f.fmetl_profit, q.qdm_profit,
-       f.fmetl_profit - q.qdm_profit as diff,
-       CASE WHEN q.qdm_profit != 0 THEN (f.fmetl_profit - q.qdm_profit)/ABS(q.qdm_profit) END as diff_pct
-FROM fmetl f
-FULL OUTER JOIN qdm q ON f.store_id = q.store_id AND f.category_level1_id = q.category_level1_id
-WHERE ABS(f.fmetl_profit - q.qdm_profit) / NULLIF(ABS(q.qdm_profit), 0) > 0.05
-ORDER BY ABS(diff) DESC
+-- QDM SKU 级 (strategy_fm_levels_result, 字段名 sku_id)
+SELECT sku_id, SUM(total_sale_amount) as sale, SUM(store_profit_amount) as profit
+FROM default_catalog.ads_business_analysis.strategy_fm_levels_result
+WHERE level_description = 'sku' AND business_date BETWEEN '{start}' AND '{end}'
+  AND day_clear = 1
+GROUP BY sku_id
+
+-- FM SKU 级 (t_fm_sku_dim, 字段名 article_id)
+SELECT article_id, SUM(total_sale_amt) as sale, SUM(article_profit_amt) as profit
+FROM t_fm_sku_dim
+WHERE day_clear IN ('0','1') AND business_date BETWEEN '{start}' AND '{end}'
+GROUP BY article_id
+
+-- 两边都 JOIN dim_goods 获取原始分类，应用相同 master-data v2.3 重映射后再对比
 ```
 
 **输出**:
@@ -446,7 +440,11 @@ API SQL 中所有 `CASE WHEN x THEN y ELSE z END` 必须写成 `IF(x, y, z)`。D
 
 ### QDM 对比表
 
-对比 v4 输出时使用 QDM 表 `default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`（不是 `strategy_fm_levels_result`）。该表字段与 v4 一一对应，可做 SKU 级逐字段对比。
+对比时使用 QDM 表 `default_catalog.ads_business_analysis.strategy_fm_levels_result`（`level_description='sku'`，字段名 `sku_id`）。
+该表是 QDM 旧 ETL 产出，和 FM `t_fm_levels_result` 同一层级，销售数据完全一致。
+QDM 分类用原始 dim_goods（非重映射），对比时必须对两边应用**相同的 master-data v2.3 重映射**后再聚合。
+
+不再使用 `dal_transaction_chdj_store_sale_article_sale_info_di`（日期/门店覆盖不全，无 day_clear 区分）。
 
 ### 门店过滤 & 品类过滤
 所有原子表 INNER JOIN `dim_store_list`（翠花门店白名单）。品类过滤: `category_level1_id NOT IN ('70','71','72','73','74','75','76','77')` 排除物料类。
@@ -577,8 +575,8 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 
 ### QDM 对比表
 
-`default_catalog.ads_business_analysis.dal_transaction_chdj_store_sale_article_sale_info_di`。
-该表 `day_clear` 只有 `'1'`（不含 `'2'`），FM 对比时需合并 `'0'+'1'` 全口径。
+`default_catalog.ads_business_analysis.strategy_fm_levels_result` (SKU级: `level_description='sku'`)。
+该表 `day_clear` 只有 `1`(非日清) 和 `2`(合计)，无 `0`。FM 对比时用 `day_clear IN ('0','1')` 对应 QDM `day_clear=1`。
 
 ### QDM 数据查询
 
