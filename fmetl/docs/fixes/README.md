@@ -24,10 +24,12 @@
 | FIX-012 | L2=即食类→熟食类映射 | 📋 已记录 | — | sku_dim.py, executor.py 等多文件 | — |
 | FIX-013 | compose 部分原料 euc=0 整体归零 | ✅ 已实现 | ✅ 全月 | sku_cost.py | `7dab133` |
 | FIX-014 | 烘焙类 FM vs QDM 完整对比 | 📋 分析报告 | ✅ 已验证 | — | — |
+| FIX-015 | SKU级毛利差异逐日追踪 | 📋 分析报告 | ✅ 已验证 | — | `25c7c75` |
+| FIX-016 | 手动日清清单重整 93→72 | ✅ 已生效 | ✅ 已验证 | 服务器 day_clear.db | — |
 | — | sku_dim.py L3 LIKE '%熟食' | ✅ 已实现 | ❌ | sku_dim.py | `3b47390` |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
-**已实现 4 个（FIX-001, FIX-013 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
+**已实现 5 个（FIX-001, FIX-013, FIX-016 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -106,6 +108,20 @@
             被依赖: 无
 ```
 
+### 日清配置管理
+
+```
+日清标签管理
+│
+├── FIX-016 手动日清清单重整 93→72 ✅ 已生效
+│   └── 服务器 day_clear.db 直接清理
+│       烘焙冷冻原料移除非日清 → 恢复跨日库存结转
+│       关联: FIX-002 (EUC继承), FIX-013 (compose部分原料)
+│
+└── dims_extractor 全量手动日清 API 化 ✅
+    └── 从 ?manual_only=1 拉取，不再硬编码
+```
+
 ---
 
 ## 文件结构
@@ -126,7 +142,9 @@ fmetl/docs/fixes/
 ├── FIX-011-category-cost-ratio.md     (品类差异化成本率 ⏳)
 ├── FIX-012-cooked-instant-remap.md    (L2=即食类→熟食类映射 📋)
 ├── FIX-013-compose-partial-euc.md     (compose 部分原料 euc=0 不归零 ✅)
-└── FIX-014-bakery-qdm-comparison.md   (烘焙类FM vs QDM完整对比 📋)
+├── FIX-014-bakery-qdm-comparison.md   (烘焙类FM vs QDM完整对比 📋)
+├── FIX-015-sku-profit-trace.md        (SKU级利润逐日追踪 📋)
+└── FIX-016-dayclear-cleanup.md        (手动日清清单重整 93→72 ✅)
 ```
 ```
 

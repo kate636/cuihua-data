@@ -184,6 +184,11 @@ class StockCalculator:
         except (duckdb.CatalogException, Exception):
             pass
 
+        if prev_df is not None:
+            self._log.info(f"  {business_date}: 继承前一天 end_stock → init_stock ({len(prev_df)} SKU)")
+        else:
+            self._log.info(f"  {business_date}: 首日，从 purchase_di 源表取 init_stock")
+
         # ── 实盘库存 ──
         try:
             actual_df = conn.execute(f"""

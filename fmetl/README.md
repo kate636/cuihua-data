@@ -1,4 +1,4 @@
-# fmetl v0.10 — 翠花当家数据管道
+# fmetl v0.11 — 翠花当家数据管道
 
 ## 目录
 
@@ -9,7 +9,7 @@
 5. [完整计算逻辑流程](#5-完整计算逻辑流程)
 6. [13步流程详解](#6-13步流程详解)
 7. [QDM源表→DuckDB表映射](#7-源表映射)
-8. [v0.10修复对照表](#8-v0.10修复对照表)
+8. [v0.11修复对照表](#8-v0.11修复对照表)
 9. [day_clear字段说明](#9-day_clear字段说明)
 10. [验证方案](#10-验证方案)
 11. [环境配置](#11-环境配置)
@@ -43,7 +43,7 @@
 
 这组分层完整落到 DuckDB 表里：`atomic_*` 对应 Layer -2，`t_calc_*` 对应 Layer -1，`t_fm_*` 是最终对外的 Layer 0。
 
-**v0.10 新增设计原则**：
+**v0.11 新增设计原则**：
 
 | 原则 | 说明 |
 |------|------|
@@ -52,9 +52,9 @@
 | **四流分离** | 进货(receive)、拆分入(bom_in)、拆分出(bom_out)、加工入/出(compose_in/out) 各自独立列，一目了然 |
 | **跨日链式传递** | 今日期初库存 = 昨日期末库存，通过 `t_calc_stock` 逐日滚动 |
 
-### 1.3 从 v9 到 v0.10 的迭代
+### 1.3 从 v9 到 v0.11 的迭代
 
-| 方面 | v9（旧） | v0.10（现在） |
+| 方面 | v9（旧） | v0.11（现在） |
 |------|---------|------------|
 | 计算引擎 | SQL 内嵌复杂 CASE/窗口函数 | **Python pandas + NumPy** 计算，SQL 仅拉数据 |
 | 计算模块 | 7 张 calc 表 (inventory + avg_price + amounts + ...) | **4 张 calc 表** (删除 3 个冗余模块，合并到 stock.py) |
@@ -113,7 +113,7 @@
     │                                         47.115.213.115       │
     │                                                              │
     │  ┌───────────────────────────────────────────────────────┐  │
-    │  │              fmetl v0.10 ETL 管道                     │  │
+    │  │              fmetl v0.11 ETL 管道                     │  │
     │  │                                                       │  │
     │  │  sync_strategy_fm.sql (手动)                          │  │
     │  │    Hive → StarRocks 21张源表同步                      │  │
@@ -170,7 +170,7 @@
 ### 2.3 迭代路径
 
 ```
-v3 (旧版) ──→ v4 (BOM重写) ──→ v0.10 (架构重构)
+v3 (旧版) ──→ v4 (BOM重写) ──→ v0.11 (架构重构)
   SQL计算        scripts/下9版     三层分离
   7张calc表      临时脚本验证       4张calc表
                                   三agent流程
@@ -462,7 +462,7 @@ fmetl/
 
 ### BOM 分摊完整流程（Σ总权重 + 共享组识别 + 单位归一化）
 
-BOM (Bill of Materials) 是 v0.10 最复杂的计算模块。核心问题：当一个父品（如"大白猪A级"）拆分为多个子品（五花肉、前腿肉...）销售时，如何将父品的进货成本合理分摊到各子品？
+BOM (Bill of Materials) 是 v0.11 最复杂的计算模块。核心问题：当一个父品（如"大白猪A级"）拆分为多个子品（五花肉、前腿肉...）销售时，如何将父品的进货成本合理分摊到各子品？
 
 **数据源**：唯一使用 `atomic_receive_sale`（`strategy_fm_receive_sale_di`），不再使用 `atomic_bom_relation`。
 
@@ -511,7 +511,7 @@ BOM (Bill of Materials) 是 v0.10 最复杂的计算模块。核心问题：当�
 
   IF self_inbound_qty > 0 (Type A):
       split_need_weight = max(0, consume_weight - self_inbound_weight)
-      split_need_qty   = max(0, consume_qty - self_inbound_qty)     ← v0.10 A14: 防负
+      split_need_qty   = max(0, consume_qty - self_inbound_qty)     ← v0.11 A14: 防负
   ELSE (Type B/C):
       split_need_weight = consume_weight
       split_need_qty   = consume_qty
@@ -525,13 +525,13 @@ BOM (Bill of Materials) 是 v0.10 最复杂的计算模块。核心问题：当�
   alloc_ratio = split_need_weight / Σ总权重
   bom_alloc_amt = alloc_ratio × 组总 parent_inbound_amount
 
-  【共享子品分拆】(v0.10 A18):
+  【共享子品分拆】(v0.11 A18):
     共享子品（同时属于两个parent）按各 parent 进货额比例分拆:
     p0_ratio = parent_A.amt / (parent_A.amt + parent_B.amt)
     p1_ratio = parent_B.amt / (parent_A.amt + parent_B.amt)
     → 生成两行: (parent_A, sub, bom_alloc_amt×p0_ratio) + (parent_B, sub, bom_alloc_amt×p1_ratio)
 
-  【单位归一化】(v0.10 A19):
+  【单位归一化】(v0.11 A19):
     bom_alloc_qty = split_need_qty × (parent_qty / sum_sub_qty) × qty_split_ratio
     例: 海大虾 1箱=12kg, 子品消耗10kg → bom_out = 10 × (1/12) = 0.833箱
     目的: 保证库存方程各列单位一致 (全部用父品单位)
@@ -617,7 +617,7 @@ t_calc_bom_alloc
 
 **金额统一规则**：
 - receive_amt = 源表值 (receive_sale_di.inbound_amount)，不用 euc
-- compose_amt = 加工关系配方推算（v0.10 不再使用 avg_inbound_price）
+- compose_amt = 加工关系配方推算（v0.11 不再使用 avg_inbound_price）
 - know_lost_amt / unknow_lost_amt / end_stock_amt = qty × euc
 
 ### 跨日链式依赖
@@ -764,7 +764,7 @@ Day T+1:
 
 ---
 
-## 8. v0.10修复对照表
+## 8. v0.11修复对照表
 
 | # | 异常描述 | 影响 | 修复位置 | 修复方案 |
 |---|---------|------|---------|---------|
@@ -837,7 +837,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 
 ### 与 QDM 对比
 
-选取 3 个 SKU (20003470, 20015855, 21292699) 对比 v0.10 输出 vs QDM `strategy_fm_levels_result`:
+选取 3 个 SKU (20003470, 20015855, 21292699) 对比 v0.11 输出 vs QDM `strategy_fm_levels_result`:
 
 | 指标 | 期望差异 | 原因 |
 |------|---------|------|
@@ -845,7 +845,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 | 进货额 (inbound_amount) | 完全一致 | 源表相同 |
 | 期初库存额 | 完全一致 | 首日源表相同 |
 | 期末库存额 | < 0.5% | 浮点精度差异 |
-| 门店毛利额 | 有偏差 | v0.10 新公式含 BOM (A10/A12 修复) |
+| 门店毛利额 | 有偏差 | v0.11 新公式含 BOM (A10/A12 修复) |
 
 ### 2026-04-23 验证结果
 
@@ -857,7 +857,7 @@ print(conn.execute('SELECT COUNT(*) FROM t_calc_sku_cost WHERE effective_unit_co
 - ✅ BOM 对称: Σbom_in = Σbom_out
 - ✅ 核心金额 (sale/inbound/init/end) 匹配 QDM，差异 < 0.3%
 - ⚠️ 猪肉类毛利 v4=431 vs QDM=545 (差距-114, 来自 euc=0 的BOM加工品和共享组权重计算差异)
-- ⚠️ 毛利偏离 QDM — 预期内 (v0.10 纳入 BOM 毛利, A10/A12/A17-A19)
+- ⚠️ 毛利偏离 QDM — 预期内 (v0.11 纳入 BOM 毛利, A10/A12/A17-A19)
 
 ---
 
