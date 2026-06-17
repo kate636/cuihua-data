@@ -57,7 +57,8 @@ class DimsExtractor:
                 category_level3_id, category_level3_description,
                 spu_id, spu_name,
                 blackwhite_pig_name, blackwhite_pig_id,
-                unit_weight, sale_unit
+                unit_weight, sale_unit,
+                matnr
             FROM strategy_fm_dim_goods
             WHERE inc_day = '{ds}'
               AND category_level1_id NOT IN ('70','71','72','73','74','75','76','77')
