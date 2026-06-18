@@ -21,7 +21,6 @@ Pipeline (v0.10, 13 步):
   Step 9   FM 客数 (t_fm_cust)
   Step 10  FM 分类汇总 (t_fm_levels_sum)
   Step 11  FM 结果层 (t_fm_levels_result)
-  Step 11b FM 结果层-物料号 (t_fm_levels_result_matnr)
   Step 12  BOM 分摊溯源 (t_fm_bom_breakdown)
   Step 13  库存滚动展开 (t_fm_stock_roll)
   Step 14  同步加工关系候选数据到云端
@@ -52,7 +51,7 @@ from .calculated import (
 )
 from .fm_tables import (
     SkuDimBuilder, CustBuilder, LevelsSumBuilder, LevelsResultBuilder,
-    MatnrResultBuilder, BomBreakdownBuilder, StockRollBuilder,
+    BomBreakdownBuilder, StockRollBuilder,
 )
 from .utils import get_logger
 
@@ -152,9 +151,6 @@ def _run_fm(duck, api, start, end, yesterday):
 
     _step("Step 11: FM 结果层 → t_fm_levels_result")
     LevelsResultBuilder(duck).build(start=start, end=end)
-
-    _step("Step 11b: FM 结果层(物料号) → t_fm_levels_result_matnr")
-    MatnrResultBuilder(duck).build(start=start, end=end)
 
     _step("Step 12: BOM 分摊溯源 → t_fm_bom_breakdown")
     BomBreakdownBuilder(duck).build(start=start, end=end)
