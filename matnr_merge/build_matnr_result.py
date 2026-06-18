@@ -3,16 +3,17 @@
 
 用法:
     source .venv/bin/activate
-    python build_matnr_result.py 2026-06-01 2026-06-09
-    python build_matnr_result.py 2026-06-09 2026-06-09
+    python matnr_merge/build_matnr_result.py 2026-06-01 2026-06-09
+    python matnr_merge/build_matnr_result.py 2026-06-09 2026-06-09
 
 前提: ETL 已跑完 (t_fm_levels_sum + t_fm_cust + dim_goods 就绪, dim_goods 需含 matnr 列)
 """
 
 import sys
+from pathlib import Path
 import duckdb
 
-DB_PATH = "data/fm.duckdb"
+DB_PATH = str(Path(__file__).parent.parent / "data" / "fm.duckdb")
 TARGET_TABLE = "t_fm_levels_result_matnr"
 
 
@@ -259,8 +260,8 @@ def build(conn: duckdb.DuckDBPyConnection, start: str, end: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python build_matnr_result.py <start_date> <end_date>")
-        print("  e.g.: python build_matnr_result.py 2026-06-01 2026-06-09")
+        print("Usage: python matnr_merge/build_matnr_result.py <start_date> <end_date>")
+        print("  e.g.: python matnr_merge/build_matnr_result.py 2026-06-01 2026-06-09")
         sys.exit(1)
 
     start, end = sys.argv[1], sys.argv[2]
