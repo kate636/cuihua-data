@@ -3,7 +3,8 @@
 | 报告 | 日期 | 范围 | 关键发现 |
 |------|------|------|---------|
 | [REVIEW-001](REVIEW-001-2026-06-18-to-22.md) | 2026-06-23 | 6/18-22 QDM对比 | 销售0差异；利润+20%；BOM父品利润不为0；5大可修正+4个结构性差异 |
-| [REVIEW-002](REVIEW-002-matnr-euc-integration.md) | 2026-06-23 | matnr+EUC整合 | 429对活跃matnr；3对BOM重叠；V10_MATNR_CONVERT兜底方案；~50-70 SKU可修复 |
+| [REVIEW-002](REVIEW-002-matnr-euc-integration.md) | 2026-06-23 | matnr+EUC整合 | 429对活跃matnr；3对BOM重叠；V10_MATNR_CONVERT兜底方案；Phase 1+2已完成 |
+| [REVIEW-003](REVIEW-003-matnr-deep-dive.md) | 2026-06-23 | matnr深层审查 | 修正前次错误；receive落在称重品(106/117对)；需merge.py拆分receive |
 | [全面审查报告 v0.10](全面审查报告_v0.10_2026-06-01.md) | 2026-06-01 | 5月全月 | v0.10 初始审查 |
 | [差异问题与待办](差异问题与待办事项_v0.10.md) | — | v0.10 | 已知差异问题跟踪 |
 
