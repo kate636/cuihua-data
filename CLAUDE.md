@@ -63,12 +63,14 @@ conn = duckdb.connect('data/fm.duckdb', read_only=True)
 print(conn.execute('SELECT COUNT(*) FROM t_calc_stock WHERE end_stock_qty < 0').fetchone())
 "
 
-# 检查 BOM 对称（bom_in ≈ bom_out）
+# 检查 BOM 对称：bom_in - bom_out 应 = Σstock_transfer_in_amt（不是 0！）
+# stock_transfer 把父品残余库存转成 sub 的 bom_in 但不补父品 bom_out（FIX-004 已回滚），
+# 故 bom_diff = transfer_in。真正的残差 = bom_diff - transfer_in，应 ≈ 0。
 python3 -c "
 import duckdb
 conn = duckdb.connect('data/fm.duckdb', read_only=True)
-r = conn.execute('SELECT SUM(bom_in_amt)-SUM(bom_out_amt) FROM t_calc_stock').fetchone()
-print(f'BOM diff: {r[0]:.2f}')
+r = conn.execute('SELECT SUM(bom_in_amt)-SUM(bom_out_amt), SUM(stock_transfer_in_amt) FROM t_calc_stock').fetchone()
+print(f'BOM diff: {r[0]:.2f}  transfer_in: {r[1]:.2f}  residual: {r[0]-r[1]:.2f}')
 "
 
 # 查询结果
@@ -711,6 +713,7 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 ## Documentation Conventions
 
 - **CLAUDE.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
+- **公式单一信源**: 核心公式（profit / EUC / BOM 分摊 / 库存方程 / 6 分支）的 canonical 定义只在 **CLAUDE.md「Core Business Logic」+ `docs/architecture/ETL_v0.11_完整处理逻辑.md`** 两处维护。子目录 README 可展开实现细节，但顶部需声明"以信源为准"，改公式时先改信源、再同步子 README，避免漂移（历史教训：calculated/README 曾把 `bom_alloc_qty_sub` 误写成 `bom_alloc_qty`，险些诱导 euc 暴涨 bug 复现）。
 - **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
 - **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
 - **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本

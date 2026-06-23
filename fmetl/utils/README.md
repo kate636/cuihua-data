@@ -33,7 +33,7 @@ _log.info("done")
 ## `date_utils.py` — 日期分段
 
 ```python
-from fm_etl_v3.utils import split_date_range
+from fmetl.utils import split_date_range
 
 # 把长区间切成 7 天一段，闭区间
 segments = split_date_range("2026-01-01", "2026-01-31", chunk=7)
@@ -53,7 +53,7 @@ segments = split_date_range("2026-01-01", "2026-01-31", chunk=7)
 ## `retry.py` — 指数退避重试
 
 ```python
-from fm_etl_v3.utils import retry_on_exception
+from fmetl.utils import retry_on_exception
 
 @retry_on_exception(max_attempts=3, wait_seconds=5.0, backoff=2.0)
 def unstable_call():

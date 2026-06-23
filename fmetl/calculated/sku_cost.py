@@ -444,7 +444,8 @@ class SkuCostCalculator:
             article_id = str(df.at[idx, 'article_id'])
             if article_id not in proc_map:
                 # 无加工关系 → compose_in_amt 保持 0
-                # EUC 兜底链 (cost_price → current_price×0.40) 会在后续步骤提供估算
+                # 后续 EUC 兜底链 (ffill→avg_inbound→processing_relation→matnr_convert)
+                # 可能给该 SKU 提供 euc; 注意 cost_price / current_price×0.40 兜底已移除
                 self._log.debug(f"compose_in SKU {article_id} 无加工关系, compose_in_amt=0")
                 continue
 

@@ -1,5 +1,9 @@
 # calculated/ — 计算层
 
+> **公式权威信源**：核心公式（profit / EUC / BOM 分摊 / 库存方程）的 canonical 定义以
+> [`CLAUDE.md`](../../CLAUDE.md) 的「Core Business Logic」+ [`docs/architecture/ETL_v0.11_完整处理逻辑.md`](../docs/architecture/ETL_v0.11_完整处理逻辑.md) 为准。
+> 本 README 提供模块级实现细节（字段、分支、来源），与信源保持同步；如发现不一致，**以代码 + 信源为准**，并回头修正本文件。
+
 计算层是 ETL 管道的核心逻辑层。所有复杂计算（分支、加权、聚合）在 Python (pandas + NumPy) 中完成，SQL (DuckDB) 仅用于数据提取 (`SELECT ... FROM ...`)。
 
 ## 模块依赖关系
@@ -141,8 +145,16 @@ ELSE (Type B/C — 子品完全依赖父品拆分):
 对于每个 sub:
   alloc_ratio   = split_need_weight / Σ总权重        (Σ总权重 > 0)
   bom_alloc_amt = alloc_ratio × parent_inbound_amount  (父品总进货额)
-  bom_alloc_qty = split_need_qty
+
+  ── 单位归一化 (v0.10 fix, 两套 qty 不可混用) ──
+  bom_alloc_qty     = alloc_ratio × parent_qty   ← 父品单位, 用于 stock.py 的 bom_out
+  bom_alloc_qty_sub = alloc_ratio × sum_sub      ← 子品单位, 用于 sku_cost.py 的 bom_in
+                       (sum_sub = parent_sum_sub_qty, 无则回退 parent_qty)
 ```
+
+> ⚠️ **关键**: `bom_alloc_qty`(父品单位) 与 `bom_alloc_qty_sub`(子品单位) 是两套量，
+> 混用会导致 euc 暴涨（海大虾 200.84→54.47 案例）。sku_cost.py 计算子品 euc 的 bom_in
+> 必须用 `bom_alloc_qty_sub`；stock.py 计算父品 bom_out 用 `bom_alloc_qty`。
 
 ### 全部输出字段 (28列)
 
@@ -168,14 +180,15 @@ ELSE (Type B/C — 子品完全依赖父品拆分):
 | `group_total_weight` | Σ(共享组内 sub.split_need_weight) | 组总权重 |
 | `alloc_ratio` | `split_need_weight / group_total_weight` | 分配占比 |
 | `bom_alloc_amt` | `alloc_ratio × 父品进货额` | BOM分摊金额 |
-| `bom_alloc_qty` | `split_need_qty` | BOM分摊数量 |
+| `bom_alloc_qty` | `alloc_ratio × parent_qty` | BOM分摊数量(**父品单位**, 给 stock.py bom_out) |
+| `bom_alloc_qty_sub` | `alloc_ratio × sum_sub` | BOM分摊数量(**子品单位**, 给 sku_cost.py bom_in) |
 | `dressing_rate` | `alloc_ratio` | 修整率 (=分配占比) |
 | `cost_rate_effective` | `0.0` | 有效成本率 (预留) |
 | `cost_rate_source` | `'V10_WEIGHTED_ALLOC'` | 成本率来源标记 |
 | `sub_qty_actual` | `consume_qty` | 子品实际消耗量 |
 | `sub_qty_source` | `'SALES+LOSS'` | 子品消耗量来源 |
 | `sub_alloc_amt` | `bom_alloc_amt` | 子品分摊额 (=bom_alloc_amt副本) |
-| `sub_unit_cost` | `bom_alloc_amt / bom_alloc_qty` (qty>0) | 子品分摊单位成本 |
+| `sub_unit_cost` | `bom_alloc_amt / bom_alloc_qty_sub` (qty_sub>0) | 子品分摊单位成本 |
 
 ---
 
@@ -192,7 +205,7 @@ ELSE (Type B/C — 子品完全依赖父品拆分):
 | 来源 | 字段 | 用途 |
 |------|------|------|
 | `t_atomic_wide` | self_receive_qty, self_receive_amt, compose_in_qty, compose_out_qty, init_stock_qty_src, init_stock_amt_src, avg_inbound_price | 基础数据 |
-| `t_calc_bom_alloc` | bom_alloc_qty, bom_alloc_amt (按 sub_article_id 聚合) | BOM分摊量/额 |
+| `t_calc_bom_alloc` | bom_alloc_qty_sub (子品单位, 别名为 bom_alloc_qty), bom_alloc_amt (按 sub_article_id 聚合) | BOM分摊量/额 |
 | `t_calc_stock` (昨天) | end_stock_qty, end_stock_amt (日期+1天shift) | 昨日→今日期初 |
 
 #### 期初库存解析
@@ -215,7 +228,8 @@ ELSE (首日, 无历史):
 加工成品成本由**加工关系**配方推算，不再使用 QDM 源表金额：
 
 ```
-base_euc = (init + self_receive + bom_alloc) / (init_qty + self_receive_qty + bom_alloc_qty)
+base_euc = (init + self_receive + bom_alloc) / (init_qty + self_receive_qty + bom_alloc_qty_sub)
+            ← 注意: 分母用子品单位 bom_alloc_qty_sub (SQL 中按 sub 聚合后别名为 bom_alloc_qty)
 
 成品: compose_in_amt = compose_in_qty × Σ(raw_qty / yield_qty × raw_base_euc)
 原料: compose_out_amt = compose_out_qty × base_euc (价值守恒)
@@ -229,16 +243,19 @@ compose_net_amt = compose_in_amt - compose_out_amt
 ```
 total_cost_amt = init_stock_amt + self_receive_amt + compose_net_amt + bom_alloc_amt
 cost_qty       = init_stock_qty + self_receive_qty + compose_net_qty + bom_alloc_qty
+                 ← bom_alloc_qty 此处 = SUM(bom_alloc_qty_sub), 子品单位 (sku_cost.py L82 别名)
 effective_unit_cost = total_cost_amt / cost_qty    (仅当 cost_qty > 0)
 cost_source         = 'V10_WEIGHTED_AVG'
 ```
 
-**euc 兜底链** (cost_qty=0 时):
+**euc 兜底链** (cost_qty=0 时，依次尝试):
 1. ffill 沿 (store_id, article_id) 从前一营业日继承 → `V10_INHERITED_EUC`
 2. avg_inbound_price → `V10_AVG_INBOUND_FALLBACK`
 3. 加工关系推算 → `V10_PROCESSING_RELATION`
+4. 同 matnr 兄弟 SKU 按重量比互推 → `V10_MATNR_CONVERT`
 
-> cost_price 不参与 euc 计算。
+> `cost_price` 和 `current_price×0.40` **均不参与** euc 计算（早期设计已移除）。
+> 实际 cost_source 标记只有上述 5 种（含主算法 `V10_WEIGHTED_AVG`），无 `V10_COST_PRICE_FALLBACK`。
 
 ### 输出字段 (19列)
 
@@ -255,7 +272,7 @@ cost_source         = 'V10_WEIGHTED_AVG'
 | `compose_in_amt` | 成品=配方推算, 否则源表值 | 加工流入金额 |
 | `compose_out_amt` | `qty × base_euc` | 加工流出金额 (价值守恒) |
 | `bom_alloc_amt` | SUM from t_calc_bom_alloc | BOM分摊金额 |
-| `bom_alloc_qty` | SUM from t_calc_bom_alloc | BOM分摊数量 |
+| `bom_alloc_qty` | `SUM(bom_alloc_qty_sub)` from t_calc_bom_alloc | BOM分摊数量(子品单位) |
 | `init_stock_qty` | 昨日end / 首日源表 | 期初库存量 |
 | `init_stock_amt` | 昨日end / 首日源表 | 期初库存额 |
 | `avg_inbound_price` | t_atomic_wide | 平均进货价 |

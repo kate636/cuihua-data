@@ -1,5 +1,7 @@
 # fm_tables/ — FM 底表层
 
+> **公式权威信源**：毛利 / EUC / 分类重映射等 canonical 公式以 [`CLAUDE.md`](../../CLAUDE.md) + [`docs/architecture/ETL_v0.11_完整处理逻辑.md`](../docs/architecture/ETL_v0.11_完整处理逻辑.md) 为准。本 README 描述底表字段与产出口径。
+
 最终产出层。6 张表供商分平台消费。
 
 ## 表概览

@@ -15,8 +15,8 @@
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
 | FIX-004 | BOM 父品转移负毛利 | ↩️ 已回滚 | — | stock.py | `e5f503c`→`8a6030e` revert |
 | FIX-005 | 金额平衡公式修正 | 📋 低优先级 | — | stock_roll.py | — |
-| FIX-006 | 蛋类 -34.9% 偏差 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
-| FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
+| FIX-006 | 蛋类 -34.9% 偏差 | 🟡 波及分析 | — | — (FIX-004已回滚, 改由FIX-019缓解) | — |
+| FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004已回滚, 口径差视为正常) | — |
 | FIX-008 | 标品库存核销 | 🟡 被取代 | — | — (FIX-009 修复) | — |
 | FIX-009 | is_counted 系统快照 | ✅ 已实现 | ❌ | stock.py | `6ad7e91` |
 | FIX-010 | 盘盈机制分析 | 📋 结构性差异 | N/A | 无需改代码 | — |
@@ -96,20 +96,28 @@
 │
 ├── §2.3 BOM 父品库存转移负毛利 🔴 -1,272.80 元
 │   │
-│   └── FIX-004 BOM 父品 transfer 增加 bom_out ⏳ 待实现
-│       └── stock_transfer 时父品同步增加 bom_out_amt/qty
-│           修改: stock.py
-│           依赖: FIX-001, FIX-002
-│           被依赖: FIX-005
+│   └── FIX-004 BOM 父品 transfer 增加 bom_out ↩️ 已回滚
+│       └── 曾实现 (e5f503c) 后 revert (8a6030e): 对矩阵无改善且总差变大
+│           BOM 父子品利润分配差异属可接受口径差, 不强行归零
+│           矩阵真正驱动因素改由 FIX-019 解决
 │
-└── §2.6 库存方程金额平衡大面积失败 (23.9%)
+├── §2.6 库存方程金额平衡大面积失败 (23.9%)
     │
     └── FIX-005 金额平衡公式修正 + balance_amt 列 🟡 低优先级
         └── 审查报告用了 sale_amt(售价) 而非 sale_cost_amt(成本)
             正确公式下 98.0% 行平衡, 剩余 2% 是结构性差异
             修改: stock_roll.py (增加 balance_amt 列), 审查报告 (更新公式)
-            依赖: FIX-002, FIX-004
+            依赖: FIX-002
             被依赖: 无
+
+差异矩阵根因 (REVIEW-007, 独立于上述审查报告)
+│
+└── FIX-019 负库存钉零分支透支成本未计入利润 ✅ 已实现 (fa0116e)
+    └── dc='1' & eq<0 & end≈0 时 stock.py 钉零, 透支量入 unknow_lost,
+        但利润公式不含 unknow_lost → 利润虚高。profit.py 扣回 unknow_lost_amt
+        修改: profit.py
+        依赖: 无 (只读 t_calc_stock.eq_end_qty + unknow_lost_amt)
+        效果: 6/18-22 总毛利差 +18.9% → +6.3%
 ```
 
 ### 日清配置管理
@@ -136,10 +144,10 @@ fmetl/docs/fixes/
 ├── FIX-001-compose-pure-pr.md         (加工金额纯加工关系计算 ✅)
 ├── FIX-002-euc-fallback.md            (EUC计算链路与兜底修复方案 ⏳)
 ├── FIX-003-init-stock-consistency.md  (跨日init_stock查找不一致 🟡)
-├── FIX-004-bom-transfer.md            (BOM父品库存转移负毛利 ⏳)
+├── FIX-004-bom-transfer.md            (BOM父品库存转移负毛利 ↩️已回滚)
 ├── FIX-005-amount-balance.md          (库存方程金额平衡分析 🟡)
-├── FIX-006-egg-category-deviation.md  (蛋类 -34.9% → FIX-004波及 🟡)
-├── FIX-007-may29-loss.md              (5/29巨损 → FIX-004波及 🟡)
+├── FIX-006-egg-category-deviation.md  (蛋类 -34.9% → FIX-004已回滚/FIX-019缓解 🟡)
+├── FIX-007-may29-loss.md              (5/29巨损 → FIX-004已回滚 🟡)
 ├── FIX-008-inventory-writeoff.md      (标品核销分析 → 根因FIX-009 🟡)
 ├── FIX-009-is-counted-snapshot.md     (is_counted系统快照 ✅)
 ├── FIX-010-inventory-gain.md          (盘盈机制分析 📋)
@@ -149,6 +157,8 @@ fmetl/docs/fixes/
 ├── FIX-014-bakery-qdm-comparison.md   (烘焙类FM vs QDM完整对比 📋)
 ├── FIX-015-sku-profit-trace.md        (SKU级利润逐日追踪 📋)
 ├── FIX-016-dayclear-cleanup.md        (手动日清清单重整 93→72 ✅)
+├── FIX-017-self-receive-bom-dedup.md  (self_receive BOM父品收货去重 ✅)
+├── FIX-018-matnr-cross-validation.md  (matnr EUC 交叉验证 ✅)
 └── FIX-019-negative-stock-clamp-cost.md (负库存钉零透支成本未计入利润 ✅)
 ```
 ```
@@ -426,6 +436,62 @@ fmetl/docs/fixes/
 
 ---
 
+### FIX-015: SKU 级毛利差异逐日追踪 📋
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-015-sku-profit-trace.md](FIX-015-sku-profit-trace.md) |
+| **状态** | 📋 分析报告（无需改代码，commit `25c7c75`） |
+| **修改文件** | — |
+
+逐 SKU、逐日追踪 FM vs QDM 毛利差异来源，确认差异集中在 BOM 父子品与库存口径，为后续 FIX-017~019 定位提供依据。
+
+---
+
+### FIX-016: 手动日清清单重整 93→72 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-016-dayclear-cleanup.md](FIX-016-dayclear-cleanup.md) |
+| **状态** | ✅ 已生效（服务器 day_clear.db，ETL 已验证） |
+| **修改文件** | 服务器 `day_clear.db`（数据，非代码） |
+
+烘焙冷冻原料从非日清清单移除，恢复跨日库存结转。手动日清清单从 93 项精简到 72 项。配合 `dims_extractor` 全量从 `?manual_only=1` API 拉取，不再硬编码。
+
+---
+
+### FIX-017: self_receive BOM 父品收货去重 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-017-self-receive-bom-dedup.md](FIX-017-self-receive-bom-dedup.md) |
+| **来源** | [REVIEW-004](../reviews/REVIEW-004-receive-source-audit.md) |
+| **状态** | ✅ 已实现（ETL 已验证） |
+| **修改文件** | `fmetl/calculated/merge.py` |
+
+**问题**: `_tmp_self_receive` 对 `atomic_receive_sale` 两路（Path1 自购 `article_id=sale_article_id` + Path2 BOM父品 `article_id≠sale_article_id`）做 UNION ALL + SUM。同一 SKU 同天既自购又是 BOM 父品时被双倍计数（西葫芦等 6 行 +302 元）。
+
+**修复**: Path1（自购）优先，Path2（BOM父品）仅在 Path1=0 时补充。纯 BOM 父品保留 Path2 不受影响。
+
+---
+
+### FIX-018: matnr EUC 交叉验证层 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-018-matnr-cross-validation.md](FIX-018-matnr-cross-validation.md) |
+| **来源** | [REVIEW-003](../reviews/REVIEW-003-matnr-deep-dive.md) |
+| **状态** | ✅ 已实现（只读告警，ETL 已验证） |
+| **修改文件** | `fmetl/calculated/sku_cost.py` |
+
+**问题**: 同 matnr 多个 SKU 独立算 EUC，无机制检测 EUC 比率与重量比率是否一致（蒙牛鲜奶 6包袋 euc 偏差 279%）。
+
+**实现**: `_cross_validate_matnr_euc()` 在所有 fallback 后只读检查，同 matnr 有 ≥2 SKU 且 euc_ratio 与 wt/zgl 比偏差 >20% 时输出 WARNING（同 matnr 跨天去重，BOM 重叠加标记）。**不修改 EUC 值**，仅暴露异常。
+
+> 注：FIX-018 是只读告警，真正按重量比修正 EUC 的是 `V10_MATNR_CONVERT`（sku_cost.py `_apply_matnr_conversion`）。
+
+---
+
 ### FIX-019: 负库存钉零分支透支成本未计入利润 ✅
 
 | 属性 | 值 |
@@ -456,6 +522,19 @@ QDM 允许负期末，自然把透支扣进利润，故 FM 在生鲜品类系统
 ```
 FIX-001 ✅  2026-06-01  compose纯加工关系计算 (sku_cost.py + stock.py)
 FIX-009 ✅  2026-06-01  is_counted系统快照移除 (stock.py)
+FIX-013 ✅  2026-06-04  compose部分原料euc=0不归零 (sku_cost.py)
+FIX-017 ✅  2026-06-23  self_receive BOM父品收货去重 (merge.py)
+FIX-018 ✅  2026-06-23  matnr EUC 交叉验证 (sku_cost.py)
+FIX-019 ✅  2026-06-24  负库存钉零透支成本计入利润 (profit.py)
+```
+
+### ↩️ 已回滚
+
+```
+FIX-004 ↩️  BOM父品转移负毛利 (stock.py)
+   └── 曾实现 (e5f503c) 后 revert (8a6030e): 对矩阵无改善且总差变大
+   └── 结论: BOM 父子品利润分配差异属可接受口径差, 不归零
+            矩阵真正驱动因素由 FIX-019 解决
 ```
 
 ### ⏳ 待实现（按顺序）
@@ -469,18 +548,14 @@ FIX-009 ✅  2026-06-01  is_counted系统快照移除 (stock.py)
    └── 阻塞: FIX-002 (需要 V10_RETAIL_ESTIMATED 兜底层先存在)
    └── 影响: 将 FIX-002 的 uniform 0.40 替换为品类差异化 0.66-0.85
             利润虚增从 15,836 → 7,403 (-53%)
-
-3. FIX-004 ⏳  BOM父品转移负毛利 (stock.py)
-   └── 阻塞: FIX-002 (需要 EUC 先正确)
-   └── 影响: 修复 11 个父品 -1,273 → +148,
-            连带修复蛋类(FIX-006) 和 5/29(FIX-007)
 ```
 
 ### 🟡 波及分析（待上游修复后验证）
 
 ```
-FIX-006 🟡  蛋类 -34.9%  → 验证 FIX-004 修复后蛋类进入 ±5%
-FIX-007 🟡  5/29 巨损    → 验证 FIX-004 修复后 5/29 利润恢复正常
+FIX-006 🟡  蛋类 -34.9%  → 原指望 FIX-004 修复; FIX-004 已回滚, 改由
+                          FIX-019(库存口径) 缓解, 蛋类 6/18-22 差异已收窄到 +51
+FIX-007 🟡  5/29 巨损    → 原指望 FIX-004; FIX-004 已回滚, BOM 父子品口径差视为正常
 FIX-008 🟡  标品核销     → 已被 FIX-009 修复, 验证无遗留
 ```
 

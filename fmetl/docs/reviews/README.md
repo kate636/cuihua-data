@@ -2,6 +2,7 @@
 
 | 报告 | 日期 | 范围 | 关键发现 |
 |------|------|------|---------|
+| [REVIEW-008](REVIEW-008-full-chain-logic-audit.md) | 2026-06-24 | 全链路逻辑审计(逐项把握%) | BOM残差349.35=stock_transfer非bug; 136零成本有销售=FIX-002/011结构缺口; 分摊全局守恒; 父品转移后end=0; 多处文档冲突已修 |
 | [REVIEW-001](REVIEW-001-2026-06-18-to-22.md) | 2026-06-23 | 6/18-22 QDM对比 | 销售0差异；利润+20%；BOM父品利润不为0；5大可修正+4个结构性差异 |
 | [REVIEW-002](REVIEW-002-matnr-euc-integration.md) | 2026-06-23 | matnr+EUC整合 | 429对活跃matnr；3对BOM重叠；V10_MATNR_CONVERT兜底方案；Phase 1+2已完成 |
 | [REVIEW-003](REVIEW-003-matnr-deep-dive.md) | 2026-06-23 | matnr深层审查 | 修正前次错误；receive落在称重品(106/117对)；需merge.py拆分receive |

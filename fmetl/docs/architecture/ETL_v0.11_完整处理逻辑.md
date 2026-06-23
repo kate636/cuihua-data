@@ -15,7 +15,7 @@ ETL 中有 **10+ 个 price 字段**，分属四个不同来源，各自用途不
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
 | `original_price` | **销售原价**（list price，标签价） | **BOM 消耗权重**：`weight = (sale_qty + know_lost_qty) × original_price`；**预期销售额**：`pre_sale_amt = lost_qty × original_price + original_price_sale_amt` |
-| `current_price` | 今日实际售价 | EUC 最终兜底：`euc = current_price × 0.40`（零售估算成本率）；写入 `t_atomic_wide` |
+| `current_price` | 今日实际售价 | **不参与 euc 计算**（早期 `current_price×0.40` 兜底已移除）；仅写入 `t_atomic_wide` 作观测 |
 | `yesterday_price` | 昨日售价 | 观测值，写入 `t_atomic_wide`，下游不参与计算 |
 | `dc_original_price` | **出库原价**（配送中心出库价） | **理论进货额**：`pre_inbound_amount = receive_qty × dc_original_price` |
 
@@ -23,13 +23,13 @@ ETL 中有 **10+ 个 price 字段**，分属四个不同来源，各自用途不
 
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
-| `avg_inbound_price` | **进货均价**（parent 验收均价） | compose_net_amt **第二层回退**（源表无 amt 且 cost_price=0 时 = `qty × avg_inbound_price`）；euc **第三层回退**（cost_qty=0 且前向填充无值、cost_price=0 时 = `avg_inbound_price`） |
+| `avg_inbound_price` | **进货均价**（parent 验收均价） | euc 兜底链第 2 层：cost_qty=0 且前向填充(ffill)无值时 `euc = avg_inbound_price`，标记 `V10_AVG_INBOUND_FALLBACK` |
 
 ### 1.3 成本侧（`atomic_cost_price`，源表 `strategy_fm_inventory_pool_di`）
 
 | 字段 | 含义 | 在 ETL 中的用途 |
 |------|------|----------------|
-| `cost_price` | **标准成本价**（系统维护的标准成本） | **compose_net_amt 第一层回退**（源表无 amt 时 = `qty × cost_price`）；**euc 第四层回退**（前三层均失败时 = `cost_price`），标记 `V10_COST_PRICE_FALLBACK` |
+| `cost_price` | **标准成本价**（系统维护的标准成本） | **不参与计算**：`atomic_cost_price` 仍提取、sku_cost.py 仍 SELECT，但 euc 与 compose 均不使用（无 `V10_COST_PRICE_FALLBACK` 标记）。纯观测值 |
 
 ### 1.4 SCM 侧（`atomic_scm`，源表 `strategy_fm_scm_di`）—— 7 个单价
 
@@ -136,14 +136,17 @@ day_clear 优先级：sales.day_clear > inventory.day_clear > dim_day_clear(1→
 
 **3d. BOM 父品补行**：父品不在宽表中时 INSERT 补全行（父品有 self_receive 但无销售，需出现在宽表以便 downstream 处理其进货和 BOM 流出）。父品行 day_clear 固定为 '1'，所有销售/库存/损耗等字段填 0。
 
-**3e. 日清覆盖**（两组商品强制 `day_clear='0'`，通过 `dim_day_clear_override` 白名单实现）：
+**3e. 日清覆盖**（三组商品强制 `day_clear='0'`，通过 `dim_day_clear_override` 白名单实现，与 `merge.py` 的三段 UPDATE 一致）：
 
-| 规则 | override_type |
-|------|--------------|
-| 猪肉类 | `猪肉类` — `category_level1_description = '猪肉类'` |
-| 熟食类 | `熟食类` — `category_level3_description LIKE '%熟食'` |
+| override_type | 派生规则（dims_extractor.py 构建） |
+|---------------|--------------|
+| `猪肉类` | `category_level1_description = '猪肉类'` |
+| `熟食类` | `L1='熟食类'` OR `L3 LIKE '%熟食'` OR `L2 IN ('即烹类','即热类')` OR (`L1='预制菜'` AND `sale_unit='千克'`) |
+| `烘焙类`（及其他手动录入） | 从 FM 日清标签管理 API `?manual_only=1` 拉取，按 API 返回的 `override_type` 追加 |
 
 > **v0.10 fix**：鲜牛肉日清覆盖已移除。牛肉有持续期初库存（`purchase_di` 的 `init_stock ≠ 0`），日清会导致巨额虚假亏损。
+>
+> 注意：本 Step 3e 列表与 Step 1 的"日清覆盖白名单"是同一份 `dim_day_clear_override`，构建在 Step 1（dims_extractor），应用在 Step 3（merge.py）。
 
 ### Step 4: BOM 分摊 (`BomAllocCalculator` → `t_calc_bom_alloc`)
 
@@ -257,10 +260,18 @@ eq = init_stock + receive + bom_in - bom_out + compose_in - compose_out - sale -
    → unknow = 0
    解释：知道丢了什么、丢了多少，方程已扣减 know_lost，算出来的 eq 就是应有的库存。
 
-5. 其他（正常）:
+5. actual_stock_qty > eq + 0.001 (系统快照盘盈检测):
+   → end = actual_stock_qty
+   → unknow = eq - actual  (负值 = 盘盈)
+   解释：系统记录的实盘数超过方程计算值，用实盘覆盖 end，差额记为负 unknow。
+
+6. 其他（正常）:
    → end = eq
    → unknow = 0
 ```
+
+> 共 **6 个分支**（优先级从高到低）。stock.py 的实际判断顺序见
+> `[calculated/README.md](../../calculated/README.md)` 分支表。
 
 **金额统一用 euc**：所有 amt = qty × euc（包括 know_lost_amt、unknow_lost_amt、end_stock_amt）
 
@@ -337,7 +348,7 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 
 ## 五、数据源表
 
-### 5.1 原子域表（16 张）
+### 5.1 原子域表（15 张：13 活跃 + 2 空骨架）
 
 | DuckDB 表 | QDM 商分源表 | 域 | 说明 |
 |-----------|-------------|---|------|
@@ -376,7 +387,7 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 |-----------|------|------|
 | `t_atomic_wide` | FULL OUTER JOIN + 父品补全 + 日清覆盖 + ROW_NUMBER 去重 | store×date×article×day_clear |
 | `t_calc_bom_alloc` | Σ总权重 + 共享组识别 + 产量比例分配 | store×date×parent×sub |
-| `t_calc_sku_cost` | 加权平均含期初库存（5 层兜底链） | store×date×article |
+| `t_calc_sku_cost` | 加权平均含期初库存（主算法 + 4 层兜底） | store×date×article |
 | `t_calc_stock` | 四流合一 + 跨日滚动（中枢模块） | store×date×article×day_clear |
 | `t_calc_profit` | 含 BOM + SCM 金融 + 全链路 + 多口径毛利 | store×date×article×day_clear |
 
@@ -403,7 +414,9 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 
 4. **euc 与 QDM 成本方法差异**：fmetl 使用加权平均含期初库存的 euc，QDM 使用 `cost_price` 或 `avg_purchase_price`。fmetl 通过 `V10_INHERITED_EUC` 前向填充和 `V10_PROCESSING_RELATION` 配方推算减少差异。
 
-5. **EUC 加工关系兜底**：`V10_PROCESSING_RELATION` 使用配方推算成本 `Σ(原料用量 × 原料euc) / 产出数量`，覆盖无任何成本数据但有加工关系配置的 SKU。`cost_price` 和 `current_price×0.40` 兜底已移除。
+5. **EUC 兜底链（主算法 + 4 层，实际 cost_source 标记）**：
+   `V10_WEIGHTED_AVG`(主) → `V10_INHERITED_EUC`(ffill 继承前日) → `V10_AVG_INBOUND_FALLBACK`(进货均价) → `V10_PROCESSING_RELATION`(配方推算 `Σ(原料用量×原料euc)/产出数量`) → `V10_MATNR_CONVERT`(同 matnr 兄弟 SKU 按重量比互推)。
+   `cost_price` 和 `current_price×0.40` 兜底均已移除，**无** `V10_COST_PRICE_FALLBACK`。
 
 6. **日清品 unknow_lost 可为负值**：日清分支中 `unknow = 新供给 - sale - know_lost`，当新供给小于销售时产生负值（表示消耗期初库存）。软日清设计有意允许此行为。
 

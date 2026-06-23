@@ -162,7 +162,7 @@
 | StarRocks 源表 → ETL | BI API 拉取 21 张 strategy_fm_* 表，7天chunk分区写入 | 拉 |
 | Hive → StarRocks | sync_strategy_fm.sql 每日手动执行，从 Hive 同步到商分库 | 推 |
 | 加工关系 → ETL | API 优先 (nginx :8080/api/proc-rel/)，失败回退本地 JSON 缓存，成功后自动写回缓存 | 拉 |
-| ETL → DuckDB | 13 步计算产出 6 张底表，写入 /opt/fm/data/fm.duckdb | 写 |
+| ETL → DuckDB | 14 步（13 步主流程 + Step 14 加工候选同步）产出 6 张底表，写入 /opt/fm/data/fm.duckdb | 写 |
 | DuckDB → FM 看板 | nginx :8080 静态报告 + DuckDB 直连查询 | 读 |
 | 本地 → 服务器 | git push → GitHub → cron pull，全量重刷后 scp DuckDB | 推 |
 | 持久记忆/Skill → Agent | 新 session 启动时自动加载 13 条记忆 + 22+ Skill | 自动 |
@@ -339,7 +339,7 @@ fmetl/
 
 ## 5. 完整计算逻辑流程
 
-### 数据总览：从 QDM API 到 FM 底表（13 步全链路）
+### 数据总览：从 QDM API 到 FM 底表（14 步全链路：13 步主流程 + Step 14 加工候选同步）
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -417,11 +417,12 @@ fmetl/
 │ ⑤ 四流合一库存方程:                                                     │
 │    eq = init + receive + bom_in - bom_out + compose_in - compose_out     │
 │        - sale - know_lost                                               │
-│ ⑥ 分支判断 (逐个SKU，Python loop):                                      │
-│    ├─ is_counted (人工盘点) → end=actual,    unknow=max(0,eq-actual)     │
+│ ⑥ 分支判断 (逐个SKU，Python loop，6分支优先级从高到低):                  │
+│    ├─ is_counted (人工盘点) → end=actual,    unknow=eq-actual(允许负=盘盈)│
 │    ├─ day_clear='0'(软日清)→ 清新供给,      init可部分消耗              │
 │    ├─ eq < 0 (负库存保护)  → end=0,         unknow=-eq                  │
 │    ├─ know_lost_qty > 0    → end=eq,        unknow=0                    │
+│    ├─ actual>eq+0.001(盘盈)→ end=actual,    unknow=eq-actual(负=盘盈)    │
 │    └─ 其他                  → end=eq,        unknow=0                    │
 │ ⑦ 金额统一 euc:                                                         │
 │    end_stock_amt = end_qty × euc                                        │
@@ -442,6 +443,8 @@ fmetl/
 │    profit = sale - receive - bom_in + bom_out - compose_in + compose_out │
 │            + end_stock - init_stock                                      │
 │    【注意】损耗已通过库存方程反映在 end_stock 中，不再额外扣减            │
+│    【FIX-019】dc='1'&eq<0&end≈0&unknow>0: profit -= unknow_lost_amt       │
+│             (负库存钉零分支透支成本扣回，详见 docs/fixes/FIX-019)         │
 │ ③ 销售成本 (统一公式):                                                   │
 │    sale_cost_amt = sale_qty × euc                                       │
 │ ④ SCM 金融毛利: income(丨out丨-丨return丨_notax) - cost(丨out丨-丨return丨_cb)│
@@ -787,6 +790,7 @@ Day T+1:
 | A17 | BOM父品(大白猪/黑猪)进货条码无进货额 | 父品 receive=0, 库存方程失衡 | merge.py | self_receive 扩展为自购+父品两路; 父品补入 t_atomic_wide |
 | A18 | 共享组 bom_out 全归第一个父品 | 大白猪A级 bom_out超分 | bom_alloc.py | 共享子品按进货额比例分拆为两行, 各父品仅承担自身份额 |
 | A19 | bom_out_qty 子品单位 ≠ receive 父品单位 | 海大虾 1箱 receive vs 10kg bom_out | bom_alloc.py | 单位归一化: qty × (parent_qty / sum_sub_qty) |
+| A20 (FIX-019) | 负库存钉零分支透支成本未计入利润 | 生鲜利润虚高 (FM−QDM +18.9%) | profit.py | dc='1'&eq<0&end≈0&unknow>0 时 profit -= unknow_lost_amt (→ +6.3%) |
 
 ---
 

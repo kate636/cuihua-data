@@ -1,4 +1,4 @@
-# FIX-006: self_receive BOM 父品收货去重
+# FIX-017: self_receive BOM 父品收货去重
 
 > **日期**: 2026-06-23 | **影响模块**: merge.py | **对比基准**: `strategy_fm_flag_sku_di`
 > **关联**: [REVIEW-004](../reviews/REVIEW-004-receive-source-audit.md)

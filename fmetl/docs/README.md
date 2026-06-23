@@ -44,10 +44,14 @@ docs/
 
 ### reviews/ — 审查报告
 
+详见 [reviews/README.md](reviews/README.md)（含 REVIEW 索引 + 审查 SOP）。
+
 | 文件 | 说明 |
 |------|------|
-| [全面审查报告_v0.10_2026-06-01.md](reviews/全面审查报告_v0.10_2026-06-01.md) | 2026年6月全系统审查，含 4 个核心问题的根因分析 |
-| [差异问题与待办事项_v0.10.md](reviews/差异问题与待办事项_v0.10.md) | QDM vs FM 差异追踪 + 行动计划 |
+| [reviews/README.md](reviews/README.md) | 审查报告索引（REVIEW-001~008）+ 审查 SOP |
+| [REVIEW-001 ~ REVIEW-008](reviews/) | 6/18-22 QDM 对比下钻系列（最新 REVIEW-008 = 全链路逻辑审计） |
+| [全面审查报告_v0.10_2026-06-01.md](reviews/全面审查报告_v0.10_2026-06-01.md) | 2026年6月全系统审查，含 4 个核心问题的根因分析（历史） |
+| [差异问题与待办事项_v0.10.md](reviews/差异问题与待办事项_v0.10.md) | QDM vs FM 差异追踪 + 行动计划（历史） |
 
 ### fixes/ — 修复记录
 
