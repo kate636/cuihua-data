@@ -101,6 +101,12 @@ class StockCalculator:
             except: pass
             self._log.info(f"created {self.TARGET_TABLE}")
 
+        # FIX-020: 透支成本列(幂等迁移, 已有表也补上)
+        try:
+            conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN neg_clamp_cost_amt DOUBLE")
+        except Exception:
+            pass
+
         # ── 清理本次日期范围旧数据 ────────────────────────────────
         try:
             conn.execute(f"DELETE FROM {self.TARGET_TABLE} WHERE business_date >= '{dates[0]}' AND business_date <= '{dates[-1]}'")
@@ -320,6 +326,7 @@ class StockCalculator:
         # ── 分支逻辑 ──────────────────────────────────────────────
         end_qty = np.zeros(len(df))
         unknow_qty = np.zeros(len(df))
+        neg_clamp_qty = np.zeros(len(df))  # FIX-020: 负库存钉零的透支量(正), 仅 eq<0 分支, 供 profit.py 扣回成本
         used_actual = 0
 
         for idx in df.index:
@@ -346,8 +353,12 @@ class StockCalculator:
                 end_qty[idx] = max(0.0, init_q - consumed_from_init)
                 unknow_qty[idx] = new_supply - sale_q - kl_qty  # 允许负值=盘盈
             elif eq < 0:
+                # FIX-020 (REVIEW-008, 口径B): 超卖(eq<0)记为盘盈(负unknow),
+                # 使库存方程精确平衡(end+unknow=eq)。物理含义: 卖出多于账面供给,
+                # 说明进货/期初被低估, 而非额外丢货。透支成本另由 neg_clamp 给 profit 扣回。
                 end_qty[idx] = 0
-                unknow_qty[idx] = -eq
+                unknow_qty[idx] = eq          # 负值 = 盘盈(库存被低估)
+                neg_clamp_qty[idx] = -eq      # 透支量(正), 仅此分支非0
             elif kl_qty > 0:
                 end_qty[idx] = eq
                 unknow_qty[idx] = 0
@@ -362,12 +373,13 @@ class StockCalculator:
 
         df['end_stock_qty'] = np.round(end_qty, 6)
         df['unknow_lost_qty'] = np.round(unknow_qty, 6)
+        df['neg_clamp_qty'] = np.round(neg_clamp_qty, 6)
 
         self._log.info(
             f"  {business_date}: rows={len(df)}, actual_stock={used_actual}, "
             f"day_clear_0={int((df['day_clear']=='0').sum())}, "
             f"has_know_lost={int((df['know_lost_qty']>0).sum())}, "
-            f"neg_eq→unknow={int(((df['eq_end_qty'] < 0) & (df['unknow_lost_qty'] > 0)).sum())}"
+            f"neg_clamp(eq<0钉零)={int((df['neg_clamp_qty'] > 0).sum())}"
         )
 
         # ── 金额统一 euc ──────────────────────────────────────────
@@ -377,6 +389,8 @@ class StockCalculator:
         df['know_lost_amt'] = df['know_lost_qty'] * euc
         df['lost_qty'] = df['know_lost_qty'] + df['unknow_lost_qty']
         df['lost_amt'] = df['know_lost_amt'] + df['unknow_lost_amt']
+        # FIX-020: 透支成本(正), 供 profit.py 精确扣回(解耦于 unknow 符号)
+        df['neg_clamp_cost_amt'] = df['neg_clamp_qty'] * euc
 
         # ── SCM 金融 ──────────────────────────────────────────────
         df['out_stock_pay_amt'] = (
@@ -503,6 +517,7 @@ class StockCalculator:
             'purchase_weight': df['purchase_weight'],
             'is_first_day': df['is_first_day'],
             'eq_end_qty': df['eq_end_qty'],
+            'neg_clamp_cost_amt': df['neg_clamp_cost_amt'],
         }
         out_df = pd.DataFrame(out_cols)
 
@@ -531,7 +546,7 @@ class StockCalculator:
         df['cat'] = '?'
 
         bom_parents = df[df['bom_out_amt'].abs() > 0.01]
-        neg_eq = df[(df['eq_end_qty'] < 0) & (df['unknow_lost_qty'] > 0.01)]
+        neg_eq = df[df['neg_clamp_qty'] > 0.01] if 'neg_clamp_qty' in df.columns else df.iloc[0:0]
 
         if bom_parents.empty and neg_eq.empty:
             return
@@ -558,11 +573,12 @@ class StockCalculator:
             )
 
         if not neg_eq.empty:
-            self._log.info(f"─── eq<0 转 unknow_lost 行 (共{len(neg_eq)}行) ───")
-            for _, r in neg_eq.sort_values('unknow_lost_amt').head(20).iterrows():
+            self._log.info(f"─── eq<0 负库存钉零行 (共{len(neg_eq)}行, FIX-020: unknow记盘盈, 透支成本另扣) ───")
+            for _, r in neg_eq.sort_values('neg_clamp_cost_amt', ascending=False).head(20).iterrows():
                 self._log.info(
                     f"  [{r['cat']}] {r['article_id']} dc={r['day_clear']} "
                     f"euc={r['effective_unit_cost']:.4f} "
                     f"eq={r['eq_end_qty']:.2f} "
-                    f"→ unknow={r['unknow_lost_qty']:.2f}/{r['unknow_lost_amt']:.2f}"
+                    f"→ unknow={r['unknow_lost_qty']:.2f}/{r['unknow_lost_amt']:.2f} "
+                    f"透支成本={r['neg_clamp_cost_amt']:.2f}"
                 )

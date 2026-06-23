@@ -298,8 +298,9 @@ eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_
      → 新供给 = receive + bom_in - bom_out + compose_in - compose_out
      → end = max(0, init - max(0, (sale+klost) - 新供给))
      → unknow = 新供给 - sale - klost (允许负值=消耗期初库存)
-  3. eq < 0 (负库存保护)
-     → end=0, unknow=-eq
+ 3. eq < 0 (负库存保护)
+ → end=0, unknow=eq (FIX-020 口径B: 负值=盘盈, 库存方程精确平衡)
+ → neg_clamp_cost_amt=-eq×euc (透支成本, 仅此分支非0, profit.py 扣回)
   4. know_lost_qty > 0 (有已知损耗)
      → end=eq, unknow=0
   5. actual_stock_qty > eq + 0.001 (系统快照盘盈检测)
@@ -318,6 +319,8 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out
 
 注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt（A20）。
 ```
+
+**FIX-019/020 负库存钉零透支成本**: eq<0 时 stock.py 钉 end=0，利润公式用 end=0 会虚高 `(-eq)×euc`。profit.py 扣回 stock.py 算出的 `neg_clamp_cost_amt`（仅 eq<0 分支非0）。FIX-020 把该分支 unknow 改记盘盈（负值，库存方程精确平衡），利润扣减解耦走独立列。利润/QDM矩阵不受口径B影响，仅损耗率KPI下降（未知损耗转净盘盈）。
 
 **FIX-019 (v0.11)**：非日清品 `eq<0` 时 stock.py 把 end 钉零、透支量转 unknow_lost，
 但毛利公式不含 unknow_lost、end 又被钉高到 0 → 透支成本凭空消失 → 利润虚高。profit.py 对

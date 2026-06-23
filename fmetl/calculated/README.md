@@ -320,12 +320,14 @@ eq_end_qty = init_stock_qty
 |--------|------|---------------|-----------------|------|
 | 1 | `is_counted` (人工盘点 或 系统实盘>0) | `actual_stock_qty` | `eq - actual` (允许负=盘盈) | 信任实盘值 |
 | 2 | `day_clear = '0'` | `max(0, init - consumed)` | `新供给 - sale - kl` (允许负) | 软日清：只清新供给，init可部分消耗 |
-| 3 | `eq < 0` | 0 | `-eq` | 负库存保护 |
+| 3 | `eq < 0` | 0 | `eq` (负=盘盈, FIX-020) | 负库存保护; 透支成本另存 `neg_clamp_cost_amt` 给 profit 扣 |
 | 4 | `know_lost_qty > 0` | `eq` | 0 | 已知损耗日信任方程 |
 | 5 | `actual_stock_qty > eq` | `actual_stock_qty` | `eq - actual` (负=盘盈) | 系统快照盘盈检测 |
 | 6 | 其他 | `eq` | 0 | 正常 |
 
 > **v0.10 修复**: is_counted 从仅人工盘点(`created_by != '系统'`)扩展到包含系统快照(`actual>0`)。分支5新增盘盈检测：系统记录的实盘超过方程计算值时自动识别盘盈。
+>
+> **FIX-020 (口径B)**: 分支3(`eq<0`)的 unknow 从 `-eq`(正损耗) 改为 `eq`(负=盘盈)，使库存方程 `end+unknow=eq` 精确平衡（物理含义：超卖说明进货/期初被低估，非丢货）。透支成本单独存 `neg_clamp_cost_amt = -eq×euc`（仅此分支非0），供 profit.py 直接扣回，与 unknow 符号解耦。利润不受影响。
 
 ### 金额派生
 

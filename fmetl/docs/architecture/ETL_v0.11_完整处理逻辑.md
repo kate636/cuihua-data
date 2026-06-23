@@ -253,7 +253,9 @@ eq = init_stock + receive + bom_in - bom_out + compose_in - compose_out - sale -
 
 3. eq < 0 (负库存保护):
    → end = 0
-   → unknow = -eq
+   → unknow = eq  (FIX-020 口径B: 负值=盘盈, 使 end+unknow=eq 精确平衡;
+                   超卖含义=进货/期初被低估而非丢货)
+   → neg_clamp_cost_amt = -eq × euc  (透支成本, 仅此分支非0, 供 profit.py 扣回)
 
 4. know_lost_qty > 0 (有已知损耗):
    → end = eq

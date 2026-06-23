@@ -31,8 +31,9 @@
 | FIX-018 | matnr EUC 交叉验证 | ✅ 已实现 | ✅ 已验证 | sku_cost.py | — |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 | FIX-019 | 负库存钉零分支透支成本未计入利润 | ✅ 已实现 | ✅ 已验证 | profit.py | `fa0116e` |
+| FIX-020 | 负库存钉零口径改盘盈(B)+利润扣减解耦 | ✅ 已实现 | ✅ 已验证 | stock.py, profit.py | — |
 
-**已实现含 ETL 验证: FIX-001, FIX-013, FIX-016, FIX-019。FIX-004（BOM父品归零）已实现后回滚（对矩阵无改善且总差变大）。待实现 2 个 (FIX-002 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
+**已实现含 ETL 验证: FIX-001, FIX-013, FIX-016, FIX-017, FIX-018, FIX-019, FIX-020。FIX-004（BOM父品归零）已实现后回滚（对矩阵无改善且总差变大）。待实现 2 个 (FIX-002 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -112,12 +113,18 @@
 
 差异矩阵根因 (REVIEW-007, 独立于上述审查报告)
 │
-└── FIX-019 负库存钉零分支透支成本未计入利润 ✅ 已实现 (fa0116e)
-    └── dc='1' & eq<0 & end≈0 时 stock.py 钉零, 透支量入 unknow_lost,
-        但利润公式不含 unknow_lost → 利润虚高。profit.py 扣回 unknow_lost_amt
-        修改: profit.py
-        依赖: 无 (只读 t_calc_stock.eq_end_qty + unknow_lost_amt)
-        效果: 6/18-22 总毛利差 +18.9% → +6.3%
+├── FIX-019 负库存钉零分支透支成本未计入利润 ✅ 已实现 (fa0116e)
+│   └── dc='1' & eq<0 & end≈0 时 stock.py 钉零, 透支量入 unknow_lost,
+│       但利润公式不含 unknow_lost → 利润虚高。profit.py 扣回 unknow_lost_amt
+│       修改: profit.py
+│       效果: 6/18-22 总毛利差 +18.9% → +6.3%
+│
+└── FIX-020 负库存钉零改盘盈口径B + 利润扣减解耦 ✅ 已实现
+    └── eq<0 分支 unknow 改记 eq(负=盘盈, 库存方程精确平衡); 透支成本另存
+        neg_clamp_cost_amt 给 profit 直接扣(解耦 unknow 符号)
+        修改: stock.py(eq<0分支+neg_clamp列), profit.py(解耦扣减)
+        依赖: 扩展 FIX-019
+        效果: 利润不变(矩阵不回退); 库存方程 dc=1 残差 -812→+52; 损耗率 14.36%→11.90%
 ```
 
 ### 日清配置管理
@@ -159,7 +166,8 @@ fmetl/docs/fixes/
 ├── FIX-016-dayclear-cleanup.md        (手动日清清单重整 93→72 ✅)
 ├── FIX-017-self-receive-bom-dedup.md  (self_receive BOM父品收货去重 ✅)
 ├── FIX-018-matnr-cross-validation.md  (matnr EUC 交叉验证 ✅)
-└── FIX-019-negative-stock-clamp-cost.md (负库存钉零透支成本未计入利润 ✅)
+├── FIX-019-negative-stock-clamp-cost.md (负库存钉零透支成本未计入利润 ✅)
+└── FIX-020-negative-stock-gain-semantics.md (负库存钉零改盘盈口径B+利润扣减解耦 ✅)
 ```
 ```
 
@@ -513,6 +521,27 @@ QDM 允许负期末，自然把透支扣进利润，故 FM 在生鲜品类系统
 **效果**: 总毛利差异 +2,129(+18.9%) → +707(+6.3%)；命中 155 行扣减 1,422.54 元；
 烘焙/冷藏乳品/水饮/蛋基本对齐；剩余热点（水产/牛羊/熟食）为生鲜+BOM子品跨日euc结构性差异。
 
+> **后续**: FIX-020 把本修复的扣减句柄从 `unknow_lost_amt` 解耦为独立的 `neg_clamp_cost_amt`，
+> 并把 `eq<0` 分支的 unknow 改记为盘盈（口径 B）。利润扣减效果完全保留（1,422 不变）。
+
+---
+
+### FIX-020: 负库存钉零口径改盘盈(B) + 利润扣减解耦 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-020-negative-stock-gain-semantics.md](FIX-020-negative-stock-gain-semantics.md) |
+| **来源** | REVIEW-008 待用户决策项，用户选定口径 B (2026-06-24) |
+| **状态** | ✅ 已实现（ETL 已验证） |
+| **修改文件** | `stock.py`（eq<0 分支 + neg_clamp 列）, `profit.py`（解耦扣减） |
+| **依赖** | 扩展 FIX-019 |
+
+**问题**: 口径 A 把超卖(eq<0)记为正 unknow_lost，导致 ① 库存方程偏离 2×eq（dc=1 残差 −812.52）② 未知损耗率虚高（物理上货是卖掉的不是丢的）。
+
+**修复**: `eq<0` 分支 unknow 改记 `eq`（负=盘盈，使 end+unknow=eq 精确平衡）；透支成本另存 `neg_clamp_cost_amt`（仅此分支非0）给 profit.py 直接扣，解耦于 unknow 符号。
+
+**效果**: Σprofit **不变**(11952.91, 扣减 1422.57)，QDM 矩阵不回退(+6.3%)；库存方程 dc=1 残差 −812.52→+52；总损耗率 14.36%→11.90%，未知损耗率 1.69%→−0.77%(转净盘盈)。
+
 ---
 
 ## 实现顺序
@@ -526,6 +555,7 @@ FIX-013 ✅  2026-06-04  compose部分原料euc=0不归零 (sku_cost.py)
 FIX-017 ✅  2026-06-23  self_receive BOM父品收货去重 (merge.py)
 FIX-018 ✅  2026-06-23  matnr EUC 交叉验证 (sku_cost.py)
 FIX-019 ✅  2026-06-24  负库存钉零透支成本计入利润 (profit.py)
+FIX-020 ✅  2026-06-24  负库存钉零改盘盈口径B+利润扣减解耦 (stock.py+profit.py)
 ```
 
 ### ↩️ 已回滚
