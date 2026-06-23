@@ -12,9 +12,11 @@ WAF 注意事项：
 分页机制：
   - API 默认 pageSize=10，最大允许 20000
   - pageSize 必须作为 body 顶层参数（非 paramMap 内部）
-  - 超过 pageSize 的行会被静默截断，API 不会自动翻页
-  - 截断检测：返回行数 = pageSize 时说明可能还有更多数据
-  - 调用方应通过缩小日期分片（chunk）来避免单次查询超过 20000 行
+  - 超过 pageSize 的行会被静默截断，API 不支持 LIMIT/OFFSET
+  - _fetch_all 自动处理三种路径：
+    1. pageData 格式 → 标准翻页
+    2. list 且 < 20000 行 → 直接返回
+    3. list 且 = 20000 行 → 自动键集分页（以第一列为键循环拉取）
 """
 
 from __future__ import annotations
@@ -123,14 +125,43 @@ class ApiConnector:
     def _fetch_all(self, sql: str) -> list[dict]:
         """执行 SQL 并自动翻页，返回所有行。
 
-        分页策略：
-        1. 若 API 返回 pageData 格式 → 循环拉取所有页（标准分页路径）
-        2. 若 API 返回 list 且行数 < PAGE_SIZE → 数据完整，直接返回
-        3. 若 API 返回 list 且行数 = PAGE_SIZE → 可能被截断，抛出错误
-           （调用方应缩小日期分片，确保单次查询 ≤ PAGE_SIZE 行）
+        分页策略（按优先级）：
+        1. API 返回 pageData 格式 → 循环拉取所有页（标准分页路径）
+        2. API 返回 list 且行数 < PAGE_SIZE → 数据完整，直接返回
+        3. API 返回 list 且行数 = PAGE_SIZE → 自动键集分页（keyset pagination）
+           以结果集第一列作为分页键，循环追加 WHERE 条件拉取后续页
         """
         headers = {"Content-Type": "application/json"}
 
+        first_page = self._fetch_single_page(sql, headers)
+        if isinstance(first_page, tuple):  # pageData 格式
+            return first_page
+
+        if len(first_page) < self.PAGE_SIZE:
+            return first_page
+
+        # 键集分页：以第一列作为分页键，循环拉取
+        all_rows = list(first_page)
+        first_col = list(first_page[0].keys())[0]  # API 返回 camelCase 列名
+        page = first_page
+
+        while len(page) >= self.PAGE_SIZE:
+            last_val = page[-1][first_col]
+            page_sql = (
+                f"SELECT * FROM ({sql}) _ks_page "
+                f'WHERE "{first_col}" > \'{last_val}\''
+            )
+            page = self._fetch_single_page(page_sql, headers)
+            if isinstance(page, tuple):  # pageData 格式（不太可能出现在分页中，但兜底）
+                page = page
+            if not page:
+                break
+            all_rows.extend(page)
+
+        return all_rows
+
+    def _fetch_single_page(self, sql: str, headers: dict) -> list[dict]:
+        """发送单次 API 请求，返回原始行列表或 (rows, total_pages) 元组。"""
         url, body_str = self._build_request(sql)
         resp = requests.post(url, data=body_str.encode("utf-8"), headers=headers, timeout=600)
         resp.raise_for_status()
@@ -143,24 +174,19 @@ class ApiConnector:
 
         data = result["data"]
 
-        # 路径 1: 标准分页格式（API 返回 pageData + pageInfo）
+        # pageData 格式：返回 (rows, total_page) 供外层循环
         if isinstance(data, dict) and "pageData" in data:
             rows: list = data["pageData"]
             total_page = data.get("pageInfo", {}).get("totalPage", 1)
+            all_rows = list(rows)
             for _ in range(2, total_page + 1):
                 url2, body2 = self._build_request(sql)
                 r2 = requests.post(url2, data=body2.encode("utf-8"), headers=headers, timeout=600)
                 r2.raise_for_status()
-                rows.extend(r2.json().get("data", {}).get("pageData", []))
-            return rows
+                all_rows.extend(r2.json().get("data", {}).get("pageData", []))
+            return all_rows
 
-        # 路径 2: 小数据量直接返回 list
         if isinstance(data, list):
-            if len(data) >= self.PAGE_SIZE:
-                raise RuntimeError(
-                    f"API 返回 {len(data)} 行（达到 pageSize={self.PAGE_SIZE} 上限），"
-                    f"数据可能被截断。请缩小日期分片（减小 chunk）或拆分查询条件后重试。"
-                )
             return data
 
         return []
