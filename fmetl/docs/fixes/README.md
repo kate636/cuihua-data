@@ -13,7 +13,7 @@
 | FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ 全月 | sku_cost.py, stock.py | `277f296` `c2cb613` |
 | FIX-002 | EUC 兜底链完善 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
-| FIX-004 | BOM 父品转移负毛利 | ⏳ 待实现 | — | stock.py | — |
+| FIX-004 | BOM 父品转移负毛利 | ✅ 已实现 | ✅ 已验证 | stock.py | `TBD` |
 | FIX-005 | 金额平衡公式修正 | 📋 低优先级 | — | stock_roll.py | — |
 | FIX-006 | 蛋类 -34.9% 偏差 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
 | FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
@@ -31,7 +31,7 @@
 | FIX-018 | matnr EUC 交叉验证 | ✅ 已实现 | ✅ 已验证 | sku_cost.py | — |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
-**已实现 5 个（FIX-001, FIX-013, FIX-016 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
+**已实现 6 个（FIX-001, FIX-004, FIX-013, FIX-016 ETL 已验证），待实现 2 个 (FIX-002 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -218,22 +218,22 @@ fmetl/docs/fixes/
 
 ---
 
-### FIX-004: BOM 父品库存转移负毛利 🔴
+### FIX-004: BOM 父品库存转移负毛利 ✅
 
 | 属性 | 值 |
 |------|-----|
 | **文档** | [FIX-004-bom-transfer.md](FIX-004-bom-transfer.md) |
 | **审查报告** | §2.3 |
-| **状态** | ⏳ 待实现 |
+| **状态** | ✅ 已实现 (2026-06-23) |
 | **修改文件** | `fmetl/calculated/stock.py` |
 | **优先级** | 🔴 P0 |
-| **依赖** | FIX-001, FIX-002 |
+| **依赖** | FIX-001 |
 
 **问题**: stock_transfer 清零父品 end_stock 但不增加 bom_out → init_stock 变成净亏损。
 
-**修复**: 父品 transfer 时同步增加 `bom_out_amt` += transfer_amt, `bom_out_qty` += transfer_qty。
+**修复**: 父品 transfer 时同步增加 `bom_out_amt += transfer_amt`, `bom_out_qty += transfer_qty` (v0.11)。
 
-**影响**: 11 个父品，23 行，虚增亏损 -1,272.80 元 → 修复后 +148.06 元。
+**验证**: BOM 对称 bom_in-bom_out=0.00, 大BOM父品 profit=0, 负库存 0 rows。
 
 ---
 
@@ -441,10 +441,8 @@ FIX-009 ✅  2026-06-01  is_counted系统快照移除 (stock.py)
    └── 影响: 将 FIX-002 的 uniform 0.40 替换为品类差异化 0.66-0.85
             利润虚增从 15,836 → 7,403 (-53%)
 
-3. FIX-004 ⏳  BOM父品转移负毛利 (stock.py)
-   └── 阻塞: FIX-002 (需要 EUC 先正确)
-   └── 影响: 修复 11 个父品 -1,273 → +148,
-            连带修复蛋类(FIX-006) 和 5/29(FIX-007)
+3. FIX-004 ✅  BOM父品转移负毛利 (stock.py, 2026-06-23)
+   └── 父品 transfer 时同步增加 bom_out, profit 归零, BOM 对称通过
 ```
 
 ### 🟡 波及分析（待上游修复后验证）
