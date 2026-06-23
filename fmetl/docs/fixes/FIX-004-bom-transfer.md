@@ -1,6 +1,6 @@
 # §2.3 BOM 父品库存转移后产生负毛利 (FIX-004)
 
-> 状态: **✅ 已实现 (2026-06-23)** | 阻塞: FIX-001 ✅ | [修复索引 →](README.md)
+> 状态: **⏳ 待实现** | 阻塞: 依赖 FIX-001 ✅ + FIX-002 ⏳ | [修复索引 →](README.md)
 >
 > 修改文件: `fmetl/calculated/stock.py`
 >
@@ -8,7 +8,7 @@
 >
 > 影响: 11 个父品 SKU, 23 行, 虚增亏损 -1,272.80 元
 >
-> 修复后: 父品亏损清零, BOM 对称检查通过 (bom_in - bom_out = 0.00)
+> 修复后: 父品利润 -1,273 → +148, 蛋类 -34.9% → ~0%, 5/29 利润 +662
 >
 > 根因: stock_transfer 清零父品 end_stock 但不调整 bom_out, 导致 init_stock 成为净亏损
 
@@ -313,46 +313,20 @@ df['profit_amt'] = (
 
 ## 八、验证清单
 
-- [x] 修改 stock.py: 父品 transfer 时增加 bom_out_amt/qty
-- [x] 本地重刷: `python -m fmetl.executor 2026-06-18 2026-06-22`
-- [x] 验证 transfer 父品利润 ≈0: 20500351, 20045463, 21153037 → profit=0.00
-- [x] 验证 BOM 对称: bom_in - bom_out = 0.00
-- [x] 验证负库存: 0 rows with end_stock < 0
-- [x] 验证 6 个 transfer 触发正确: bom_out = receive + init_stock (转移金额)
-- [x] commit + push
-
-## 十、实现验证 (2026-06-23)
-
-### 修复代码
-
-`fmetl/calculated/stock.py` 第 440-449 行: stock_transfer 清零父品 end_stock 时同步增加 bom_out:
-
-```python
-# v0.11 fix: stock_transfer 清零父品 end_stock 时同步增加 bom_out
-df.loc[..., 'bom_out_qty'] += transfer_qty
-df.loc[..., 'bom_out_amt'] += transfer_amt
-```
-
-### 验证结果 (A3XV, 6/18-6/22)
-
-| 指标 | 修复前 | 修复后 |
-|------|:---:|:---:|
-| BOM 对称 (bom_in - bom_out) | — | **0.00** |
-| 负库存 (end_stock < 0) | — | **0 rows** |
-| Transfer 触发 | 6 parents | 6 parents (bom_out 正确增加) |
-| 大BOM父品利润 (20500351/20045463/21153037) | — | **0.00** |
-| FM 总利润 (A3XV) | 13,384.30 | 13,721.29 (+337) |
-
-### 注意
-
-TOP SKU 差异 (猪肉类 BOM 子品 -638 等) **未改善** — 这些是 BOM 子品 EUC 分配问题，不是父品转移问题。子品通过 `bom_in` 获得成本，其利润取决于 EUC × sale_qty 与实际售价的关系。子品 EUC 受跨日滚动和日清机制影响，需要独立的修复方案。
+- [ ] 修改 stock.py: 父品 transfer 时增加 bom_out_amt/qty
+- [ ] 本地全月重刷: `python -m fmetl.executor 2026-05-01 2026-05-31`
+- [ ] 验证 21037825 5/29 利润从 -576.62 → ≈0
+- [ ] 验证所有 transfer 父品 (11个) 利润 ≈0
+- [ ] 验证子品利润未因父品 bom_out 变化而改变
+- [ ] 验证 stock equation balance 未恶化
+- [ ] QDM 对比确认总利润变化方向正确
+- [ ] commit + push
 
 ---
- 
-## 十一、相关文档
+
+## 九、相关文档
 
 - [FIX-003 init_stock一致性](FIX-003-init-stock-consistency.md) — 同文件 init_stock 查找差异
 - stock.py:387-451 — stock_transfer 完整逻辑
 - profit.py:94-100 — 毛利公式
 - 审查报告 §2.3 — 原始问题描述
-- [REVIEW-006](../reviews/REVIEW-006-next-fix-target.md) — 差异矩阵下钻

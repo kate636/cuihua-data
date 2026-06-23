@@ -1,5 +1,5 @@
 """
-t_calc_profit — 门店毛利 (v0.11 Python 重写)
+t_calc_profit — 门店毛利 (v0.10 Python 重写)
 
 v0.10 核心公式:
   profit = sale

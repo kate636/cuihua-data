@@ -787,7 +787,6 @@ Day T+1:
 | A17 | BOM父品(大白猪/黑猪)进货条码无进货额 | 父品 receive=0, 库存方程失衡 | merge.py | self_receive 扩展为自购+父品两路; 父品补入 t_atomic_wide |
 | A18 | 共享组 bom_out 全归第一个父品 | 大白猪A级 bom_out超分 | bom_alloc.py | 共享子品按进货额比例分拆为两行, 各父品仅承担自身份额 |
 | A19 | bom_out_qty 子品单位 ≠ receive 父品单位 | 海大虾 1箱 receive vs 10kg bom_out | bom_alloc.py | 单位归一化: qty × (parent_qty / sum_sub_qty) |
-| A20 | BOM父品 stock_transfer 清零 end_stock 不增 bom_out | init_stock → 净亏损 | stock.py | transfer 时同步 bom_out_amt += transfer_amt (FIX-004) |
 
 ---
 

@@ -1,5 +1,5 @@
 """
-t_calc_stock — 库存与金额中枢 (v0.11 Python 重写，合并原 stock + amounts)
+t_calc_stock — 库存与金额中枢 (v0.10 Python 重写，合并原 stock + amounts)
 
 四流合一的库存方程:
   eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_lost
@@ -34,7 +34,7 @@ class StockCalculator:
         self._log = get_logger("StockCalculator")
 
     def run(self) -> None:
-        self._log.info("calculating stock & amounts (v0.11 Python, four-flow, sequential days) ...")
+        self._log.info("calculating stock & amounts (v0.10 Python, four-flow, sequential days) ...")
         conn = self._duck._conn
 
         wide_df = conn.execute("""
@@ -437,18 +437,9 @@ class StockCalculator:
                                (df['business_date'] == pr['business_date']),
                                'end_stock_amt'] = 0.0
 
-                        # v0.11 fix: stock_transfer 清零父品 end_stock 时同步增加 bom_out
-                        # 父品 profit = -receive + bom_out + end(0) - init
-                        # 若 bom_out≈receive: profit ≈ -init → 虚亏
-                        # 增加 bom_out += transfer(≈init) → profit ≈ 0
-                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
-                               (df['store_id'] == pr['store_id']) &
-                               (df['business_date'] == pr['business_date']),
-                               'bom_out_qty'] += transfer_qty
-                        df.loc[parent_mask & (df['article_id'] == pr['article_id']) &
-                               (df['store_id'] == pr['store_id']) &
-                               (df['business_date'] == pr['business_date']),
-                               'bom_out_amt'] += transfer_amt
+                        # v0.10 fix: 不重复增加父品 bom_out_amt/qty
+                        # BOM alloc 已将 100% 母品成本分摊给子品, stock_transfer 清零
+                        # end_stock 后 bom_out 已等于 receive_amt, 再加 transfer 会重复记账
 
                         for _, sa in sub_alloc.iterrows():
                             sub_mask = (
