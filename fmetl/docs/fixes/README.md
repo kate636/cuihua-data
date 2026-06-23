@@ -13,7 +13,7 @@
 | FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ 全月 | sku_cost.py, stock.py | `277f296` `c2cb613` |
 | FIX-002 | EUC 兜底链完善 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
-| FIX-004 | BOM 父品转移负毛利 | ✅ 已实现 | ✅ 已验证 | stock.py | `TBD` |
+| FIX-004 | BOM 父品转移负毛利 | ✅ 已实现 | ✅ 已验证 | stock.py | `e5f503c` |
 | FIX-005 | 金额平衡公式修正 | 📋 低优先级 | — | stock_roll.py | — |
 | FIX-006 | 蛋类 -34.9% 偏差 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
 | FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
