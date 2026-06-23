@@ -41,12 +41,12 @@ class DimsExtractor:
     def _extract_goods(self, yesterday: str) -> None:
         # strategy_fm_dim_goods是日快照表，有incDay字段
         # 以end日期为基准，前后各扫描几天，取最近的有数据快照
+        # dim_goods 可能超过 20000 行，使用 query_with_keyset 做键集分页
         from datetime import date as dt_date, timedelta
         df = None
-        # 优先查 end 到 end-7 天，再查 end+3 到 end（覆盖今天同步但ETL跑历史日期的情况）
         base_date = dt_date.fromisoformat(yesterday)
-        scan_dates = [base_date - timedelta(days=i) for i in range(8)]  # yesterday back 7 days
-        scan_dates += [base_date + timedelta(days=i) for i in range(1, 4)]  # forward up to 3 days
+        scan_dates = [base_date - timedelta(days=i) for i in range(8)]
+        scan_dates += [base_date + timedelta(days=i) for i in range(1, 4)]
         for try_date in scan_dates:
             ds = try_date.isoformat()
             sql = f"""
@@ -63,7 +63,7 @@ class DimsExtractor:
             WHERE inc_day = '{ds}'
               AND category_level1_id NOT IN ('70','71','72','73','74','75','76','77')
             """
-            df = self._sr.query(sql)
+            df = self._sr.query_with_keyset(sql, order_by="article_id")
             if not df.empty:
                 self._log.info(f"dim_goods found at inc_day={ds}")
                 break
@@ -71,7 +71,6 @@ class DimsExtractor:
             self._duck.load_df(df, "dim_goods", mode="replace")
             self._log.info(f"dim_goods: {len(df)} rows")
         else:
-            # 无新数据时保留现有 dim_goods 不覆盖
             existing = self._duck.row_count("dim_goods")
             self._log.warning(f"dim_goods: no data in last 7 days, keeping existing ({existing} rows)")
 

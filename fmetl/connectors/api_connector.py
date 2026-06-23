@@ -76,6 +76,20 @@ class ApiConnector:
         _log.debug(f"query returned {len(df)} rows")
         return df
 
+    def query_with_keyset(self, sql: str, order_by: str) -> pd.DataFrame:
+        """带显式排序键的查询，避免自动检测第一列可能不准确的问题。
+
+        调用方明确指定排序键（StarRocks snake_case 列名），_fetch_all
+        会用此键做分页。用于已知可能超过 PAGE_SIZE 的大表查询。
+        """
+        _log.debug(f"query_with_keyset: order_by={order_by}  {sql[:100].strip()} ...")
+        rows = self._fetch_all(sql, keyset_col=order_by)
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df.columns = [_camel_to_snake(str(c)) for c in df.columns]
+        _log.debug(f"query_with_keyset returned {len(df)} rows")
+        return df
+
     PAGE_SIZE = 20_000  # API 允许的最大 pageSize，超过会报错
 
     # ── 内部实现 ─────────────────────────────────────────────────────────────
@@ -122,42 +136,69 @@ class ApiConnector:
         param_str += f"&SecretKey={self._secret_key}"
         return hashlib.md5(param_str.encode("utf-8")).hexdigest().upper()
 
-    def _fetch_all(self, sql: str) -> list[dict]:
+    def _fetch_all(self, sql: str, keyset_col: str = "") -> list[dict]:
         """执行 SQL 并自动翻页，返回所有行。
 
         分页策略（按优先级）：
         1. API 返回 pageData 格式 → 循环拉取所有页（标准分页路径）
         2. API 返回 list 且行数 < PAGE_SIZE → 数据完整，直接返回
         3. API 返回 list 且行数 = PAGE_SIZE → 自动键集分页（keyset pagination）
-           以结果集第一列作为分页键，循环追加 WHERE 条件拉取后续页
+           keyset_col 为空时自动取结果集第一列；调用方也可显式指定 StarRocks
+           列名（snake_case）。
+           键集分页要求排序列为可排序的唯一键（如 article_id / store_id），
+           否则可能漏数据或死循环。
         """
         headers = {"Content-Type": "application/json"}
 
-        first_page = self._fetch_single_page(sql, headers)
-        if isinstance(first_page, tuple):  # pageData 格式
-            return first_page
+        # 如果预先知道排序键，首轮查询也加 ORDER BY 保证分页一致性
+        first_sql = sql
+        if keyset_col:
+            first_sql = f"SELECT * FROM ({sql}) _ks_base ORDER BY {keyset_col}"
+
+        first_page = self._fetch_single_page(first_sql, headers)
 
         if len(first_page) < self.PAGE_SIZE:
             return first_page
 
-        # 键集分页：以第一列作为分页键，循环拉取
+        # 确定排序键：优先用调用方指定的，否则取结果集第一列
+        if keyset_col:
+            sort_col_snake = keyset_col
+        else:
+            first_col_camel = list(first_page[0].keys())[0]
+            sort_col_snake = _camel_to_snake(first_col_camel)
+
+        # 转换为 API 返回的 camelCase 列名，用于从 dict 取值
+        sort_col_camel = sort_col_snake.title().replace("_", "")
+        # title() 不完美，直接用首列名
+        if not keyset_col:
+            sort_col_camel = list(first_page[0].keys())[0]
+        else:
+            # 把 snake_case 转 camelCase: article_id → articleId
+            parts = sort_col_snake.split("_")
+            sort_col_camel = parts[0] + "".join(p.title() for p in parts[1:])
+
         all_rows = list(first_page)
-        first_col = list(first_page[0].keys())[0]  # API 返回 camelCase 列名
         page = first_page
+        page_num = 1
 
         while len(page) >= self.PAGE_SIZE:
-            last_val = page[-1][first_col]
+            page_num += 1
+            last_val = page[-1][sort_col_camel]
             page_sql = (
                 f"SELECT * FROM ({sql}) _ks_page "
-                f'WHERE "{first_col}" > \'{last_val}\''
+                f"WHERE {sort_col_snake} > '{last_val}' "
+                f"ORDER BY {sort_col_snake}"
             )
             page = self._fetch_single_page(page_sql, headers)
-            if isinstance(page, tuple):  # pageData 格式（不太可能出现在分页中，但兜底）
-                page = page
             if not page:
                 break
             all_rows.extend(page)
+            _log.info(
+                f"keyset page {page_num}: +{len(page)} rows "
+                f"(key={sort_col_snake} > '{str(last_val)[:40]}')"
+            )
 
+        _log.info(f"keyset pagination done: {len(all_rows)} total rows in {page_num} pages")
         return all_rows
 
     def _fetch_single_page(self, sql: str, headers: dict) -> list[dict]:
