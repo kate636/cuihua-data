@@ -30,7 +30,7 @@
 | FIX-017 | self_receive BOM父品双重计数 | ✅ 已实现 | ✅ 已验证 | merge.py | — |
 | FIX-018 | matnr EUC 交叉验证 | ✅ 已实现 | ✅ 已验证 | sku_cost.py | — |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
-| FIX-019 | 负库存钉零分支透支成本未计入利润 | ✅ 已实现 | ✅ 已验证 | profit.py | (待填) |
+| FIX-019 | 负库存钉零分支透支成本未计入利润 | ✅ 已实现 | ✅ 已验证 | profit.py | `fa0116e` |
 
 **已实现含 ETL 验证: FIX-001, FIX-013, FIX-016, FIX-019。FIX-004（BOM父品归零）已实现后回滚（对矩阵无改善且总差变大）。待实现 2 个 (FIX-002 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
