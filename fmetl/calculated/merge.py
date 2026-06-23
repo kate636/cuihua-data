@@ -26,10 +26,11 @@ class AtomicMerger:
     def run(self, start: str, end: str) -> None:
         self._log.info(f"merging atomic tables (v0.10): {start} ~ {end}")
 
-        # Step A: 提取进货数据（含自购行 + BOM父品进货行）
-        #   - 自购行: article_id = sale_article_id, 聚合 SUM
-        #   - BOM父品: article_id != sale_article_id, 同一父品多行(每行对应一个子品)去重取 MAX
-        self._log.info("  extracting self_receive from atomic_receive_sale (self + BOM parents) ...")
+        # Step A: 提取进货数据（自购行，不含 BOM 父品进货）
+        #   - 自购行: article_id = sale_article_id, 聚合 SUM → self_receive
+        #   - BOM父品: article_id != sale_article_id → bom_parent_receive (不进 self_receive)
+        #     BOM父品收货通过 BomAllocCalculator 分摊给子品，不应算作父品自身进货
+        self._log.info("  extracting self_receive from atomic_receive_sale (self only, BOM parents separated) ...")
         self._duck.execute("DROP TABLE IF EXISTS _tmp_self_receive")
         # 构建 BOM 子品集合（不能被 purchase_di 回退覆盖）
         self._duck.execute(f"""
@@ -48,26 +49,43 @@ class AtomicMerger:
             SELECT
                 r.store_id, r.business_date, r.article_id,
                 r.self_receive_qty, r.self_receive_amt,
+                r.bom_parent_receive_qty, r.bom_parent_receive_amt,
                 CASE WHEN bs.article_id IS NOT NULL THEN 1 ELSE 0 END AS is_bom_sub
             FROM (
                 SELECT
                     store_id, business_date, article_id,
-                    SUM(self_receive_qty)  AS self_receive_qty,
-                    SUM(self_receive_amt)  AS self_receive_amt
+                    -- Path1(self)优先, Path2(BOM父品)仅在无Path1时补充
+                    CASE WHEN SUM(self_recv_qty) > 0
+                         THEN SUM(self_recv_qty)
+                         ELSE SUM(bom_recv_qty)
+                    END AS self_receive_qty,
+                    CASE WHEN SUM(self_recv_amt) > 0
+                         THEN SUM(self_recv_amt)
+                         ELSE SUM(bom_recv_amt)
+                    END AS self_receive_amt,
+                    SUM(bom_recv_qty)   AS bom_parent_receive_qty,
+                    SUM(bom_recv_amt)   AS bom_parent_receive_amt
                 FROM (
+                    -- Path 1: 自购 (article_id = sale_article_id)
                     SELECT
                         store_id, business_date, article_id,
-                        SUM(inbound_qty)    AS self_receive_qty,
-                        SUM(inbound_amount) AS self_receive_amt
+                        SUM(inbound_qty)    AS self_recv_qty,
+                        SUM(inbound_amount) AS self_recv_amt,
+                        0 AS bom_recv_qty,
+                        0 AS bom_recv_amt
                     FROM atomic_receive_sale
                     WHERE article_id = sale_article_id
                       AND business_date BETWEEN '{start}' AND '{end}'
                     GROUP BY store_id, business_date, article_id
                     UNION ALL
+                    -- Path 2: BOM父品收货 (article_id ≠ sale_article_id)
+                    -- 同一父品可能对应多个子品, 去重取 MAX
                     SELECT
                         store_id, business_date, article_id,
-                        MAX(inbound_qty)    AS self_receive_qty,
-                        MAX(inbound_amount) AS self_receive_amt
+                        0 AS self_recv_qty,
+                        0 AS self_recv_amt,
+                        MAX(inbound_qty)    AS bom_recv_qty,
+                        MAX(inbound_amount) AS bom_recv_amt
                     FROM atomic_receive_sale
                     WHERE article_id != sale_article_id
                       AND business_date BETWEEN '{start}' AND '{end}'
@@ -415,7 +433,7 @@ class AtomicMerger:
                 AND sr.business_date = w.business_date
                 AND sr.article_id = w.article_id
             WHERE w.article_id IS NULL
-              AND sr.self_receive_qty > 0
+              AND (sr.self_receive_qty > 0 OR sr.bom_parent_receive_qty > 0)
         """)
         # v0.10 fix: 日清覆盖使用 dim_day_clear_override 辅助表（从 dim_goods 派生）
         # 避免 merge.py 直接依赖 dim_goods（dim_goods 关联统一在 FM 底表层完成）
