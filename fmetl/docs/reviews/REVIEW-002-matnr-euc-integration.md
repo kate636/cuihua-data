@@ -196,28 +196,23 @@ WHERE inc_day = '{ds}'
 
 **风险评估**: 无风险。字段均在 `strategy_fm_dim_goods` 中，无需额外权限或 JOIN。
 
-#### Phase 2: matnr 转换模块（SkuCostCalculator 新增方法）
+#### Phase 2: matnr 转换模块（SkuCostCalculator 新增方法）✅ 已完成 2026-06-23
 
-```python
-def _apply_matnr_conversion(self, df):
-    """同 matnr SKU 的 EUC 互推算。
-    
-    仅对 euc=0 且无 BOM 关系的 SKU 触发。
-    """
-    # 1. 构建 matnr → SKU 映射
-    matnr_map = defaultdict(list)
-    for aid, matnr in sku_matnr.items():
-        if matnr:
-            matnr_map[matnr].append(aid)
-    
-    # 2. 对每个多 SKU matnr
-    for matnr, skus in matnr_map.items():
-        if len(skus) < 2:
-            continue
-        # 3. 排除 BOM 关系覆盖的 SKU 对
-        # 4. 对有 euc 和无 euc 的配对计算 ratio
-        # 5. 应用转换
-```
+实现在 `sku_cost.py` `_apply_matnr_conversion()` 方法（~170 行）。
+
+**核心逻辑**:
+1. 从 `dim_goods` 加载 matnr / unit_weight / zglfz / zglfm
+2. 从 `t_calc_bom_alloc` 加载 BOM 配对（排除已覆盖的 SKU 对）
+3. 按 (date, store, matnr) 索引 euc>0 的候选基准 SKU
+4. 对每个 euc=0 的目标 SKU：
+   - 同店同日找基准 → 跨店回退
+   - 排除 BOM 对 + 品质差异检查（avg_inbound_price 差异 >30%）
+   - 选最优基准：cost_qty>0 优先 → cost_qty 最大
+   - ratio = unit_weight比（优先） 或 zglfz/zglfm比（回退）
+   - 目标EUC = 基准EUC × ratio
+
+**验证结果**: 50 行 (10 SKU × 5 天) 转换，3 对 BOM 排除，0 品质排除。数学验证全部正确。
+详见 `_apply_matnr_conversion` 方法内注释。
 
 #### Phase 3: 与现有 BOM 的协同
 
@@ -266,7 +261,7 @@ BOM 分摊已处理父子品成本传递。matnr 转换在此场景下仅做**�
 | 优先级 | 行动 | 效果 |
 |:---:|------|------|
 | **P1** | ~~DimsExtractor 增加 zglfz/zglfm 字段拉取~~ ✅ 已完成 | 解锁 matnr 转换的称重商品覆盖 |
-| **P1** | SkuCostCalculator 增加 V10_MATNR_CONVERT 兜底层 | 修复 ~50-70 个 EUC=0 的 SKU |
+| **P1** | ~~SkuCostCalculator 增加 V10_MATNR_CONVERT 兜底层~~ ✅ 已完成 | 修复 10 个 EUC=0 的 SKU（50 行） |
 | **P2** | matnr 交叉验证: 对已有 EUC 的同 matnr SKU 做 ratio 一致性检查 | 发现异常 EUC（如蒙牛 6-pack 高估4×） |
 | **P2** | BOM + matnr 重叠场景的联合校验 | 检测 BOM 分配错误 |
 | **P3** | MatnrResultBuilder 中使用 matnr-euc 修正后的数据 | 改善报表层的数据质量 |
