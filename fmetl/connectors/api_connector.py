@@ -7,6 +7,14 @@ QDM BI API 连接器（只读）
 WAF 注意事项：
   - SQL 中禁止使用 CASE WHEN，改用 IF(condition, true_val, false_val)
   - IN (...) 列表过大时分批查询
+  - SQL 中禁止使用 LIMIT / OFFSET（API 侧 SQL 解析器不支持）
+
+分页机制：
+  - API 默认 pageSize=10，最大允许 20000
+  - pageSize 必须作为 body 顶层参数（非 paramMap 内部）
+  - 超过 pageSize 的行会被静默截断，API 不会自动翻页
+  - 截断检测：返回行数 = pageSize 时说明可能还有更多数据
+  - 调用方应通过缩小日期分片（chunk）来避免单次查询超过 20000 行
 """
 
 from __future__ import annotations
@@ -66,11 +74,14 @@ class ApiConnector:
         _log.debug(f"query returned {len(df)} rows")
         return df
 
+    PAGE_SIZE = 20_000  # API 允许的最大 pageSize，超过会报错
+
     # ── 内部实现 ─────────────────────────────────────────────────────────────
     def _build_request(self, sql: str) -> tuple[str, str]:
         """构建带签名的请求 URL 和 body。每次调用生成新 nonce/timestamp。"""
         body = {
             "apiId": self._api_id,
+            "pageSize": self.PAGE_SIZE,
             "paramMap": {"apiId": self._api_id, "sql": sql},
         }
         body_str = json.dumps(body, ensure_ascii=False)
@@ -110,7 +121,14 @@ class ApiConnector:
         return hashlib.md5(param_str.encode("utf-8")).hexdigest().upper()
 
     def _fetch_all(self, sql: str) -> list[dict]:
-        """执行 SQL 并自动翻页，返回所有行。"""
+        """执行 SQL 并自动翻页，返回所有行。
+
+        分页策略：
+        1. 若 API 返回 pageData 格式 → 循环拉取所有页（标准分页路径）
+        2. 若 API 返回 list 且行数 < PAGE_SIZE → 数据完整，直接返回
+        3. 若 API 返回 list 且行数 = PAGE_SIZE → 可能被截断，抛出错误
+           （调用方应缩小日期分片，确保单次查询 ≤ PAGE_SIZE 行）
+        """
         headers = {"Content-Type": "application/json"}
 
         url, body_str = self._build_request(sql)
@@ -125,6 +143,7 @@ class ApiConnector:
 
         data = result["data"]
 
+        # 路径 1: 标准分页格式（API 返回 pageData + pageInfo）
         if isinstance(data, dict) and "pageData" in data:
             rows: list = data["pageData"]
             total_page = data.get("pageInfo", {}).get("totalPage", 1)
@@ -135,7 +154,13 @@ class ApiConnector:
                 rows.extend(r2.json().get("data", {}).get("pageData", []))
             return rows
 
+        # 路径 2: 小数据量直接返回 list
         if isinstance(data, list):
+            if len(data) >= self.PAGE_SIZE:
+                raise RuntimeError(
+                    f"API 返回 {len(data)} 行（达到 pageSize={self.PAGE_SIZE} 上限），"
+                    f"数据可能被截断。请缩小日期分片（减小 chunk）或拆分查询条件后重试。"
+                )
             return data
 
         return []
