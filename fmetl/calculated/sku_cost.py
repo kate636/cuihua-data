@@ -296,15 +296,19 @@ class SkuCostCalculator:
         # 仍为0的回退到 加工关系推算成本 (原料进货价 × 配方用量 / 产出)
         fallback_pr = self._apply_processing_relation_fallback(df)
 
+        # 仍为0的回退到 同matnr兄弟SKU的EUC换算
+        fallback_matnr = self._apply_matnr_conversion(df)
+
         df['cost_source'] = 'V10_WEIGHTED_AVG'
         inherited = ((~mask) & (df['effective_unit_cost'] > 0) &
-                     (~fallback_aip) & (~fallback_pr))
+                     (~fallback_aip) & (~fallback_pr) & (~fallback_matnr))
         df.loc[inherited, 'cost_source'] = 'V10_INHERITED_EUC'
         df.loc[fallback_aip, 'cost_source'] = 'V10_AVG_INBOUND_FALLBACK'
         df.loc[fallback_pr, 'cost_source'] = 'V10_PROCESSING_RELATION'
+        df.loc[fallback_matnr, 'cost_source'] = 'V10_MATNR_CONVERT'
 
         # 清理临时列
-        for tmp_col in ['_pr_applied', '_compose_corrected']:
+        for tmp_col in ['_pr_applied', '_matnr_applied', '_compose_corrected']:
             if tmp_col in df.columns:
                 df.drop(columns=[tmp_col], inplace=True)
 
@@ -629,3 +633,152 @@ class SkuCostCalculator:
             )
 
         return df['_pr_applied']
+
+    def _apply_matnr_conversion(self, df):
+        """同 matnr SKU 的 EUC 互推算 (V10_MATNR_CONVERT)。
+
+        仅对 euc=0 且无 BOM 关系的 SKU 触发。
+        转换公式: 目标EUC = 基准EUC × ratio
+        ratio: unit_weight 比（优先）或 zglfz/zglfm 比（回退）。
+        """
+        import math
+        from collections import defaultdict
+
+        euc_zero_idx = df[df['effective_unit_cost'] == 0].index
+        if len(euc_zero_idx) == 0:
+            df['_matnr_applied'] = False
+            return df['_matnr_applied']
+
+        # 从 dim_goods 加载 matnr + 单位换算字段
+        dim_df = self._duck._conn.execute("""
+            SELECT article_id, matnr, unit_weight, zglfz, zglfm
+            FROM dim_goods
+            WHERE matnr IS NOT NULL AND matnr != ''
+        """).df()
+
+        if dim_df.empty:
+            df['_matnr_applied'] = False
+            return df['_matnr_applied']
+
+        sku_info = {}
+        for _, row in dim_df.iterrows():
+            wt = row['unit_weight']
+            zfz = row['zglfz']
+            zfm = row['zglfm']
+            sku_info[str(row['article_id'])] = {
+                'matnr': str(row['matnr']),
+                'unit_weight': float(wt) if wt is not None and not (isinstance(wt, float) and math.isnan(wt)) else 0.0,
+                'zglfz': float(zfz) if zfz is not None and not (isinstance(zfz, float) and math.isnan(zfz)) else 0.0,
+                'zglfm': float(zfm) if zfm is not None and not (isinstance(zfm, float) and math.isnan(zfm)) else 0.0,
+            }
+
+        # 加载 BOM 关系（排除已由 BOM 覆盖的 SKU 对）
+        bom_df = self._duck._conn.execute("""
+            SELECT DISTINCT parent_article_id, sub_article_id
+            FROM t_calc_bom_alloc
+        """).df()
+
+        bom_pairs = set()
+        for _, row in bom_df.iterrows():
+            p, s = str(row['parent_article_id']), str(row['sub_article_id'])
+            bom_pairs.add((p, s))
+            bom_pairs.add((s, p))
+
+        # 按 (date, store, matnr) 索引有 euc 的 SKU 作为候选基准
+        matnr_groups = defaultdict(list)
+        euc_positive = df[df['effective_unit_cost'] > 0]
+        for idx in euc_positive.index:
+            aid = str(df.at[idx, 'article_id'])
+            info = sku_info.get(aid)
+            if not info or not info['matnr']:
+                continue
+            key = (df.at[idx, 'business_date'], df.at[idx, 'store_id'], info['matnr'])
+            matnr_groups[key].append({
+                'article_id': aid,
+                'euc': float(df.at[idx, 'effective_unit_cost']),
+                'cost_qty': float(df.at[idx, 'cost_qty']),
+                'avg_inbound_price': float(df.at[idx, 'avg_inbound_price']),
+                'unit_weight': info['unit_weight'],
+                'zglfz': info['zglfz'],
+                'zglfm': info['zglfm'],
+            })
+
+        df['_matnr_applied'] = False
+        processed = 0
+        skipped_bom = 0
+        skipped_quality = 0
+        skipped_no_base = 0
+
+        # 选最优基准: cost_qty>0 优先（加权平均来源），再按 cost_qty 降序
+
+        for idx in euc_zero_idx:
+            target_aid = str(df.at[idx, 'article_id'])
+            target_info = sku_info.get(target_aid)
+            if not target_info or not target_info['matnr']:
+                continue
+
+            target_matnr = target_info['matnr']
+            biz_date = df.at[idx, 'business_date']
+            store_id = df.at[idx, 'store_id']
+            key = (biz_date, store_id, target_matnr)
+            bases = matnr_groups.get(key, [])
+
+            # 同店无基准 → 跨店回退（同日同 matnr 任意门店）
+            if not bases:
+                for k, v in matnr_groups.items():
+                    if k[0] == biz_date and k[2] == target_matnr:
+                        bases = v
+                        break
+
+            if not bases:
+                skipped_no_base += 1
+                continue
+
+            # 排除 BOM 已覆盖的配对
+            if any((target_aid, b['article_id']) in bom_pairs for b in bases):
+                skipped_bom += 1
+                continue
+
+            best_base = max(bases, key=lambda b: (1 if b['cost_qty'] > 0 else 0, b['cost_qty']))
+
+            # 品质差异检查: avg_inbound_price 差异 >30% 不转换
+            target_aip = float(df.at[idx, 'avg_inbound_price'])
+            base_aip = best_base['avg_inbound_price']
+            if target_aip > 0 and base_aip > 0:
+                aip_ratio = max(target_aip, base_aip) / min(target_aip, base_aip)
+                if aip_ratio > 1.3:
+                    skipped_quality += 1
+                    continue
+
+            # 计算转换比率
+            target_wt = target_info['unit_weight']
+            base_wt = best_base['unit_weight']
+
+            if target_wt > 0 and base_wt > 0:
+                ratio = target_wt / base_wt
+            else:
+                target_zgl = (target_info['zglfz'] / target_info['zglfm']
+                              if target_info['zglfm'] > 0 else 0.0)
+                base_zgl = (best_base['zglfz'] / best_base['zglfm']
+                            if best_base['zglfm'] > 0 else 0.0)
+                if target_zgl > 0 and base_zgl > 0:
+                    ratio = target_zgl / base_zgl
+                else:
+                    continue
+
+            if ratio <= 0:
+                continue
+
+            new_euc = round(best_base['euc'] * ratio, 4)
+            if new_euc > 0:
+                df.at[idx, 'effective_unit_cost'] = new_euc
+                df.at[idx, '_matnr_applied'] = True
+                processed += 1
+
+        if processed > 0 or skipped_no_base > 0:
+            self._log.info(
+                f"V10_MATNR_CONVERT: {processed} converted, "
+                f"skipped: {skipped_bom} BOM, {skipped_quality} quality, {skipped_no_base} no-base"
+            )
+
+        return df['_matnr_applied']
