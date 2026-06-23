@@ -21,6 +21,7 @@ Pipeline (v0.10, 13 步):
   Step 9   FM 客数 (t_fm_cust)
   Step 10  FM 分类汇总 (t_fm_levels_sum)
   Step 11  FM 结果层 (t_fm_levels_result)
+  Step 11b FM 结果层-物料号 (t_fm_levels_result_matnr)
   Step 12  BOM 分摊溯源 (t_fm_bom_breakdown)
   Step 13  库存滚动展开 (t_fm_stock_roll)
   Step 14  同步加工关系候选数据到云端
@@ -51,7 +52,7 @@ from .calculated import (
 )
 from .fm_tables import (
     SkuDimBuilder, CustBuilder, LevelsSumBuilder, LevelsResultBuilder,
-    BomBreakdownBuilder, StockRollBuilder,
+    MatnrResultBuilder, BomBreakdownBuilder, StockRollBuilder,
 )
 from .utils import get_logger
 
@@ -152,6 +153,9 @@ def _run_fm(duck, api, start, end, yesterday):
     _step("Step 11: FM 结果层 → t_fm_levels_result")
     LevelsResultBuilder(duck).build(start=start, end=end)
 
+    _step("Step 11b: FM 结果层(物料号) → t_fm_levels_result_matnr")
+    MatnrResultBuilder(duck).build(start=start, end=end)
+
     _step("Step 12: BOM 分摊溯源 → t_fm_bom_breakdown")
     BomBreakdownBuilder(duck).build(start=start, end=end)
 
@@ -163,8 +167,14 @@ def _run_fm(duck, api, start, end, yesterday):
 
 
 def _sync_processing_candidates(duck):
-    """从 DuckDB 提取烘焙+熟食类候选 SKU，同步到云端加工关系管理系统。"""
+    """从 DuckDB 提取烘焙+熟食类候选 SKU，同步到加工关系管理系统。
+
+    本地 Mac 运行时通过 scp + ssh 推送到服务器；
+    服务器本地运行时直接 cp + sqlite3 本地导入。
+    """
+    import shutil
     import sqlite3
+    import subprocess
     import tempfile
 
     try:
@@ -209,9 +219,8 @@ def _sync_processing_candidates(duck):
     if df.empty:
         return
 
-    _log.info(f"syncing {len(df)} processing candidates to cloud ...")
+    _log.info(f"syncing {len(df)} processing candidates ...")
 
-    # 写入临时 SQLite → SCP 到云端
     try:
         tmp = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
         tmp.close()
@@ -221,23 +230,42 @@ def _sync_processing_candidates(duck):
         sdb.commit()
         sdb.close()
 
-        import subprocess
-        ssh_key = os.path.expanduser("~/.ssh/id_rsa")
-        subprocess.run([
-            "scp", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
-            tmp.name, "root@47.115.213.115:/opt/fm/proc-rel/proc_candidates.db",
-        ], check=True, capture_output=True, timeout=30)
+        proc_rel_dir = "/opt/fm/proc-rel"
+        target_db = f"{proc_rel_dir}/proc_candidates.db"
+        relation_db = f"{proc_rel_dir}/processing_relation.db"
 
-        subprocess.run([
-            "ssh", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
-            "root@47.115.213.115",
-            "python3 -c \"import sqlite3; db=sqlite3.connect('/opt/fm/proc-rel/processing_relation.db'); "
-            "db.execute('DROP TABLE IF EXISTS proc_candidates'); "
-            "db.execute('ATTACH DATABASE \\\"/opt/fm/proc-rel/proc_candidates.db\\\" AS cand'); "
-            "db.execute('CREATE TABLE proc_candidates AS SELECT * FROM cand.proc_candidates'); "
-            "db.execute('UPDATE proc_candidates SET relation_count = (SELECT COUNT(*) FROM processing_relation pr WHERE pr.finished_sku = proc_candidates.article_id AND pr.is_active = 1)'); "
-            "db.commit(); db.close()\"",
-        ], check=True, capture_output=True, timeout=30)
+        if os.path.isdir(proc_rel_dir):
+            # 已在服务器上：直接本地拷贝 + 导入
+            shutil.copy(tmp.name, target_db)
+            local_sdb = sqlite3.connect(relation_db)
+            local_sdb.execute("DROP TABLE IF EXISTS proc_candidates")
+            local_sdb.execute(f"ATTACH DATABASE '{target_db}' AS cand")
+            local_sdb.execute("CREATE TABLE proc_candidates AS SELECT * FROM cand.proc_candidates")
+            local_sdb.execute(
+                "UPDATE proc_candidates SET relation_count = ("
+                "SELECT COUNT(*) FROM processing_relation pr "
+                "WHERE pr.finished_sku = proc_candidates.article_id AND pr.is_active = 1)"
+            )
+            local_sdb.commit()
+            local_sdb.close()
+        else:
+            # 本地 Mac：scp + ssh 推送到服务器
+            ssh_key = os.path.expanduser("~/.ssh/id_rsa")
+            subprocess.run([
+                "scp", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+                tmp.name, f"root@47.115.213.115:{target_db}",
+            ], check=True, capture_output=True, timeout=30)
+
+            subprocess.run([
+                "ssh", "-i", ssh_key, "-o", "StrictHostKeyChecking=no",
+                "root@47.115.213.115",
+                "python3 -c \"import sqlite3; db=sqlite3.connect('/opt/fm/proc-rel/processing_relation.db'); "
+                "db.execute('DROP TABLE IF EXISTS proc_candidates'); "
+                "db.execute('ATTACH DATABASE \\\"/opt/fm/proc-rel/proc_candidates.db\\\" AS cand'); "
+                "db.execute('CREATE TABLE proc_candidates AS SELECT * FROM cand.proc_candidates'); "
+                "db.execute('UPDATE proc_candidates SET relation_count = (SELECT COUNT(*) FROM processing_relation pr WHERE pr.finished_sku = proc_candidates.article_id AND pr.is_active = 1)'); "
+                "db.commit(); db.close()\"",
+            ], check=True, capture_output=True, timeout=30)
 
         os.unlink(tmp.name)
         _log.info(f"processing candidates synced: {len(df)} SKUs")
