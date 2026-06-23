@@ -1,13 +1,18 @@
 """
-t_calc_profit — 门店毛利 (v0.10 Python 重写)
+t_calc_profit — 门店毛利 (v0.10 Python 重写, v0.11 FIX-019)
 
-v0.10 核心公式:
+核心公式:
   profit = sale
          - receive - bom_in + bom_out
          - compose_in + compose_out
          + end - init
 
   注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt。
+
+v0.11 FIX-019: 非日清品 (day_clear='1') 当库存方程 eq<0 时, stock.py 将 end
+  钉零并把透支量记入 unknow_lost_amt。但利润只用 end-init, 透支成本既未进 end
+  也未进利润 → 利润虚高。此处对 dc='1' & eq<0 & end≈0 分支扣回 unknow_lost_amt
+  (日清 dc='0' 的 unknow 是软日清正常残差/含盘盈, 不扣)。
 
 sale_cost_amt (日清/非日清统一):
   sale_cost_amt = sale_qty × euc
@@ -51,6 +56,7 @@ class ProfitCalculator:
                 lost_qty, lost_amt,
                 init_stock_qty, init_stock_amt,
                 end_stock_qty, end_stock_amt,
+                eq_end_qty,
                 effective_unit_cost, cost_source,
                 out_stock_pay_amt_notax, return_stock_pay_amt_notax,
                 out_stock_amt_cb
@@ -98,6 +104,25 @@ class ProfitCalculator:
             - df['compose_in_amt'] + df['compose_out_amt']
             + df['end_stock_amt'] - df['init_stock_amt']
         )
+
+        # ── 4b. FIX-019: 负库存钉零分支的透支成本计入利润 ─────────────
+        # 非日清品 (day_clear='1') 当 eq<0 时, stock.py 将 end 钉到 0,
+        # 把透支量 (-eq) 记入 unknow_lost_amt。但利润公式只用 end-init,
+        # end 被钉高到 0 → 透支成本既未进 end 也未进利润 → 利润虚高。
+        # 此处把这部分真实透支成本(=超卖/超损的库存)扣回。
+        # 仅限 day_clear='1' 且 end≈0 (精确定位钉零分支), 不碰日清 dc='0'
+        # (其 unknow 是软日清正常残差, 含盘盈, 不应计入成本)。
+        # unknow_lost_qty>0 守卫: 只扣真实透支(=-eq>0), 排除 is_counted 实盘=0
+        # 且 eq<0 的角落 (其 unknow 为负=盘盈, 不应反向加利润)。
+        clamp_mask = (
+            (df['day_clear'] == '1')
+            & (df['eq_end_qty'] < -0.001)
+            & (df['end_stock_qty'] < 0.001)
+            & (df['unknow_lost_qty'] > 0.001)
+        )
+        df.loc[clamp_mask, 'profit_amt'] -= df.loc[clamp_mask, 'unknow_lost_amt']
+        n_clamp = int(clamp_mask.sum())
+        clamp_amt = float(df.loc[clamp_mask, 'unknow_lost_amt'].sum())
 
         # ── 5. Python: 销售成本 ──────────────────────────────────────
         # 日清/非日清统一: sale_qty × euc
@@ -173,6 +198,10 @@ class ProfitCalculator:
         self._log.info(
             f"t_calc_profit: {rows} rows, "
             f"Σprofit={df['profit_amt'].sum():.2f}"
+        )
+        self._log.info(
+            f"FIX-019 负库存钉零透支成本扣减: {n_clamp} rows (dc='1'), "
+            f"Σ扣减={clamp_amt:.2f}"
         )
 
         # v0.10 fix: 大分类毛利汇总已迁移到 FM 底表层 (sku_dim.py)

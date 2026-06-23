@@ -13,7 +13,7 @@
 | FIX-001 | compose 纯加工关系计算 | ✅ 已实现 | ✅ 全月 | sku_cost.py, stock.py | `277f296` `c2cb613` |
 | FIX-002 | EUC 兜底链完善 | ⏳ 待实现 | — | sku_cost.py | — |
 | FIX-003 | 跨日 init_stock 不一致 | 📋 低优先级 | — | stock.py | — |
-| FIX-004 | BOM 父品转移负毛利 | ⏳ 待实现 | — | stock.py | — |
+| FIX-004 | BOM 父品转移负毛利 | ↩️ 已回滚 | — | stock.py | `e5f503c`→`8a6030e` revert |
 | FIX-005 | 金额平衡公式修正 | 📋 低优先级 | — | stock_roll.py | — |
 | FIX-006 | 蛋类 -34.9% 偏差 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
 | FIX-007 | 5/29 FM 巨损 | 🟡 波及分析 | — | — (FIX-004 自动修复) | — |
@@ -30,8 +30,9 @@
 | FIX-017 | self_receive BOM父品双重计数 | ✅ 已实现 | ✅ 已验证 | merge.py | — |
 | FIX-018 | matnr EUC 交叉验证 | ✅ 已实现 | ✅ 已验证 | sku_cost.py | — |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
+| FIX-019 | 负库存钉零分支透支成本未计入利润 | ✅ 已实现 | ✅ 已验证 | profit.py | (待填) |
 
-**已实现 5 个（FIX-001, FIX-013, FIX-016 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
+**已实现含 ETL 验证: FIX-001, FIX-013, FIX-016, FIX-019。FIX-004（BOM父品归零）已实现后回滚（对矩阵无改善且总差变大）。待实现 2 个 (FIX-002 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
 
 ### 状态图例
 
@@ -41,6 +42,7 @@
 | ⏳ 待实现 | 根因确认，修复方案明确，等待编码 |
 | 🟡 波及分析 | 非独立 bug，上游修复后自动解决 |
 | 📋 低优先级 | 当前数据不触发或影响极小 |
+| ↩️ 已回滚 | 曾实现但验证不利，已 revert |
 
 ### ETL 验证状态
 
@@ -146,7 +148,8 @@ fmetl/docs/fixes/
 ├── FIX-013-compose-partial-euc.md     (compose 部分原料 euc=0 不归零 ✅)
 ├── FIX-014-bakery-qdm-comparison.md   (烘焙类FM vs QDM完整对比 📋)
 ├── FIX-015-sku-profit-trace.md        (SKU级利润逐日追踪 📋)
-└── FIX-016-dayclear-cleanup.md        (手动日清清单重整 93→72 ✅)
+├── FIX-016-dayclear-cleanup.md        (手动日清清单重整 93→72 ✅)
+└── FIX-019-negative-stock-clamp-cost.md (负库存钉零透支成本未计入利润 ✅)
 ```
 ```
 
@@ -223,17 +226,20 @@ fmetl/docs/fixes/
 | 属性 | 值 |
 |------|-----|
 | **文档** | [FIX-004-bom-transfer.md](FIX-004-bom-transfer.md) |
-| **审查报告** | §2.3 |
-| **状态** | ⏳ 待实现 |
+| **审查报告** | §2.3 / REVIEW-006 |
+| **状态** | ↩️ 已实现后回滚 (`e5f503c` → revert `8a6030e`) |
 | **修改文件** | `fmetl/calculated/stock.py` |
-| **优先级** | 🔴 P0 |
+| **优先级** | ~~🔴 P0~~ 已否决 |
 | **依赖** | FIX-001, FIX-002 |
 
 **问题**: stock_transfer 清零父品 end_stock 但不增加 bom_out → init_stock 变成净亏损。
 
-**修复**: 父品 transfer 时同步增加 `bom_out_amt` += transfer_amt, `bom_out_qty` += transfer_qty。
+**曾尝试的修复**: 父品 transfer 时同步增加 `bom_out_amt` += transfer_amt, `bom_out_qty` += transfer_qty。
 
-**影响**: 11 个父品，23 行，虚增亏损 -1,272.80 元 → 修复后 +148.06 元。
+**为何回滚**: 实现并经三次审查（旧 REVIEW-007）后发现——该改动让**总毛利差异变大**，
+对分类×日期矩阵**无改善**。BOM 父子品利润分配差异本质是可接受的口径差（父品+/子品−
+符号相抵，品类级净额很小），不应强行归零。已全部 revert（`8a6030e`/`506bc9d`/`2db6a2a`）。
+矩阵真正的驱动因素由 **FIX-019** 解决。
 
 ---
 
@@ -420,6 +426,29 @@ fmetl/docs/fixes/
 
 ---
 
+### FIX-019: 负库存钉零分支透支成本未计入利润 ✅
+
+| 属性 | 值 |
+|------|-----|
+| **文档** | [FIX-019-negative-stock-clamp-cost.md](FIX-019-negative-stock-clamp-cost.md) |
+| **来源** | REVIEW-007 差异矩阵根因下钻 (2026-06-24) |
+| **状态** | ✅ 已实现 (ETL 已验证) |
+| **修改文件** | `fmetl/calculated/profit.py` |
+| **优先级** | 🔴 P0 |
+| **依赖** | 无（只读 stock 现有列） |
+
+**问题**: 非日清品 `eq<0` 时 stock.py 把 end 钉零、透支量转 unknow_lost，
+但毛利公式 `+end−init` 不含 unknow_lost → 透支成本既不进 end 也不进利润 → 利润虚高。
+QDM 允许负期末，自然把透支扣进利润，故 FM 在生鲜品类系统性高于 QDM。
+
+**修复**: profit.py 对 `dc='1' & eq<0 & end≈0 & unknow_qty>0` 精确扣回 `unknow_lost_amt`，
+不碰日清 dc='0'（其 unknow 是软日清正常残差/盘盈）。
+
+**效果**: 总毛利差异 +2,129(+18.9%) → +707(+6.3%)；命中 155 行扣减 1,422.54 元；
+烘焙/冷藏乳品/水饮/蛋基本对齐；剩余热点（水产/牛羊/熟食）为生鲜+BOM子品跨日euc结构性差异。
+
+---
+
 ## 实现顺序
 
 ### ✅ 已实现
@@ -469,7 +498,7 @@ FIX-005 📋  金额平衡公式     (审查报告公式 bug, 不影响 ETL 正�
 | 文档 | 路径 |
 |------|------|
 | 项目总览 | [CLAUDE.md](../../../CLAUDE.md) |
-| ETL 完整处理逻辑 | [architecture/ETL_v0.10_完整处理逻辑.md](../architecture/ETL_v0.10_完整处理逻辑.md) |
+| ETL 完整处理逻辑 | [architecture/ETL_v0.11_完整处理逻辑.md](../architecture/ETL_v0.11_完整处理逻辑.md) |
 | 差异问题与待办 | [reviews/差异问题与待办事项_v0.10.md](../reviews/差异问题与待办事项_v0.10.md) |
 | 全面审查报告 | [reviews/全面审查报告_v0.10_2026-06-01.md](../reviews/全面审查报告_v0.10_2026-06-01.md) |
 | 源表字段手册 | [references/strategy_fm_字段手册_完整版.md](../references/strategy_fm_字段手册_完整版.md) |

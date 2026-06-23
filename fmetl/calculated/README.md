@@ -408,6 +408,23 @@ profit_amt = sale_amt
 
 > 损耗已通过库存方程反映在 end_stock 中（end减少→成本增加→利润减少），不再额外减去 lost_amt。
 
+#### v0.11 FIX-019: 负库存钉零分支的透支成本扣减
+
+非日清品 (`day_clear='1'`) 当库存方程 `eq<0`（超卖/超损）时，stock.py 走负库存保护：
+`end` 钉零、透支量 `-eq` 转入 `unknow_lost`。但上面的核心公式只用 `end-init`，`end` 又被
+钉高到 0 → 透支成本既不进 end 也不进利润 → **利润虚高**。FIX-019 在主公式后对精确命中
+钉零分支的行扣回透支成本：
+
+```python
+clamp_mask = (day_clear=='1') & (eq_end_qty<-0.001) & (end_stock_qty<0.001) & (unknow_lost_qty>0.001)
+profit_amt[clamp_mask] -= unknow_lost_amt[clamp_mask]
+```
+
+四条件精确锁定 stock.py 的 `elif eq<0` 分支，**不碰日清 `dc='0'`**（其 unknow 是软日清正常
+残差/盘盈，扣了会双重惩罚），`unknow_qty>0` 守卫排除 is_counted 实盘=0 的盘盈角落。
+效果：6/18–22 总毛利 FM−QDM 从 +2,129(+18.9%) 降至 +707(+6.3%)。详见
+[FIX-019](../docs/fixes/FIX-019-negative-stock-clamp-cost.md)。
+
 ### 销售成本 (v0.10 统一公式)
 
 ```

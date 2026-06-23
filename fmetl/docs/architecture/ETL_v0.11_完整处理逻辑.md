@@ -1,4 +1,4 @@
-# FM ETL v0.10 完整处理逻辑
+# FM ETL v0.11 完整处理逻辑
 
 > 粒度：`(store_id, business_date, article_id, day_clear)` 贯穿全链路。
 >
@@ -282,6 +282,13 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 ```
 
 损耗不在公式中单独扣减（已通过库存方程的 `end_stock` 体现）。
+
+> **v0.11 FIX-019（负库存钉零透支成本扣减）**：非日清品 (`day_clear='1'`) 当库存方程
+> `eq<0` 时，stock.py 把 `end` 钉零、透支量 `-eq` 转入 `unknow_lost`。但毛利公式只用
+> `end-init`、`end` 又被钉高到 0 → 透支成本既不进 end 也不进利润 → 利润虚高。profit.py
+> 对精确命中钉零分支的行 (`dc='1' & eq<0 & end≈0 & unknow_qty>0`) 扣回 `unknow_lost_amt`，
+> 不碰日清 `dc='0'`（其 unknow 是软日清正常残差/盘盈）。6/18–22 总毛利差 +18.9%→+6.3%。
+> 详见 [FIX-019](../fixes/FIX-019-negative-stock-clamp-cost.md)。
 
 **辅助毛利指标**：
 

@@ -1,5 +1,5 @@
 """
-FM ETL v0.10 主执行器
+FM ETL v0.11 主执行器
 
 用法:
     python -m fmetl.executor 2026-04-23 2026-04-23
@@ -9,7 +9,7 @@ FM ETL v0.10 主执行器
 
 凭证: QDM_ACCESS_KEY / QDM_SECRET_KEY (.env 或环境变量)
 
-Pipeline (v0.10, 13 步):
+Pipeline (v0.11, 14 步):
   Step 1   维度表快照
   Step 2   13 个原子域抽数
   Step 3   原子宽表合并 (t_atomic_wide)
@@ -63,7 +63,7 @@ def run(start: str, end: str, stages: str = "all") -> None:
     cfg = get_settings()
     yesterday = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
 
-    _log.info(f"═══ FM ETL v0.10 START  {start} ~ {end}  (stage={stages}) ═══")
+    _log.info(f"═══ FM ETL v0.11 START  {start} ~ {end}  (stage={stages}) ═══")
     t0 = time.time()
 
     api  = ApiConnector(cfg)
@@ -84,7 +84,7 @@ def run(start: str, end: str, stages: str = "all") -> None:
         duck.close()
 
     elapsed = time.time() - t0
-    _log.info(f"═══ FM ETL v0.10 DONE  elapsed={elapsed:.1f}s ═══")
+    _log.info(f"═══ FM ETL v0.11 DONE  elapsed={elapsed:.1f}s ═══")
 
 
 def _run_atomic(api, duck, start, end, yesterday):

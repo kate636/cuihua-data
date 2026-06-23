@@ -317,6 +317,11 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out
 注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt（A20）。
 ```
 
+**FIX-019 (v0.11)**：非日清品 `eq<0` 时 stock.py 把 end 钉零、透支量转 unknow_lost，
+但毛利公式不含 unknow_lost、end 又被钉高到 0 → 透支成本凭空消失 → 利润虚高。profit.py 对
+`day_clear='1' & eq_end_qty<0 & end_stock_qty≈0 & unknow_lost_qty>0` 扣回 unknow_lost_amt
+（不碰日清 dc='0'）。6/18–22 总毛利 FM−QDM +18.9%→+6.3%。
+
 ### 销售成本
 `sale_cost_amt = sale_qty × euc`（日清/非日清统一公式，差异在 stock.py 端体现）
 
