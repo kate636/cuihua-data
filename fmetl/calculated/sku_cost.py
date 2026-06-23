@@ -307,6 +307,9 @@ class SkuCostCalculator:
         df.loc[fallback_pr, 'cost_source'] = 'V10_PROCESSING_RELATION'
         df.loc[fallback_matnr, 'cost_source'] = 'V10_MATNR_CONVERT'
 
+        # matnr 交叉验证: 检测同物料多SKU的EUC比率异常（只读WARNING, 不修改EUC）
+        self._cross_validate_matnr_euc(df, conn)
+
         # 清理临时列
         for tmp_col in ['_pr_applied', '_matnr_applied', '_compose_corrected']:
             if tmp_col in df.columns:
@@ -782,3 +785,117 @@ class SkuCostCalculator:
             )
 
         return df['_matnr_applied']
+
+    def _cross_validate_matnr_euc(self, df, conn):
+        """matnr EUC 交叉验证: 检测同物料多SKU的EUC比率是否与重量比一致。
+
+        只读 WARNING, 不修改任何 EUC 值。
+        目标: 发现 BOM + matnr 重叠导致的 EUC 异常 (如蒙牛3.6偏差41.5%)。
+        """
+        import math
+        from collections import defaultdict
+
+        dim_df = conn.execute("""
+            SELECT article_id, matnr, unit_weight, zglfz, zglfm
+            FROM dim_goods WHERE matnr IS NOT NULL AND matnr != ''
+        """).df()
+        if dim_df.empty:
+            return
+
+        sku_info = {}
+        for _, row in dim_df.iterrows():
+            wt = row['unit_weight']
+            zfz = row['zglfz']
+            zfm = row['zglfm']
+            sku_info[str(row['article_id'])] = {
+                'matnr': str(row['matnr']),
+                'unit_weight': float(wt) if wt is not None and not (isinstance(wt, float) and math.isnan(wt)) else 0.0,
+                'zglfz': float(zfz) if zfz is not None and not (isinstance(zfz, float) and math.isnan(zfz)) else 0.0,
+                'zglfm': float(zfm) if zfm is not None and not (isinstance(zfm, float) and math.isnan(zfm)) else 0.0,
+            }
+
+        bom_df = conn.execute("""
+            SELECT DISTINCT parent_article_id, sub_article_id FROM t_calc_bom_alloc
+        """).df()
+        bom_pairs = set()
+        for _, row in bom_df.iterrows():
+            bom_pairs.add((str(row['parent_article_id']), str(row['sub_article_id'])))
+            bom_pairs.add((str(row['sub_article_id']), str(row['parent_article_id'])))
+
+        matnr_groups = defaultdict(list)
+        euc_positive = df[df['effective_unit_cost'] > 0]
+        for idx in euc_positive.index:
+            aid = str(df.at[idx, 'article_id'])
+            info = sku_info.get(aid)
+            if not info or not info['matnr']:
+                continue
+            key = (df.at[idx, 'business_date'], df.at[idx, 'store_id'], info['matnr'])
+            matnr_groups[key].append({
+                'article_id': aid,
+                'euc': float(df.at[idx, 'effective_unit_cost']),
+                'unit_weight': info['unit_weight'],
+                'zglfz': info['zglfz'],
+                'zglfm': info['zglfm'],
+                'cost_source': str(df.at[idx, 'cost_source']),
+            })
+
+        # 跨日去重: 同一 (matnr, aid_a, aid_b) 只报一次, 汇总天数
+        anomaly_pairs = defaultdict(list)  # key=(matnr,aid_a,aid_b) → [(date, euc_a, euc_b)]
+        for (biz_date, store_id, matnr), skus in matnr_groups.items():
+            if len(skus) < 2:
+                continue
+            for i in range(len(skus)):
+                for j in range(i + 1, len(skus)):
+                    a, b = skus[i], skus[j]
+                    if a['euc'] <= 0 or b['euc'] <= 0:
+                        continue
+
+                    has_bom = (a['article_id'], b['article_id']) in bom_pairs
+                    euc_ratio = b['euc'] / a['euc']
+
+                    if a['unit_weight'] > 0 and b['unit_weight'] > 0:
+                        expected_ratio = b['unit_weight'] / a['unit_weight']
+                        ratio_type = 'wt'
+                    elif a['zglfm'] > 0 and b['zglfm'] > 0:
+                        a_zgl = a['zglfz'] / a['zglfm']
+                        b_zgl = b['zglfz'] / b['zglfm']
+                        if a_zgl > 0 and b_zgl > 0:
+                            expected_ratio = b_zgl / a_zgl
+                            ratio_type = 'zgl'
+                        else:
+                            continue
+                    else:
+                        continue
+
+                    if expected_ratio <= 0:
+                        continue
+
+                    deviation = abs(euc_ratio - expected_ratio) / expected_ratio
+                    if deviation > 0.20:
+                        pair_key = (matnr, a['article_id'], b['article_id'], has_bom, ratio_type, expected_ratio)
+                        anomaly_pairs[pair_key].append({
+                            'date': biz_date,
+                            'euc_a': a['euc'],
+                            'euc_b': b['euc'],
+                            'src_a': a['cost_source'],
+                            'src_b': b['cost_source'],
+                        })
+
+        for (matnr, aid_a, aid_b, has_bom, ratio_type, expected_ratio), days in anomaly_pairs.items():
+            avg_euc_a = sum(d['euc_a'] for d in days) / len(days)
+            avg_euc_b = sum(d['euc_b'] for d in days) / len(days)
+            avg_ratio = avg_euc_b / avg_euc_a
+            avg_dev = abs(avg_ratio - expected_ratio) / expected_ratio
+            bom_flag = " [BOM重叠!]" if has_bom else ""
+            self._log.warning(
+                f"matnr EUC mismatch{bom_flag}: matnr={matnr} "
+                f"{aid_a}(avg_euc={avg_euc_a:.2f},{days[0]['src_a']}) "
+                f"vs {aid_b}(avg_euc={avg_euc_b:.2f},{days[0]['src_b']}) "
+                f"avg_euc_ratio={avg_ratio:.3f} expected_{ratio_type}_ratio={expected_ratio:.3f} "
+                f"deviation={avg_dev*100:.1f}% ({len(days)}天)"
+            )
+
+        if anomaly_pairs:
+            self._log.warning(
+                f"matnr cross-validation: {len(anomaly_pairs)} unique EUC ratio anomalies detected"
+            )

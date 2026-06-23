@@ -183,8 +183,8 @@ split_ratio_i = weighted_qty_i / Σ(weighted_qty_j for j in same matnr)
 | 优先级 | 行动 | 效果 |
 |:---:|------|------|
 | **P0** | ✅ 验证完成：验收数据按 matnr 记录，落在称重品 | 确认结构性缺陷 |
-| **P1** | 在 merge.py 中按 matnr weight 比拆分 receive | 根本性修复 106 个 matnr 对的 EUC |
-| **P2** | matnr 交叉验证层（Step 5 末尾 WARNING） | 发现 BOM + matnr 重叠的 EUC 异常 |
+| **P1** | ~~在 merge.py 中按 matnr weight 比拆分 receive~~ → V10_MATNR_CONVERT 兜底替代 | receive 落在称重品是正确的, 包装品 EUC 通过 matnr 兜底推算 |
+| **P2** | ~~matnr 交叉验证层（Step 5 末尾 WARNING）~~ ✅ 已完成 | 发现 BOM + matnr 重叠的 EUC 异常 (FIX-018) |
 | **P3** | V10_MATNR_CONVERT 继续兜底（覆盖拆分后仍为零的少量 SKU） | 安全网 |
 
 ## 8. 链路总结（修订版）

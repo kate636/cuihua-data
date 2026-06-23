@@ -28,6 +28,7 @@
 | FIX-016 | 手动日清清单重整 93→72 | ✅ 已生效 | ✅ 已验证 | 服务器 day_clear.db | — |
 | — | sku_dim.py L3 LIKE '%熟食' | ✅ 已实现 | ❌ | sku_dim.py | `3b47390` |
 | FIX-017 | self_receive BOM父品双重计数 | ✅ 已实现 | ✅ 已验证 | merge.py | — |
+| FIX-018 | matnr EUC 交叉验证 | ✅ 已实现 | ✅ 已验证 | sku_cost.py | — |
 | — | dims_extractor 全量手动日清 | ✅ 已实现 | ❌ | dims_extractor.py | `ed8c7ac` |
 
 **已实现 5 个（FIX-001, FIX-013, FIX-016 ETL 已验证），待实现 3 个 (FIX-002 + FIX-004 + FIX-011)，其余为波及分析、结构性差异或低优先级。**
