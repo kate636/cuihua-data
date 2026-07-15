@@ -75,7 +75,7 @@ def run(start: str, end: str, stages: str = "all") -> None:
             _run_merge(duck, start, end)
 
         if stages in ("all", "calc"):
-            _run_calc(duck)
+            _run_calc(duck, start, end)
 
         if stages in ("all", "fm"):
             _run_fm(duck, api, start, end, yesterday)
@@ -126,15 +126,26 @@ def _run_merge(duck, start, end):
     AtomicMerger(duck).run(start=start, end=end)
 
 
-def _run_calc(duck):
+def _run_calc(duck, start, end):
     _step("Step 4: BOM 分摊 → t_calc_bom_alloc [v0.10 修复]")
     BomAllocCalculator(duck).run()
 
-    _step("Step 5: SKU 有效单位成本 → t_calc_sku_cost [v0.10 Python]")
-    SkuCostCalculator(duck).run()
+    dates = [
+        r[0] for r in duck._conn.execute(f"""
+            SELECT DISTINCT business_date
+            FROM t_atomic_wide
+            WHERE business_date BETWEEN '{start}' AND '{end}'
+            ORDER BY business_date
+        """).fetchall()
+    ]
+    if not dates:
+        _log.warning(f"no t_atomic_wide dates found for calc stage: {start} ~ {end}")
+        return
 
-    _step("Step 6: 库存与金额 → t_calc_stock [v0.10 四流合一 Python]")
-    StockCalculator(duck).run()
+    for d in dates:
+        _step(f"Step 5/6: SKU成本→库存 按日闭环 → {d}")
+        SkuCostCalculator(duck).run(start=d, end=d)
+        StockCalculator(duck).run(start=d, end=d)
 
     _step("Step 7: 门店毛利 → t_calc_profit [v0.10 Python 新公式]")
     ProfitCalculator(duck).run()  # debug_categories 仅在排查单品类时传入

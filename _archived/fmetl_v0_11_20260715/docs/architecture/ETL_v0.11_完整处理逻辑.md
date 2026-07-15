@@ -426,6 +426,6 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out + (end - i
 
 8. **dim_goods 关联时机**：dim_goods 在 FM 底表层（sku_dim.py）统一 JOIN，所有历史日期使用最新 dim_goods 快照。计算层（stock/profit/merge）不直接引用 dim_goods 分类。日清覆盖通过 `dim_day_clear_override` 辅助表隔离。
 
-9. **跨日依赖与 sku_cost 初次运行**：sku_cost (Step 5) 读取 t_calc_stock (Step 6 产出) 获取前日 end_stock。由于 Step 5 先于 Step 6 运行，当次运行的跨日链使用上一次 ETL 运行的 t_calc_stock 数据。修复 BOM 等影响库存的模块后需运行两次才能完全更新跨日链。
+9. **跨日依赖闭环**：自 REVIEW-009 修复后，计算层不再一次性跑完整 Step 5 再跑完整 Step 6，而是先全量计算 BOM alloc，再按营业日期串行执行 `SkuCostCalculator(date=d) -> StockCalculator(date=d)`。这样当日 `sku_cost` 读取的是本轮刚写出的前一日 `t_calc_stock.end_stock`，跨日链无需通过"运行两次"收敛。
 
 10. **标品类数据覆盖**：部分标品 SKU 在 QDM 有销售/利润但 fmetl 无对应数据，可能源自数据提取窗口或源表覆盖差异。`chunk=30` 已改善数据完整性，但仍有少量 SKU 存在差异。

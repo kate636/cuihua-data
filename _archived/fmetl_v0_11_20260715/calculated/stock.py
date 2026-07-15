@@ -33,11 +33,21 @@ class StockCalculator:
         self._duck = duck
         self._log = get_logger("StockCalculator")
 
-    def run(self) -> None:
-        self._log.info("calculating stock & amounts (v0.10 Python, four-flow, sequential days) ...")
+    def run(self, start: str | None = None, end: str | None = None) -> None:
+        date_filter = ""
+        if start and end:
+            date_filter = f"WHERE business_date BETWEEN '{start}' AND '{end}'"
+        elif start:
+            date_filter = f"WHERE business_date = '{start}'"
+
+        self._log.info(
+            "calculating stock & amounts (v0.10 Python, four-flow, sequential days)"
+            + (f" for {start}~{end}" if start or end else "")
+            + " ..."
+        )
         conn = self._duck._conn
 
-        wide_df = conn.execute("""
+        wide_df = conn.execute(f"""
             SELECT
                 store_id, business_date, article_id, day_clear,
                 self_receive_qty, self_receive_amt,
@@ -53,6 +63,7 @@ class StockCalculator:
                 order_qty_payean,
                 scm_promotion_amt_total
             FROM t_atomic_wide
+            {date_filter}
         """).df()
 
         if wide_df.empty:
@@ -94,14 +105,17 @@ class StockCalculator:
                     expect_outstock_amt DOUBLE, purchase_weight DOUBLE
                 )
             """)
-            # Add columns not in initial schema
-            try: conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN is_first_day INTEGER")
-            except: pass
-            try: conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN eq_end_qty DOUBLE")
-            except: pass
             self._log.info(f"created {self.TARGET_TABLE}")
 
-        # FIX-020: 透支成本列(幂等迁移, 已有表也补上)
+        # 幂等迁移, 已有表也补上
+        try:
+            conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN is_first_day INTEGER")
+        except Exception:
+            pass
+        try:
+            conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN eq_end_qty DOUBLE")
+        except Exception:
+            pass
         try:
             conn.execute(f"ALTER TABLE {self.TARGET_TABLE} ADD COLUMN neg_clamp_cost_amt DOUBLE")
         except Exception:

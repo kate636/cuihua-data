@@ -31,12 +31,22 @@ class SkuCostCalculator:
         self._duck = duck
         self._log = get_logger("SkuCostCalculator")
 
-    def run(self) -> None:
-        self._log.info("calculating SKU effective unit cost (v0.10 Python) ...")
+    def run(self, start: str | None = None, end: str | None = None) -> None:
+        date_filter = ""
+        if start and end:
+            date_filter = f"WHERE business_date BETWEEN '{start}' AND '{end}'"
+        elif start:
+            date_filter = f"WHERE business_date = '{start}'"
+
+        self._log.info(
+            "calculating SKU effective unit cost (v0.10 Python)"
+            + (f" for {start}~{end}" if start or end else "")
+            + " ..."
+        )
         conn = self._duck._conn
 
         # 1. 从 t_atomic_wide 取基础数据
-        wide_df = conn.execute("""
+        wide_df = conn.execute(f"""
             SELECT
                 store_id,
                 business_date,
@@ -51,9 +61,16 @@ class SkuCostCalculator:
                 avg_inbound_price,
                 cost_price
             FROM t_atomic_wide
+            {date_filter}
         """).df()
 
         if wide_df.empty:
+            if start or end:
+                self._log.warning(
+                    f"t_atomic_wide is empty for {start or ''}~{end or ''}, "
+                    f"keep existing {self.TARGET_TABLE}"
+                )
+                return
             self._log.warning("t_atomic_wide is empty, creating empty t_calc_sku_cost")
             self._duck.execute(f"DROP TABLE IF EXISTS {self.TARGET_TABLE}")
             self._duck.execute(f"""
@@ -73,7 +90,7 @@ class SkuCostCalculator:
             return
 
         # 2. 从 t_calc_bom_alloc 取 BOM 分摊（按 sub 聚合, 用子品单位 qty）
-        bom_df = conn.execute("""
+        bom_df = conn.execute(f"""
             SELECT
                 store_id,
                 business_date,
@@ -81,42 +98,46 @@ class SkuCostCalculator:
                 SUM(bom_alloc_amt) AS bom_alloc_amt,
                 SUM(bom_alloc_qty_sub) AS bom_alloc_qty
             FROM t_calc_bom_alloc
+            {date_filter}
             GROUP BY store_id, business_date, sub_article_id
         """).df()
 
         # 3. 从 t_calc_stock 取前一营业日期末库存（MAX business_date < 当天）
         prev_df = None
         try:
-            prev_df = conn.execute("""
+            prev_df = conn.execute(f"""
                 WITH stock_pairs AS (
-                    SELECT DISTINCT store_id, article_id, business_date
+                    SELECT DISTINCT store_id, article_id, day_clear, business_date
                     FROM t_atomic_wide
+                    {date_filter}
                 ),
                 prev_match AS (
-                    SELECT sp.store_id, sp.article_id, sp.business_date,
+                    SELECT sp.store_id, sp.article_id, sp.day_clear, sp.business_date,
                            MAX(cs.business_date) AS prev_biz_date
                     FROM stock_pairs sp
                     INNER JOIN t_calc_stock cs
                         ON sp.store_id = cs.store_id
                         AND sp.article_id = cs.article_id
+                        AND sp.day_clear = cs.day_clear
                         AND cs.business_date < sp.business_date
-                    GROUP BY sp.store_id, sp.article_id, sp.business_date
+                    GROUP BY sp.store_id, sp.article_id, sp.day_clear, sp.business_date
                 ),
                 prev_stock AS (
-                    SELECT pm.store_id, pm.article_id, pm.business_date,
+                    SELECT pm.store_id, pm.article_id, pm.day_clear, pm.business_date,
                            cs.end_stock_qty AS prev_end_qty,
                            cs.end_stock_amt AS prev_end_amt
                     FROM prev_match pm
                     INNER JOIN t_calc_stock cs
                         ON pm.store_id = cs.store_id
                         AND pm.article_id = cs.article_id
+                        AND pm.day_clear = cs.day_clear
                         AND pm.prev_biz_date = cs.business_date
                 )
                 SELECT * FROM prev_stock
             """).df()
             if prev_df.empty:
                 prev_df = None
-        except (duckdb.CatalogException, Exception):
+        except duckdb.CatalogException:
             self._log.info("no t_calc_stock from prior runs — all SKUs are first-day")
 
         # 4. Python: merge BOM
@@ -128,7 +149,7 @@ class SkuCostCalculator:
         # 5. Python: 计算 init_stock（前一营业日期末 或 首日源表值）
         if prev_df is not None and not prev_df.empty:
             df = df.merge(prev_df,
-                          on=['store_id', 'article_id', 'business_date'],
+                          on=['store_id', 'article_id', 'day_clear', 'business_date'],
                           how='left')
             df['init_stock_qty'] = df['prev_end_qty'].fillna(
                 df['init_stock_qty_src']).clip(lower=0)
@@ -141,11 +162,18 @@ class SkuCostCalculator:
             df['is_first_day'] = 1
 
         # 5.5 加载盘点实际库存 (用于 compose 数量推导)
-        inv_detail = conn.execute("""
+        inv_date_clause = ""
+        if start and end:
+            inv_date_clause = f"AND business_date BETWEEN '{start}' AND '{end}'"
+        elif start:
+            inv_date_clause = f"AND business_date = '{start}'"
+
+        inv_detail = conn.execute(f"""
             SELECT store_id, business_date, article_id,
                    actual_stock_qty
             FROM atomic_inventory_detail
             WHERE actual_stock_qty > 0
+              {inv_date_clause}
         """).df()
         if not inv_detail.empty:
             df = df.merge(inv_detail,
@@ -282,12 +310,57 @@ class SkuCostCalculator:
             df.loc[no_base, 'compose_out_amt'] / df.loc[no_base, 'compose_out_qty']
         )
 
-        # cost_qty=0 时沿 (store_id, article_id) 向前继承昨日 euc
-        df = df.sort_values(['store_id', 'article_id', 'business_date'])
+        # cost_qty=0 时沿 (store_id, article_id) 向前继承昨日 euc。
+        # 当 executor 按日闭环调用时，单日 DataFrame 内没有昨天，因此还要显式读取
+        # 已写出的上一营业日 t_calc_sku_cost，保持原 ffill 语义。
+        df = df.sort_values(['store_id', 'article_id', 'business_date']).reset_index(drop=True)
         df['effective_unit_cost'] = (
             df.groupby(['store_id', 'article_id'])['effective_unit_cost']
             .transform(lambda x: x.replace(0, float('nan')).ffill().fillna(0))
         )
+
+        fallback_prev_euc = df['effective_unit_cost'] == -1  # all-False, index-aligned
+        try:
+            prev_euc_df = conn.execute("""
+                WITH stock_pairs AS (
+                    SELECT DISTINCT store_id, article_id, business_date
+                    FROM df
+                ),
+                prev_match AS (
+                    SELECT sp.store_id, sp.article_id, sp.business_date,
+                           MAX(sc.business_date) AS prev_biz_date
+                    FROM stock_pairs sp
+                    INNER JOIN t_calc_sku_cost sc
+                        ON sp.store_id = sc.store_id
+                       AND sp.article_id = sc.article_id
+                       AND sc.business_date < sp.business_date
+                       AND sc.effective_unit_cost > 0
+                    GROUP BY sp.store_id, sp.article_id, sp.business_date
+                )
+                SELECT pm.store_id, pm.article_id, pm.business_date,
+                       sc.effective_unit_cost AS prev_effective_unit_cost
+                FROM prev_match pm
+                INNER JOIN t_calc_sku_cost sc
+                    ON pm.store_id = sc.store_id
+                   AND pm.article_id = sc.article_id
+                   AND pm.prev_biz_date = sc.business_date
+            """).df()
+            if not prev_euc_df.empty:
+                df = df.merge(prev_euc_df,
+                              on=['store_id', 'article_id', 'business_date'],
+                              how='left')
+                fallback_prev_euc = (
+                    (df['effective_unit_cost'] == 0)
+                    & (df['prev_effective_unit_cost'].fillna(0) > 0)
+                )
+                df.loc[fallback_prev_euc, 'effective_unit_cost'] = (
+                    df.loc[fallback_prev_euc, 'prev_effective_unit_cost']
+                )
+                df.drop(columns=['prev_effective_unit_cost'], inplace=True)
+        except duckdb.CatalogException:
+            pass
+
+        weighted_mask = df['cost_qty'] > 0
 
         # 仍为0的(首日也无供给)回退到avg_inbound_price
         fallback_aip = (df['effective_unit_cost'] == 0) & (df['avg_inbound_price'] > 0)
@@ -300,7 +373,7 @@ class SkuCostCalculator:
         fallback_matnr = self._apply_matnr_conversion(df)
 
         df['cost_source'] = 'V10_WEIGHTED_AVG'
-        inherited = ((~mask) & (df['effective_unit_cost'] > 0) &
+        inherited = (((~weighted_mask) | fallback_prev_euc) & (df['effective_unit_cost'] > 0) &
                      (~fallback_aip) & (~fallback_pr) & (~fallback_matnr))
         df.loc[inherited, 'cost_source'] = 'V10_INHERITED_EUC'
         df.loc[fallback_aip, 'cost_source'] = 'V10_AVG_INBOUND_FALLBACK'

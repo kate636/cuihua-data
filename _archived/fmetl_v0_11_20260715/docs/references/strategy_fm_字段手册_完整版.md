@@ -1972,6 +1972,99 @@ effective_unit_cost = COALESCE(
 
 ---
 
+## 十四、v1.1/v1.2 新增镜像表（flag_sku_di + cust 数据源）
+
+> v1.2 将 flag_sku_di 和 cust 两个 ETL 的数据源从 Hive 切换到以下 StarRocks 镜像表。
+> 镜像表通过 `sync_strategy_fm.sh` 每天从 Hive `SELECT *` 同步，字段与 Hive 源表完全一致。
+
+### 14.1 strategy_fm_full_link_article_di（全链路门店仓商品）
+
+**源表**：`hive.dal_full_link.dal_manage_full_link_store_dc_article_info_di`
+**用途**：flag_sku_di 主表（t1），提供进销存核心指标
+**数据量**：~285K 行，覆盖 A3XV 门店 3/1~至今
+
+**flag_sku_di 使用字段**：
+
+| 字段 | 用途 |
+|------|------|
+| `business_date` | 营业日期 |
+| `inc_day` | 增量日（分区键，⚠ bigint 时间戳格式） |
+| `store_id` | 门店编码 |
+| `article_id` | 商品编码（SKU） |
+| `total_sale_qty` / `bf19_sale_qty` | 全天/19点前销量 |
+| `total_sale_amt` / `bf19_sale_amt` | 全天/19点前销售额 |
+| `total_cust_counts` / `bf19_sale_custs` | 全天/19点前客数 |
+| `online_cust_num` | 线上客数 |
+| `inbound_amount` / `inbound_qty` | 进货额/量 |
+| `purchase_weight` | 进货重量 |
+| `expect_outstock_amt` / `out_stock_amt_cb` | 预期出库额/出库成本 |
+| `pre_sale_amt` / `pre_inbound_amount` | 理论销售额/进货额 |
+| `scm_promotion_amt_total` | 出库让利总额 |
+| `lp_sale_amt` / `discount_amt` / `hour_discount_amt` | 原价额/折扣额/时段折扣 |
+| `store_lost_amt` / `store_lost_qty` | 门店损耗金额/数量 |
+| `store_know_lost_amt` / `store_unknow_lost_amt` | 已知/未知损耗 |
+| `return_amt` | 退货金额 |
+| `out_stock_pay_amt` / `out_stock_pay_amt_notax` | 出库金额(含税/不含税) |
+| `return_stock_pay_amt_notax` | 退仓金额(不含税) |
+| `init_stock_qty` | 期初库存数量 |
+| `city_description` | 城市（WHERE 过滤条件） |
+
+### 14.2 strategy_fm_chdj_article_di（翠花商品经营）
+
+**源表**：`hive.dal.dal_transaction_chdj_store_sale_article_sale_info_di`
+**用途**：flag_sku_di (e/f/i 三表) + cust (e/i 两表) 共用，提供 day_clear、毛利和库存指标
+**数据量**：~285K 行
+
+**关键字段**：
+
+| 字段 | 用途 |
+|------|------|
+| `inc_day` / `store_id` / `article_id` | 维度键 |
+| `day_clear` | ★ 日清标识（flag_sku_di 用 e.day_clear，cust 同理） |
+| `full_link_profit` | 全链路毛利额 |
+| `scm_fin_article_profit` | 供应链毛利额 |
+| `profit_amt` | 门店毛利额 |
+| `pre_profit_amt` | 门店预期毛利额 |
+| `init_stock_amt` / `end_stock_amt` | 期初/期末库存金额 |
+| `init_stock_qty` / `end_stock_qty` | 期初/期末库存数量 |
+| `avg_7d_sale_qty` | 7天平均销量 |
+| `last_sysdate` | 最后销售时间（售罄计算用） |
+| `receive_amt` | 验收金额 |
+| `cust_num` / `bf19_cust_num` | 客数/19点前客数（⚠ 部分版本有） |
+
+### 14.3 strategy_fm_order_offline_di / _online_di（订单明细）
+
+**源表**：
+- offline: `hive.dsl.dsl_transaction_sotre_order_offline_details_di`
+- online: `hive.dsl.dsl_transaction_sotre_order_online_details_di`
+
+**用途**：cust 主表（t1），提供订单级客数统计
+**数据量**：offline ~253K, online ~21K
+
+**cust 使用字段**：
+
+| 字段 | 用途 |
+|------|------|
+| `business_date` | 营业日期 |
+| `inc_day` | 增量日 |
+| `store_id` | 门店编码 |
+| `order_id` | 订单号（online 拼接 `*` 区分渠道） |
+| `pay_at` | 支付时间（截取 HH:MM:SS 判断 19/20 点前后） |
+| `abi_article_id` | 商品编码 |
+| `order_status` | 订单状态（WHERE = 'os.completed'） |
+| `jielong_flag` | 接龙标识（`-` = 非接龙） |
+| `actual_amount` | 实付金额（接龙销售额） |
+
+### 14.4 其他辅助表
+
+| 表 | 用途 | 关键字段 |
+|---|------|---------|
+| `strategy_fm_store_daily_di` | flag_sku_di RIGHT JOIN 过滤 (b表) | `inc_day, store_id, bf19_sale_amt >= 500` |
+| `strategy_fm_article_sale_di` | flag_sku_di 销售件数 (c表) | `bf19_sale_piece_qty, sale_piece_qty` |
+| `strategy_fm_dim_order_saleable` | flag_sku_di 可订可售标记 (j表) | `is_order, saleable` |
+
+---
+
 ## 附录B：完整表序号速查（三列对照）
 
 > 一行看清：Hive源表 → strategy_fm → DuckDB
@@ -1999,7 +2092,14 @@ effective_unit_cost = COALESCE(
 | 19 | `hive.dim.dim_store_article_convert_info_da` | `strategy_fm_dim_article_convert` | `atomic_article_convert` | 单位换算 | 9 |
 | 20 | `hive.dim.dim_store_article_bom_relation` | `strategy_dim_store_article_bom_relation` | `atomic_bom_relation` | ⭐BOM关系 | 17 |
 | 21 | `hive.ddl.ddl_transaction_store_article_inventory_detail_di` | `strategy_fm_store_article_inventory_detail_di` | `atomic_inventory_detail` | 库存明细 | 21 |
+| 22 | `hive.dal_full_link.dal_manage_full_link_store_dc_article_info_di` | `strategy_fm_full_link_article_di` | — | ★全链路门店仓商品 (flag_sku_di 主表) | 100+ |
+| 23 | `hive.dal.dal_transaction_sale_store_daily_di` | `strategy_fm_store_daily_di` | — | 门店日销售汇总 (flag_sku_di RIGHT JOIN) | 20+ |
+| 24 | `hive.dal.dal_transaction_store_article_sale_info_di` | `strategy_fm_article_sale_di` | — | SKU销售件数 (flag_sku_di c表) | 30+ |
+| 25 | `hive.dal.dal_transaction_chdj_store_sale_article_sale_info_di` | `strategy_fm_chdj_article_di` | — | ★翠花商品经营 (day_clear+profit, flag_sku_di+cust共用) | 60+ |
+| 26 | `hive.dim.dim_store_article_order_sale_info_di` | `strategy_fm_dim_order_saleable` | — | 可订可售标记 (flag_sku_di j表 saleable) | 10+ |
+| 27 | `hive.dsl.dsl_transaction_sotre_order_offline_details_di` | `strategy_fm_order_offline_di` | — | ★线下订单明细 (cust 主表) | 60+ |
+| 28 | `hive.dsl.dsl_transaction_sotre_order_online_details_di` | `strategy_fm_order_online_di` | — | ★线上订单明细 (cust UNION ALL) | 60+ |
 
-*生成时间：2026-04-24*
-*版本：v5.0 完整版*
+*生成时间：2026-04-24，更新于 2026-07-06*
+*版本：v5.1 — 新增 v1.2 镜像表 (22-28)*
 *查询来源：QDM BI API + Hive 源表注释*
