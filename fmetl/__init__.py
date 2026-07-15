@@ -1,3 +1,3 @@
-"""fmetl v0.12 clean rebuild."""
+"""fmetl v0.13 clean rebuild."""
 
-__version__ = "0.12.0"
+__version__ = "0.13"

@@ -29,7 +29,7 @@ class QdmApi:
     """Read-only QDM API client.
 
     The old client silently guessed a keyset column and repeated pageData calls
-    without a proven page cursor. v0.12 refuses ambiguous multi-page results.
+    without a proven page cursor. v0.13 refuses ambiguous multi-page results.
     Extractors must shard a mirror query until each shard is below page_size.
     """
 

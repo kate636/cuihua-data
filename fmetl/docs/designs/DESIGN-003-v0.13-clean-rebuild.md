@@ -1,8 +1,8 @@
-# DESIGN-003: fmetl v0.12 全新重构执行设计
+# DESIGN-003: fmetl v0.13 全新重构执行设计
 
 > 日期: 2026-07-15
 > 状态: 已确认, 进入实施
-> 目标版本: v0.12
+> 目标版本: v0.13
 > 上游边界: `huajia_yonghong_etl/versions/v1_5/sync_strategy_fm.sh`
 > 业务范围: 滨江宏岸店 `A3XV`
 > 关联设计: `DESIGN-001-daily-cost-stock-state-machine.md`
@@ -12,7 +12,7 @@
 
 ## 1. 已冻结决策
 
-1. 新 ETL 不在旧 `fmetl` 上继续修补。旧目录完整归档, 重新建立 v0.12 目录、数据合同和测试。
+1. 新 ETL 不在旧 `fmetl` 上继续修补。旧目录完整归档, 重新建立 v0.13 目录、数据合同和测试。
 2. 所有公司数据只从 StarRocks 镜像层读取, 不直连 Hive。镜像同步权威脚本为 v1_5 `sync_strategy_fm.sh`。
 3. “镜像层权威”是字段级边界, 不等于公司派生利润/库存可重新进入核心计算。
 4. 范围固定为 `store_id='A3XV'`。出现其他门店直接阻断运行。
@@ -39,7 +39,7 @@
 - offline/online 订单明细和 trade user;
 - full_link、store_daily、article_sale、chdj_article 公司结果表。
 
-v0.12 不把 Hive 表名写入运行 SQL。Hive 血缘只在 contract 和文档中保留。
+v0.13 不把 Hive 表名写入运行 SQL。Hive 血缘只在 contract 和文档中保留。
 
 特殊损耗沿用 v1_5 所读的 StarRocks 原生业务表
 `default_catalog.ads_business_analysis.cuihua_t_purchase_wastage`。它不是上述 28 张
@@ -64,7 +64,7 @@ Hive 镜像目标，因此在 registry 中明确标为 `managed_by_sync_script=f
 
 结论:
 
-> `sales_amt` 和 `qty` 已是有符号事件值。v0.12 原样求和, 禁止根据 `order_status` 再次乘 -1。
+> `sales_amt` 和 `qty` 已是有符号事件值。v0.13 原样求和, 禁止根据 `order_status` 再次乘 -1。
 
 运行质量检查仍要监控 refund/return 每日净额符号, 但异常时阻断, 不自动翻号。
 
@@ -136,7 +136,7 @@ DuckDB `mirror_*`/`atomic_*` 是这些授权字段的幂等本地副本, 不发�
 
 ---
 
-## 4. v0.12 全新目录
+## 4. v0.13 全新目录
 
 ```text
 fmetl/
@@ -242,14 +242,14 @@ required/optional
 
 ### 6.1 决策冲突声明
 
-2026-07-15 服务器 `/opt/fm/主数据/category-mapping.md` 仍是 v2.3/126 SKU。用户本轮明确指定 v0.12 与 v1_5 一致, 因此本版采用:
+2026-07-15 服务器 `/opt/fm/主数据/category-mapping.md` 仍是 v2.3/126 SKU。用户本轮明确指定 v0.13 与 v1_5 一致, 因此本版采用:
 
 ```text
 category_rule_version = v1_5-frozen-20260715
 frozen SKU unique count = 119
 ```
 
-它是 v0.12 已批准业务规则, 不冒充服务器 v2.3, 也不宣称是未存在的“v2.5”。
+它是 v0.13 已批准业务规则, 不冒充服务器 v2.3, 也不宣称是未存在的“v2.5”。
 
 ### 6.2 精确顺序
 
@@ -300,7 +300,7 @@ online|A3XV|business_date|order_id
 
 ### 7.2 身份映射与首单
 
-sync 脚本当前把 order 与 trade 按 order_id 直接 JOIN。v0.12 抽取时要求:
+sync 脚本当前把 order 与 trade 按 order_id 直接 JOIN。v0.13 抽取时要求:
 
 1. 先把 trade_user 压到 `inc_day+order_id` 一行;
 2. 同一订单多身份直接阻断;
@@ -391,7 +391,7 @@ QUARANTINED
 
 数量计划优先级:
 
-1. receive_sale `sale_article_qty` 作为 v0.12 兼容桥, 标记 `UPSTREAM_DAL_RECEIVE_SALE`;
+1. receive_sale `sale_article_qty` 作为 v0.13 兼容桥, 标记 `UPSTREAM_DAL_RECEIVE_SALE`;
 2. purchase + BOM relation + dressing rate 重建 shadow;
 3. 销售/损耗权重反推只作差异分析。
 
@@ -488,7 +488,7 @@ ending_unit_cost    = end_stock_amt / end_stock_qty, 传给次日
 
 ## 10. v1_5 特殊损耗正式口径
 
-`cuihua_t_purchase_wastage` 没有 store_id。因 v0.12 仅有 A3XV, 抽取时固定赋值 `store_id='A3XV'`, 不再作为阻断。
+`cuihua_t_purchase_wastage` 没有 store_id。因 v0.13 仅有 A3XV, 抽取时固定赋值 `store_id='A3XV'`, 不再作为阻断。
 
 保留原值:
 
@@ -521,7 +521,7 @@ adjusted_full_profit    = accounting_full_profit + ccj_amt
 - 每笔调整保留 source_record_id、SKU、日期、reason、qty、amt;
 - `total_ssls_amt` 精确沿用 v1_5 只按 `business_date` 汇总的语义，不擅自增加
   `day_clear` 分组；如果同日多个 day_clear 导致展示层不守恒，记录
-  `ssls_transfer_delta` 供审计，不在 v0.12 内静默改口径;
+  `ssls_transfer_delta` 供审计，不在 v0.13 内静默改口径;
 - 原值和调整值并存, 不覆盖追溯。
 
 ---
@@ -548,7 +548,7 @@ adjusted_full_profit    = accounting_full_profit + ccj_amt
 - SPU/SKU 排名;
 - 其他仅为 v1_5 运营展示而新增的 KPI。
 
-旧平台必须存在的列可以兼容保留, 但不在 v0.12 内发明新上游算法。
+旧平台必须存在的列可以兼容保留, 但不在 v0.13 内发明新上游算法。
 
 ---
 
@@ -650,7 +650,7 @@ accounting and adjusted values both trace to source rows
 ### Phase 1: 归档和新骨架
 
 - 完整归档旧 `fmetl`;
-- 新建 v0.12 包;
+- 新建 v0.13 包;
 - 建立 settings/contracts/store/API;
 - 不发布业务结果。
 
@@ -697,7 +697,7 @@ accounting and adjusted values both trace to source rows
 5. 服务器 `/opt/fm/data/fm.duckdb` 验收;
 6. 显式 publish, 不在核心 run 中自动 SCP/SSH。
 
-切换门禁：现有服务器 cron 仍执行 `python -m fmetl.executor`。只有在 v0.12 executor/CLI
+切换门禁：现有服务器 cron 仍执行 `python -m fmetl.executor`。只有在 v0.13 executor/CLI
 完成、服务器 cron 已原子切换且可回滚后，才允许把重构分支合并到 `main`；骨架阶段不得覆盖
 生产入口。
 
@@ -718,7 +718,7 @@ accounting and adjusted values both trace to source rows
 ### 14.2 新目录只保留
 
 - DESIGN-003;
-- v0.12 architecture;
+- v0.13 architecture;
 - 镜像字段合同;
 - 当前 README;
 - 当前 validation/review 索引。
@@ -728,7 +728,7 @@ accounting and adjusted values both trace to source rows
 - `.DS_Store`;
 - `__pycache__` / `*.pyc`;
 - 已完整合并到字段手册的旧 `strategy_fm_字段手册_BOM版.md`;
-- 新目录中与 v0.12 无关的历史状态报告。
+- 新目录中与 v0.13 无关的历史状态报告。
 
 删除前必须证明内容已存在归档或新手册, 不使用“看起来过时”作为删除依据。
 

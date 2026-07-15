@@ -30,7 +30,7 @@ def _preflight(sync_script: Path | None) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="fmetl v0.12 development CLI")
+    parser = argparse.ArgumentParser(description="fmetl v0.13 development CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
     preflight = subparsers.add_parser(
         "preflight", help="validate local contracts without production reads or writes"

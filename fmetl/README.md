@@ -1,4 +1,4 @@
-# fmetl v0.12
+# fmetl v0.13
 
 这是基于 v1.5 StarRocks 镜像层重新建设的 A3XV 单店完整 ETL。旧 v0.11 已整体归档到
 `_archived/fmetl_v0_11_20260715/`，本目录不导入旧实现。
@@ -17,7 +17,7 @@
 尚未完成生产发布：全量镜像 contracts、跨日批量重放、全部 FM 输出表、服务器影子对比与切换
 仍属于后续阶段。当前代码不会写生产 DuckDB，也不会自动 SSH/SCP。
 
-> 合并门禁：服务器现有 cron 仍调用 `python -m fmetl.executor`。v0.12 在兼容 executor 完成或
+> 合并门禁：服务器现有 cron 仍调用 `python -m fmetl.executor`。v0.13 在兼容 executor 完成或
 > cron 显式切换前禁止合并到 `main`；当前开发只允许停留在 `codex/fmetl-v0-12-rebuild`。
 
 ## 数据边界
@@ -39,4 +39,4 @@ python3 -m fmetl.cli preflight \
 python3 -m unittest discover -s fmetl/tests -v
 ```
 
-完整决策见 [DESIGN-003](docs/designs/DESIGN-003-v0.12-clean-rebuild.md)。
+完整决策见 [DESIGN-003](docs/designs/DESIGN-003-v0.13-clean-rebuild.md)。

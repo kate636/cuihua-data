@@ -210,6 +210,6 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         allow_empty=True,
         grain_stage="derived",
         base_predicates=("is_deleted = 0",),
-        note="Native StarRocks application source used by v1.5; v0.12 assigns A3XV explicitly.",
+        note="Native StarRocks application source used by v1.5; v0.13 assigns A3XV explicitly.",
     ),
 }
