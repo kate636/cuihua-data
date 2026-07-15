@@ -65,6 +65,22 @@ class DailyStateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             transition_day(DailyFlow(init_qty=0, init_amt=100))
 
+    def test_system_end_balance_example_derives_unknown_loss_instead_of_copying_it(self) -> None:
+        # A3XV / 2026-07-14 / 21279829: receive 10, sale 2, observed end balance 0.
+        state = transition_day(DailyFlow(
+            store_receive_qty=10,
+            store_receive_amt=106.30,
+            sale_qty=2,
+            actual_stock_qty=0,
+            is_counted=True,
+        ))
+        self.assertEqual(state.branch, "counted")
+        self.assertAlmostEqual(state.issue_unit_cost, 10.63)
+        self.assertAlmostEqual(state.sale_cost_amt, 21.26)
+        self.assertAlmostEqual(state.unknown_lost_qty, 8)
+        self.assertAlmostEqual(state.unknown_lost_amt, 85.04)
+        self.assertEqual(state.end_qty, 0)
+
     def test_requested_weighted_average_and_exact_cross_day_roll(self) -> None:
         states = roll_forward_days(
             [

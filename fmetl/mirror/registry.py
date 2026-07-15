@@ -44,6 +44,25 @@ AUXILIARY_STARROCKS_TABLES: tuple[str, ...] = (
 
 
 EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
+    "sales": MirrorContract(
+        name="strategy_fm_sales_di",
+        authority=MirrorAuthority.OBSERVATION,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=(
+            "store_id", "business_date", "inc_day", "order_id", "order_status",
+            "abi_article_id", "day_clear", "qty_spec", "sales_amt",
+            "return_sale_qty", "return_sale_amt",
+        ),
+        expected_grain=("source_row_hash", "duplicate_ordinal"),
+        shard_key="order_id",
+        shards=16,
+        grain_stage="derived",
+        note=(
+            "Signed sales rows. qty_spec/sales_amt and return fields already contain negative "
+            "return values; never flip their source signs globally."
+        ),
+    ),
     "store_receipt": MirrorContract(
         name="strategy_fm_purchase_di",
         authority=MirrorAuthority.OBSERVATION,
@@ -87,6 +106,55 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         note=(
             "Supply-chain order/outbound/financial account only. Never post these amounts "
             "again as store receipt inventory. Return fields are already signed."
+        ),
+    ),
+    "known_loss": MirrorContract(
+        name="strategy_fm_loss_di",
+        authority=MirrorAuthority.OBSERVATION,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=(
+            "store_id", "inc_day", "article_id", "know_lost_qty", "know_lost_amt",
+            "unknow_lost_qty", "unknow_lost_amt",
+        ),
+        expected_grain=("store_id", "inc_day", "article_id"),
+        shard_key="article_id",
+        shards=4,
+        allow_empty=True,
+        note="Only know_lost_qty is a formal flow; upstream unknown loss is audit-only.",
+    ),
+    "inventory_detail": MirrorContract(
+        name="strategy_fm_store_article_inventory_detail_di",
+        authority=MirrorAuthority.OBSERVATION,
+        partition_column="inc_day",
+        store_column="shop_id",
+        projection=(
+            "shop_id", "inventory_date", "inc_day", "sku_code", "sale_stock_qty",
+            "actual_stock_qty", "profit_loss_qty", "created_by", "created_at",
+            "updated_by", "updated_at",
+        ),
+        expected_grain=("shop_id", "inventory_date", "sku_code"),
+        shard_key="sku_code",
+        shards=4,
+        allow_empty=True,
+        note=(
+            "Every nonnegative actual_stock_qty is an observed end balance. Creator/updater "
+            "metadata records evidence strength only: system rows may include manual counts "
+            "whose operator provenance was erased upstream."
+        ),
+    ),
+    "chdj_day_clear": MirrorContract(
+        name="strategy_fm_chdj_article_di",
+        authority=MirrorAuthority.REFERENCE_ONLY,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=("store_id", "inc_day", "article_id", "day_clear"),
+        expected_grain=("store_id", "inc_day", "article_id"),
+        shard_key="article_id",
+        shards=4,
+        note=(
+            "v1.5-compatible day_clear label. strategy_fm_dim_day_clear is a full-goods "
+            "snapshot and row presence must not be interpreted as day_clear=0."
         ),
     ),
     "store_daily": MirrorContract(

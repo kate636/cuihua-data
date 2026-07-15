@@ -175,6 +175,32 @@ SCM 退仓字段已经是负数，原样进入 SCM 净额对账，禁止再次�
 猪肉/包装采用 parent 重构模式时，才可先按 parent 做一致性检查和去重后形成一次外部
 进货。此时同一 parent 的 `purchase_di` child 分配行只作 shadow 对账，不能再次入池。
 
+### 3.2 SKU 日事实的符号与标签
+
+2026-07-08 至 07-14 镜像实查确认：
+
+- `sales_di.qty_spec/sales_amt` 的退货事件已经出现负值；
+- `return_sale_qty/return_sale_amt` 也已带负号，但部分业务退货会拆成“负销售行 +
+  qty=0 的退货标签行”，不能把两套字段都记作库存退回；
+- 正式库存数量按 `qty_spec` 正负拆为非负 `gross_sale_qty` 和 `sale_return_qty`，源
+  return 字段仅作业务标签审计；收入保留 `net_sale_amt=SUM(sales_amt)`；
+- `loss_di.know_lost_qty` 是正式已知损耗数量，源已知/未知损耗金额和未知数量仅作对照；
+- 库存明细的合法非负 `actual_stock_qty` 是期末余额观测，均可进入库存状态机；
+  `created_by/updated_by` 只记录操作人证据，不能用 `created_by=系统` 反推“没有人工盘点”；
+- 系统负库存快照无业务意义，阻断其覆盖；`inventory_date` 必须等于 `inc_day`，并校验
+  `profit_loss_qty = actual_stock_qty - sale_stock_qty`；
+- 日清兼容标签来自 `strategy_fm_chdj_article_di.day_clear`。
+
+`strategy_fm_dim_day_clear` 一周每天约 9.1 万 SKU，实查为全商品日快照；它没有
+`day_clear` 字段，禁止用“存在记录”推导 `day_clear=0`。
+
+盘点来源存在不可逆的信息损失。2026-07-14 的 SKU `21279829` 是已确认样例：
+`created_by=updated_by=系统` 且快照三数量均为 0，但当天外部进货 10、销售 2、已知
+损耗 0，业务确认该快照来自实盘。v0.13 因而不猜测操作者，而是将合法快照作为期末
+余额事实，由自身状态机计算 `unknown_lost_qty = 10 - 2 - 0 = 8`。源
+`loss_di.unknow_lost_qty=8` 仅用于对照，禁止直接过账。该政策可能吸收上游快照的时点
+差异，必须在周测中单列“系统余额覆盖产生的未知损耗”并与 v1.5 对照。
+
 ---
 
 ## 4. v0.13 全新目录
