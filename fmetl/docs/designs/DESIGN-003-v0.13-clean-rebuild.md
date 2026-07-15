@@ -873,3 +873,58 @@ compatible FM tables and explicit publish
 ```
 
 这是“基于权威镜像层的完整 ETL 重构”, 不是对公司派生结果做第二次包装。
+
+---
+
+## 17. Block 9 实现决策（2026-07-16）
+
+### 17.1 单一日内内部流 DAG
+
+BOM、PACK、RECIPE 不再分三次独立跑状态机，而是合并成同一
+`store_id + business_date` DAG。每个 SKU 每日只调用一次库存状态转换；源腿先按当前
+加权成本定价，同一事件的目标腿按比例接收完全相同的总金额。事件金额必须守恒，关系环、
+孤立腿和目标先于源到达均阻断。
+
+正式事件先做成本可达性检查：有金额的期初/外部进货是种子，成本沿当日 DAG 传播；任一
+源 SKU 没有成本证据时整笔进入 quarantine。该检查只证明成本覆盖，数量是否足够仍由
+每日状态机独立阻断。
+
+### 17.2 关系优先级补充
+
+- Foodmart `raw=finished` 的身份配方只审计，不产生库存流；
+- `article_convert` 同时承载包装换码和 BOM 单位证据。只有父 fanout=1 且子 fanin=1
+  的双向唯一关系才是 PACK；猪肉 fanout>=2 时 BOM 优先；
+- 已有 `receive_sale` 父/子实际数量的 BOM 不因辅助 convert 比例无效而删除单边；
+- BOM、PACK 和有实际加工事件的 RECIPE 都允许把外部 child 进货重建回源 SKU，之后再
+  通过正式内部事件转入目标，避免“成品外购 + 加工流入”双记。
+
+### 17.3 期初、物料和日清边界
+
+- 首日取 `purchase_di` 的唯一非零期初元组；负期初钉零并留警告；全空元组按 0；
+  正数量无金额保留数量与未定价警告，不伪造成本；
+- 70–77 物料类可进入成本账本，但不直接进入经营分类；其成本通过正式加工流转给成品；
+- 销售 SKU 的 day_clear 必须来自 `chdj_article`；无销售存量或关系物料缺标签时按非日清
+  兜底并单列审计；`dim_day_clear` 无此字段，不参与推断；
+- 退货成本使用“期初 + 当日进货 + 已完成内部流入”的退货前加权池，不使用退货收入。
+
+### 17.4 accounting 与 adjusted 并存
+
+核心库存只产出 `accounting_*`。`cuihua_t_purchase_wastage` 最新有效快照只在显示兼容层
+生成 `adjusted_*`；炒菜机成本加回利润，生熟联动只在大分类做来源贷记和熟食借记，不写回
+SKU 成本、期末金额或下一日期初。运营 KPI 仍不迁移。
+
+固定周测运行器为 `python -m fmetl.validation.run_shadow_week`，只写本地
+`data/fm_v013.duckdb`；v1.5 参考比较器为
+`python -m fmetl.validation.compare_shadow_v15`。生产服务器和 cron 未切换。
+
+### 17.5 关系时态和验收快照
+
+- BOM 与 article_convert 证据必须以
+  `store_id + business_date + parent_article_id + sub_article_id` 命中，禁止把其他门店或
+  其他日期出现过的父子对当作当天正式关系；Foodmart 配方是一次运行只拉一次的最新批准快照；
+- `relation_snapshot_id` 是 Foodmart 配方、七日 BOM、七日 article_convert 三者校验和的
+  联合摘要，不再只代表配方；三份关系输入同时持久化到本地影子库；
+- `shadow_run_manifest` 记录版本、Git、同步脚本、分类规则、联合关系和全部源清单摘要；
+  `shadow_source_manifest` 按请求分区记录行数和 SHA-256，0 行分区也必须存在；
+- v1.5 比较另存 reference/comparison manifest。levels 必须覆盖请求的完整 7 天；SKU 缺日
+  允许用于非阻塞下钻，但必须明确记录缺失日期，不能混入完整周 SKU 汇总。

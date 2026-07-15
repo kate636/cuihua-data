@@ -12,7 +12,8 @@ from fmetl.relations.resolver import resolve_relations
 class RelationTests(unittest.TestCase):
     def test_vegetable_convert_is_not_bom(self) -> None:
         candidate = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "veg-kg", "to_article_id": "veg-500g"
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "from_article_id": "veg-kg", "to_article_id": "veg-500g"
         }])
         convert = pd.DataFrame([{
             "store_id": "A3XV", "inc_day": "2026-07-01",
@@ -20,7 +21,8 @@ class RelationTests(unittest.TestCase):
             "parent_rate": 2.0, "sub_rate": 0.5,
         }])
         bom = pd.DataFrame([
-            {"parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
+            {"store_id": "A3XV", "inc_day": "2026-07-01",
+             "parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
              "category_level1_description": "蔬菜类"},
         ])
         result = resolve_relations(
@@ -30,12 +32,14 @@ class RelationTests(unittest.TestCase):
 
     def test_conflicting_recipe_and_pack_is_quarantined(self) -> None:
         candidate = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "raw", "to_article_id": "finished"
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "from_article_id": "raw", "to_article_id": "finished"
         }])
         recipe = pd.DataFrame([{
             "raw_article_id": "raw", "finished_article_id": "finished", "approved": True,
         }])
         convert = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": "2026-07-01",
             "parent_article_id": "raw", "sub_article_id": "finished",
             "parent_rate": 1.0, "sub_rate": 1.0,
         }])
@@ -59,7 +63,7 @@ class RelationTests(unittest.TestCase):
         resolution = resolve_relations(
             event.rename(columns={
                 "parent_article_id": "from_article_id", "sub_article_id": "to_article_id",
-            })[["business_date", "from_article_id", "to_article_id"]],
+            })[["store_id", "business_date", "from_article_id", "to_article_id"]],
             relation_snapshot_id="s1",
             article_convert=convert,
         )
@@ -84,7 +88,7 @@ class RelationTests(unittest.TestCase):
         resolution = resolve_relations(
             event.rename(columns={
                 "parent_article_id": "from_article_id", "sub_article_id": "to_article_id",
-            })[["business_date", "from_article_id", "to_article_id"]],
+            })[["store_id", "business_date", "from_article_id", "to_article_id"]],
             relation_snapshot_id="s1", article_convert=convert.iloc[[0]],
         )
         plan = build_pack_plan(event, convert, resolution)
@@ -108,7 +112,8 @@ class RelationTests(unittest.TestCase):
              "parent_rate": 4.0, "sub_rate": 0.25},
         ])
         resolution = pd.DataFrame([
-            {"business_date": day, "from_article_id": "kg", "to_article_id": "pack",
+            {"store_id": "A3XV", "business_date": day,
+             "from_article_id": "kg", "to_article_id": "pack",
              "relation_type": "PACK_CONVERT", "formal_flow_allowed": True,
              "relation_snapshot_id": "s1"}
             for day in ("2026-07-01", "2026-07-02")
@@ -129,7 +134,8 @@ class RelationTests(unittest.TestCase):
             "parent_rate": 2.0, "sub_rate": 0.5,
         }])
         resolution = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "kg", "to_article_id": "pack",
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "from_article_id": "kg", "to_article_id": "pack",
             "relation_type": "PACK_CONVERT", "formal_flow_allowed": True,
             "relation_snapshot_id": "s1",
         }])
@@ -139,17 +145,97 @@ class RelationTests(unittest.TestCase):
 
     def test_invalid_convert_ratio_is_quarantined(self) -> None:
         candidate = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "a", "to_article_id": "b",
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "from_article_id": "a", "to_article_id": "b",
         }])
         convert = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": "2026-07-01",
             "parent_article_id": "a", "sub_article_id": "b", "parent_rate": 2.0, "sub_rate": 0.4,
         }])
         result = resolve_relations(candidate, relation_snapshot_id="s1", article_convert=convert)
         self.assertEqual(result.loc[0, "relation_type"], "QUARANTINED")
 
+    def test_dated_relation_evidence_cannot_leak_to_another_day_or_store(self) -> None:
+        candidates = pd.DataFrame([
+            {"store_id": "A3XV", "business_date": "2026-07-14",
+             "from_article_id": "P", "to_article_id": "C1"},
+            {"store_id": "A3XV", "business_date": "2026-07-14",
+             "from_article_id": "P", "to_article_id": "C2"},
+        ])
+        convert = pd.DataFrame([{
+            "store_id": "OTHER", "inc_day": "2026-07-14",
+            "parent_article_id": "P", "sub_article_id": "C1",
+            "parent_rate": 2.0, "sub_rate": 0.5,
+        }])
+        bom = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-08",
+             "parent_article_id": "P", "sub_article_id": child,
+             "category_level1_description": "猪肉类"}
+            for child in ("C1", "C2")
+        ])
+
+        result = resolve_relations(
+            candidates,
+            relation_snapshot_id="s1",
+            article_convert=convert,
+            bom_edges=bom,
+        )
+
+        self.assertEqual(set(result["relation_type"]), {"UNRESOLVED"})
+        self.assertFalse(result["formal_flow_allowed"].any())
+
+    def test_multi_output_bom_uses_convert_only_as_unit_evidence(self) -> None:
+        candidates = pd.DataFrame([
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "P", "to_article_id": "C1"},
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "P", "to_article_id": "C2"},
+        ])
+        convert = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C1", "parent_rate": 2.0, "sub_rate": 0.5},
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C2", "parent_rate": 4.0, "sub_rate": 0.25},
+        ])
+        bom = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C1", "category_level1_description": "猪肉类"},
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C2", "category_level1_description": "猪肉类"},
+        ])
+
+        result = resolve_relations(
+            candidates,
+            relation_snapshot_id="s1",
+            article_convert=convert,
+            bom_edges=bom,
+        )
+
+        self.assertEqual(set(result["relation_type"]), {"DISASSEMBLY_BOM"})
+        self.assertTrue(result["formal_flow_allowed"].all())
+
+    def test_invalid_convert_does_not_remove_an_observed_multi_output_bom_edge(self) -> None:
+        candidates = pd.DataFrame([
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "P", "to_article_id": "C1"},
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "P", "to_article_id": "C2"},
+        ])
+        convert = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C1", "parent_rate": 2.0, "sub_rate": 0.4},
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C2", "parent_rate": 4.0, "sub_rate": 0.2},
+        ])
+        bom = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C1", "category_level1_description": "猪肉类"},
+            {"store_id": "A3XV", "inc_day": "2026-07-01", "parent_article_id": "P", "sub_article_id": "C2", "category_level1_description": "猪肉类"},
+        ])
+
+        result = resolve_relations(
+            candidates,
+            relation_snapshot_id="s1",
+            article_convert=convert,
+            bom_edges=bom,
+        )
+
+        self.assertEqual(set(result["relation_type"]), {"DISASSEMBLY_BOM"})
+        self.assertTrue(result["formal_flow_allowed"].all())
+
     def test_unapproved_recipe_is_quarantined(self) -> None:
         candidate = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "a", "to_article_id": "b",
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "from_article_id": "a", "to_article_id": "b",
         }])
         recipe = pd.DataFrame([{
             "raw_article_id": "a", "finished_article_id": "b", "approved": "false",
@@ -171,7 +257,7 @@ class RelationTests(unittest.TestCase):
             "raw_qty": 1.0, "yield_qty": 1.0, "approved": True,
         }])
         candidates = pd.DataFrame([{
-            "business_date": "2026-07-01", "from_article_id": "raw",
+            "store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "raw",
             "to_article_id": "finished",
         }])
         resolution = resolve_relations(
@@ -186,6 +272,34 @@ class RelationTests(unittest.TestCase):
         self.assertEqual(len(plan.observed_ledger), 2)
         self.assertEqual(len(plan.formal_posting_ledger), 0)
         self.assertEqual(plan.trace.loc[0, "raw_quantity_source"], "ACTUAL_COMPOSE")
+
+    def test_identity_recipe_is_audited_without_entering_compose_dag(self) -> None:
+        actual = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-01", "article_id": "same",
+            "compose_in_qty": 1.0, "compose_out_qty": 1.0,
+        }])
+        recipe = pd.DataFrame([{
+            "relation_id": "identity", "raw_article_id": "same",
+            "finished_article_id": "same", "raw_qty": 1.0,
+            "yield_qty": 1.0, "approved": True,
+        }])
+        resolution = resolve_relations(
+            pd.DataFrame([{
+                "store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "same",
+                "to_article_id": "same",
+            }]),
+            relation_snapshot_id="s1",
+            processing_recipes=recipe,
+        )
+
+        plan = build_processing_plan(actual, recipe, resolution)
+
+        self.assertTrue(plan.formal_posting_ledger.empty)
+        self.assertTrue(plan.trace.empty)
+        self.assertEqual(
+            plan.quarantined.loc[0, "reason"],
+            "IDENTITY_RECIPE_NO_TRANSFORMATION",
+        )
 
     def test_quarantined_direction_cannot_leak_through_shared_sku(self) -> None:
         actual = pd.DataFrame([
@@ -203,8 +317,8 @@ class RelationTests(unittest.TestCase):
              "raw_qty": 1.0, "yield_qty": 1.0, "approved": True},
         ])
         candidates = pd.DataFrame([
-            {"business_date": "2026-07-01", "from_article_id": "A", "to_article_id": "B"},
-            {"business_date": "2026-07-01", "from_article_id": "B", "to_article_id": "C"},
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "A", "to_article_id": "B"},
+            {"store_id": "A3XV", "business_date": "2026-07-01", "from_article_id": "B", "to_article_id": "C"},
         ])
         resolution = resolve_relations(
             candidates, relation_snapshot_id="s1", processing_recipes=recipes

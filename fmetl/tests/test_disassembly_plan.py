@@ -18,7 +18,8 @@ class DisassemblyPlanTests(unittest.TestCase):
              "sale_article_qty": 3, "spilit_sale_article_amt": 40, "sale_recev_rate": 0.4},
         ])
         self.resolution = pd.DataFrame([
-            {"business_date": "2026-07-14", "from_article_id": "P", "to_article_id": child,
+            {"store_id": "A3XV", "business_date": "2026-07-14",
+             "from_article_id": "P", "to_article_id": child,
              "relation_type": "DISASSEMBLY_BOM", "formal_flow_allowed": True,
              "relation_snapshot_id": "snapshot-1"}
             for child in ("C1", "C2")

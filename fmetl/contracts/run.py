@@ -16,9 +16,14 @@ class RunManifest:
     affected_start: str
     affected_end: str
     store_id: str
+    mirror_sync_version: str
     mirror_sync_checksum: str
+    category_rule_version: str
     category_rule_checksum: str
+    relation_snapshot_id: str
     relation_snapshot_checksum: str
+    source_manifest_checksum: str
+    git_dirty: bool = False
     status: str = "started"
     failed_step: str | None = None
     error: str | None = None

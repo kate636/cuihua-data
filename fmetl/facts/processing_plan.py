@@ -83,12 +83,32 @@ def build_processing_plan(
         recipe[column] = pd.to_numeric(recipe[column], errors="raise")
     if ((recipe["raw_qty"] <= 0) | (recipe["yield_qty"] <= 0)).any():
         raise ValueError("approved processing recipe quantities must be positive")
+    # Foodmart may contain identity rows used as catalogue/tagging metadata.
+    # They are not inventory transformations and must never enter the formal
+    # compose DAG, otherwise a harmless A -> A row is interpreted as a cycle.
+    identity_recipe = recipe.loc[
+        recipe["raw_article_id"].eq(recipe["finished_article_id"])
+    ].copy()
+    recipe = recipe.loc[
+        recipe["raw_article_id"].ne(recipe["finished_article_id"])
+    ].copy()
+    days = facts[["store_id", "business_date"]].drop_duplicates()
+    identity_quarantine = [
+        {
+            "store_id": day.store_id,
+            "business_date": day.business_date,
+            "relation_id": relation_id,
+            "reason": "IDENTITY_RECIPE_NO_TRANSFORMATION",
+        }
+        for day in days.itertuples(index=False)
+        for relation_id in identity_recipe["relation_id"].drop_duplicates()
+    ]
     if recipe.empty:
         return ProcessingPlan(
             observed_ledger=ledger,
             formal_posting_ledger=ledger.iloc[:0].copy(),
             trace=recipe,
-            quarantined=recipe.copy(),
+            quarantined=pd.DataFrame(identity_quarantine),
         )
     topological_order(
         recipe[["raw_article_id", "finished_article_id"]].itertuples(index=False, name=None)
@@ -103,9 +123,8 @@ def build_processing_plan(
 
     fact_index = facts.set_index(["store_id", "business_date", "article_id"])
     trace_rows: list[dict[str, object]] = []
-    quarantine_rows: list[dict[str, object]] = []
+    quarantine_rows: list[dict[str, object]] = identity_quarantine
     derived_rows: list[dict[str, object]] = []
-    days = facts[["store_id", "business_date"]].drop_duplicates()
     for day in days.itertuples(index=False):
         for relation_id, edges in recipe.groupby("relation_id", sort=False):
             finished_values = edges["finished_article_id"].unique()

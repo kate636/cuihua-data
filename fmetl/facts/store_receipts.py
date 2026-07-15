@@ -16,12 +16,17 @@ RECONCILIATION_COLUMNS = (
     "parent_receive_qty", "parent_receive_amt", "allocated_child_qty",
     "allocated_child_amt", "amount_residual",
 )
+QUARANTINE_COLUMNS = (
+    "store_id", "business_date", "article_id", "sale_article_id",
+    "sale_article_qty", "sale_article_purchase_amt", "reason",
+)
 
 
 @dataclass(frozen=True)
 class StoreReceiptBuild:
     postings: pd.DataFrame
     reconciliation: pd.DataFrame
+    quarantined: pd.DataFrame
 
 
 def _require(frame: pd.DataFrame, columns: set[str], label: str) -> None:
@@ -137,6 +142,16 @@ def build_store_receipts(
     )
     reconstruct_mask = active_keys.isin(reconstruction_keys)
     direct = active.loc[~reconstruct_mask].copy()
+    direct_amount_only = direct.loc[
+        direct["sale_article_qty"].le(0.000001)
+        & direct["sale_article_purchase_amt"].gt(0.000001)
+    ].copy()
+    direct = direct.drop(index=direct_amount_only.index)
+    if direct_amount_only.empty:
+        quarantined = pd.DataFrame(columns=QUARANTINE_COLUMNS)
+    else:
+        direct_amount_only["reason"] = "DIRECT_RECEIPT_AMOUNT_WITHOUT_QUANTITY"
+        quarantined = direct_amount_only[list(QUARANTINE_COLUMNS)].reset_index(drop=True)
     direct["source_parent_article_id"] = direct["article_id"]
     direct["article_id"] = direct["sale_article_id"]
     direct["external_event_group_id"] = (
@@ -172,7 +187,10 @@ def build_store_receipts(
             "pool_effect": "EXTERNAL_IN",
         })
 
-    postings = pd.concat([direct[list(POSTING_COLUMNS)], reconstructed], ignore_index=True)
+    posting_frames = [direct[list(POSTING_COLUMNS)]]
+    if not reconstructed.empty:
+        posting_frames.append(reconstructed)
+    postings = pd.concat(posting_frames, ignore_index=True)
     if postings["external_event_group_id"].duplicated().any():
         raise ValueError("external receipt event would be posted more than once")
 
@@ -206,4 +224,5 @@ def build_store_receipts(
         reconciliation=reconciliation.sort_values(
             ["store_id", "business_date", "parent_article_id"], kind="stable"
         ).reset_index(drop=True),
+        quarantined=quarantined,
     )

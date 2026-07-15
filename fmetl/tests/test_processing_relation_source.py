@@ -62,7 +62,8 @@ class ProcessingRelationSourceTests(unittest.TestCase):
         self.assertEqual(first.frame.loc[0, "raw_qty"], 2)
         recipes = first.frame
         candidates = pd.DataFrame([{
-            "business_date": "2026-07-14", "from_article_id": "R", "to_article_id": "F",
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "from_article_id": "R", "to_article_id": "F",
         }])
         resolution = resolve_relations(
             candidates, relation_snapshot_id=first.snapshot.snapshot_id,

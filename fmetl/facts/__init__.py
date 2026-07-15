@@ -12,6 +12,13 @@ from .sku_day import (
     normalize_known_loss,
     normalize_sales_events,
 )
+from .shadow_assembly import (
+    CostFundedInternalEvents,
+    assemble_dense_activities,
+    build_bootstrap_openings,
+    build_internal_event_legs,
+    filter_cost_funded_internal_events,
+)
 from .store_receipts import StoreReceiptBuild, build_store_receipts
 
 __all__ = [
@@ -26,9 +33,14 @@ __all__ = [
     "normalize_known_loss",
     "normalize_sales_events",
     "attach_authoritative_day_clear",
+    "assemble_dense_activities",
+    "build_bootstrap_openings",
+    "build_internal_event_legs",
+    "filter_cost_funded_internal_events",
     "validate_bom_plan",
     "price_disassembly_plan",
     "DisassemblyPlan",
     "PricedDisassemblyPlan",
     "StoreReceiptBuild",
+    "CostFundedInternalEvents",
 ]

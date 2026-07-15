@@ -22,6 +22,12 @@ class DailyStateTests(unittest.TestCase):
         self.assertAlmostEqual(state.qty_balance_residual, 0)
         self.assertAlmostEqual(state.amount_balance_residual, 0)
 
+    def test_machine_epsilon_negative_opening_is_normalized_but_real_negative_is_blocked(self) -> None:
+        state = transition_day(DailyFlow(init_qty=0, init_amt=-8.88e-16))
+        self.assertEqual(state.end_amt, 0)
+        with self.assertRaises(ValueError):
+            transition_day(DailyFlow(init_qty=0, init_amt=-0.01))
+
     def test_negative_clamp_cost_is_explicit(self) -> None:
         state = transition_day(DailyFlow(init_qty=1, init_amt=10, sale_qty=2))
         self.assertEqual(state.branch, "negative_clamp")

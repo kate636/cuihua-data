@@ -42,6 +42,20 @@ class StoreReceiptTests(unittest.TestCase):
         self.assertEqual(set(result.postings["article_id"]), {"C1", "C2", "S"})
         self.assertEqual(result.postings["receive_amt"].sum(), 120)
         self.assertTrue(result.reconciliation.empty)
+        self.assertTrue(result.quarantined.empty)
+
+    def test_direct_amount_without_quantity_is_quarantined(self) -> None:
+        broken = self.purchase.copy()
+        broken.loc[broken["article_id"].eq("S"), "sale_article_qty"] = None
+
+        result = build_store_receipts(broken, self.bridge)
+
+        self.assertNotIn("S", set(result.postings["article_id"]))
+        self.assertEqual(len(result.quarantined), 1)
+        self.assertEqual(
+            result.quarantined.loc[0, "reason"],
+            "DIRECT_RECEIPT_AMOUNT_WITHOUT_QUANTITY",
+        )
 
     def test_inconsistent_repeated_parent_values_are_blocked(self) -> None:
         broken = self.bridge.copy()

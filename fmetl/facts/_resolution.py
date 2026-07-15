@@ -12,7 +12,7 @@ def assert_formal_pairs(
     target_column: str,
 ) -> str:
     required_resolution = {
-        "business_date", "from_article_id", "to_article_id", "relation_type",
+        "store_id", "business_date", "from_article_id", "to_article_id", "relation_type",
         "formal_flow_allowed", "relation_snapshot_id",
     }
     missing = sorted(required_resolution - set(resolution.columns))
@@ -21,7 +21,10 @@ def assert_formal_pairs(
     snapshot_ids = resolution["relation_snapshot_id"].dropna().astype(str).unique()
     if len(snapshot_ids) != 1:
         raise ValueError("one plan must consume exactly one relation snapshot")
-    keys = pairs[["business_date", source_column, target_column]].copy()
+    if "store_id" not in pairs.columns:
+        raise KeyError("formal plan pairs missing store_id")
+    key_columns = ["store_id", "business_date", source_column, target_column]
+    keys = pairs[key_columns].copy()
     keys = keys.rename(columns={source_column: "from_article_id", target_column: "to_article_id"})
     keys[["from_article_id", "to_article_id"]] = keys[["from_article_id", "to_article_id"]].astype(str)
     approved = resolution[list(required_resolution)].copy()
@@ -30,7 +33,7 @@ def assert_formal_pairs(
     ].astype(str)
     checked = keys.merge(
         approved,
-        on=["business_date", "from_article_id", "to_article_id"],
+        on=["store_id", "business_date", "from_article_id", "to_article_id"],
         how="left",
         validate="many_to_one",
     )

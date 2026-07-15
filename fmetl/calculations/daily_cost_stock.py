@@ -80,6 +80,14 @@ def transition_day(flow: DailyFlow) -> DailyState:
         raise ValueError(f"day_clear must be '0' or '1', got {flow.day_clear!r}")
     values = {name: _finite(value, name) for name, value in flow.__dict__.items()
               if isinstance(value, (int, float)) and not isinstance(value, bool)}
+    # Cross-day amount subtraction can leave machine-epsilon dust such as
+    # -8.88e-16 after a pool is fully consumed. Normalize only numerical dust;
+    # genuine negative business values remain blocked below.
+    flow = replace(
+        flow,
+        **{name: 0.0 if abs(value) < 1e-10 else value for name, value in values.items()},
+    )
+    values = {name: float(getattr(flow, name)) for name in values}
     actual = None if flow.actual_stock_qty is None else _finite(flow.actual_stock_qty, "actual_stock_qty")
     if actual is not None and actual < 0:
         raise ValueError("actual_stock_qty cannot be negative")
