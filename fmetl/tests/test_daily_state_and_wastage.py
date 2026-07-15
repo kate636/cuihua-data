@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from fmetl.calculations.daily_cost_stock import DailyFlow, transition_day
+from fmetl.calculations.daily_cost_stock import DailyFlow, roll_forward_days, transition_day
 from fmetl.calculations.profit import calculate_accounting_profit
 from fmetl.calculations.special_wastage import (
     adjust_sku_wastage,
@@ -15,7 +15,7 @@ from fmetl.calculations.special_wastage import (
 
 class DailyStateTests(unittest.TestCase):
     def test_normal_state_balances(self) -> None:
-        state = transition_day(DailyFlow(init_qty=5, init_amt=50, receive_qty=5, receive_amt=60, sale_qty=3))
+        state = transition_day(DailyFlow(init_qty=5, init_amt=50, store_receive_qty=5, store_receive_amt=60, sale_qty=3))
         self.assertAlmostEqual(state.issue_unit_cost, 11)
         self.assertAlmostEqual(state.end_qty, 7)
         self.assertAlmostEqual(state.end_amt, 77)
@@ -31,7 +31,7 @@ class DailyStateTests(unittest.TestCase):
 
     def test_soft_day_clear_opening_stock_consumption_is_not_double_posted(self) -> None:
         state = transition_day(DailyFlow(
-            init_qty=5, init_amt=50, receive_qty=1, receive_amt=10,
+            init_qty=5, init_amt=50, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
         self.assertEqual(state.unknown_lost_qty, -2)
@@ -41,7 +41,7 @@ class DailyStateTests(unittest.TestCase):
 
     def test_soft_day_clear_shortage_posts_equation_residual(self) -> None:
         state = transition_day(DailyFlow(
-            init_qty=1, init_amt=10, receive_qty=1, receive_amt=10,
+            init_qty=1, init_amt=10, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
         self.assertEqual(state.end_qty, 0)
@@ -51,7 +51,7 @@ class DailyStateTests(unittest.TestCase):
 
     def test_profit_consumes_finalized_flows(self) -> None:
         profit = calculate_accounting_profit(
-            sale_amt=100, receive_amt=60, bom_in_amt=5, bom_out_amt=5,
+            sale_amt=100, store_receive_amt=60, bom_in_amt=5, bom_out_amt=5,
             pack_in_amt=2, pack_out_amt=2, compose_in_amt=3, compose_out_amt=3,
             init_stock_amt=10, end_stock_amt=20, neg_clamp_cost_amt=1,
         )
@@ -64,6 +64,47 @@ class DailyStateTests(unittest.TestCase):
             transition_day(DailyFlow(init_qty=10, init_amt=100, bom_out_qty=1, bom_out_amt=200))
         with self.assertRaises(ValueError):
             transition_day(DailyFlow(init_qty=0, init_amt=100))
+
+    def test_requested_weighted_average_and_exact_cross_day_roll(self) -> None:
+        states = roll_forward_days(
+            [
+                DailyFlow(store_receive_qty=1, store_receive_amt=20, sale_qty=1),
+                DailyFlow(store_receive_qty=1, store_receive_amt=30),
+            ],
+            initial_qty=1,
+            initial_amt=10,
+        )
+        self.assertEqual(states[0].issue_unit_cost, 15)
+        self.assertEqual(states[0].sale_cost_amt, 15)
+        self.assertEqual(states[0].end_qty, 1)
+        self.assertEqual(states[0].end_amt, 15)
+        self.assertEqual(states[1].issue_unit_cost, 22.5)
+        self.assertEqual(states[1].end_qty, 2)
+        self.assertEqual(states[1].end_amt, 45)
+
+    def test_roll_rejects_opening_amount_without_quantity_before_day_one(self) -> None:
+        with self.assertRaises(ValueError):
+            roll_forward_days(
+                [DailyFlow(store_receive_qty=1, store_receive_amt=20)],
+                initial_qty=0,
+                initial_amt=10,
+            )
+
+    def test_internal_out_is_priced_by_current_weighted_cost(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=1, init_amt=10, store_receive_qty=1, store_receive_amt=20,
+            bom_out_qty=0.5,
+        ))
+        self.assertEqual(state.bom_out_amt, 7.5)
+        self.assertEqual(state.end_qty, 1.5)
+        self.assertEqual(state.end_amt, 22.5)
+
+    def test_inventory_count_and_explicit_gain_cannot_both_post(self) -> None:
+        with self.assertRaises(ValueError):
+            transition_day(DailyFlow(
+                init_qty=1, init_amt=10, actual_stock_qty=2, is_counted=True,
+                inventory_gain_qty=1, inventory_gain_amt=10,
+            ))
 
     def test_v15_wastage_and_ssls_conservation(self) -> None:
         accounting = pd.DataFrame([

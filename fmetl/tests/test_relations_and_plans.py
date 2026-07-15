@@ -15,6 +15,7 @@ class RelationTests(unittest.TestCase):
             "business_date": "2026-07-01", "from_article_id": "veg-kg", "to_article_id": "veg-500g"
         }])
         convert = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": "2026-07-01",
             "parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
             "parent_rate": 2.0, "sub_rate": 0.5,
         }])
@@ -51,6 +52,7 @@ class RelationTests(unittest.TestCase):
             "parent_qty": 1.0, "sub_qty": None, "event_source": "receive_sale",
         }])
         convert = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": "2026-07-01",
             "parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
             "parent_rate": 2.0, "sub_rate": 0.5,
         }])
@@ -64,6 +66,76 @@ class RelationTests(unittest.TestCase):
         plan = build_pack_plan(event, convert, resolution)
         self.assertEqual(plan.loc[0, "sub_qty"], 2.0)
         self.assertAlmostEqual(plan.loc[0, "common_weight_residual"], 0.0)
+
+    def test_unrelated_invalid_convert_edge_does_not_block_observed_pack(self) -> None:
+        event = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
+            "parent_qty": 1.0, "sub_qty": 2.0, "event_source": "receive_sale",
+        }])
+        convert = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01",
+             "parent_article_id": "veg-kg", "sub_article_id": "veg-500g",
+             "parent_rate": 2.0, "sub_rate": 0.5},
+            {"store_id": "A3XV", "inc_day": "2026-07-01",
+             "parent_article_id": "unrelated", "sub_article_id": "bad",
+             "parent_rate": 2.0, "sub_rate": 0.4},
+        ])
+        resolution = resolve_relations(
+            event.rename(columns={
+                "parent_article_id": "from_article_id", "sub_article_id": "to_article_id",
+            })[["business_date", "from_article_id", "to_article_id"]],
+            relation_snapshot_id="s1", article_convert=convert.iloc[[0]],
+        )
+        plan = build_pack_plan(event, convert, resolution)
+        self.assertEqual(len(plan), 1)
+
+    def test_pack_plan_uses_store_and_day_specific_rate(self) -> None:
+        events = pd.DataFrame([
+            {"store_id": "A3XV", "business_date": "2026-07-01",
+             "parent_article_id": "kg", "sub_article_id": "pack",
+             "parent_qty": 1.0, "sub_qty": None, "event_source": "receive_sale"},
+            {"store_id": "A3XV", "business_date": "2026-07-02",
+             "parent_article_id": "kg", "sub_article_id": "pack",
+             "parent_qty": 1.0, "sub_qty": None, "event_source": "receive_sale"},
+        ])
+        convert = pd.DataFrame([
+            {"store_id": "A3XV", "inc_day": "2026-07-01",
+             "parent_article_id": "kg", "sub_article_id": "pack",
+             "parent_rate": 2.0, "sub_rate": 0.5},
+            {"store_id": "A3XV", "inc_day": "2026-07-02",
+             "parent_article_id": "kg", "sub_article_id": "pack",
+             "parent_rate": 4.0, "sub_rate": 0.25},
+        ])
+        resolution = pd.DataFrame([
+            {"business_date": day, "from_article_id": "kg", "to_article_id": "pack",
+             "relation_type": "PACK_CONVERT", "formal_flow_allowed": True,
+             "relation_snapshot_id": "s1"}
+            for day in ("2026-07-01", "2026-07-02")
+        ])
+        plan = build_pack_plan(events, convert, resolution).set_index("business_date")
+        self.assertEqual(plan.loc["2026-07-01", "sub_qty"], 2.0)
+        self.assertEqual(plan.loc["2026-07-02", "sub_qty"], 4.0)
+
+    def test_pack_plan_rejects_bad_or_negative_actual_quantity(self) -> None:
+        base = {
+            "store_id": "A3XV", "business_date": "2026-07-01",
+            "parent_article_id": "kg", "sub_article_id": "pack",
+            "sub_qty": 2.0, "event_source": "receive_sale",
+        }
+        convert = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": "2026-07-01",
+            "parent_article_id": "kg", "sub_article_id": "pack",
+            "parent_rate": 2.0, "sub_rate": 0.5,
+        }])
+        resolution = pd.DataFrame([{
+            "business_date": "2026-07-01", "from_article_id": "kg", "to_article_id": "pack",
+            "relation_type": "PACK_CONVERT", "formal_flow_allowed": True,
+            "relation_snapshot_id": "s1",
+        }])
+        for bad_qty in (-1, "bad", "", float("inf")):
+            with self.subTest(bad_qty=bad_qty), self.assertRaises(ValueError):
+                build_pack_plan(pd.DataFrame([{**base, "parent_qty": bad_qty}]), convert, resolution)
 
     def test_invalid_convert_ratio_is_quarantined(self) -> None:
         candidate = pd.DataFrame([{

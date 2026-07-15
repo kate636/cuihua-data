@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from fmetl.facts._resolution import assert_formal_pairs
@@ -15,9 +16,13 @@ def build_pack_plan(
         "store_id", "business_date", "parent_article_id", "sub_article_id",
         "parent_qty", "sub_qty", "event_source",
     }
-    convert_columns = {"parent_article_id", "sub_article_id", "parent_rate", "sub_rate"}
+    convert_columns = {
+        "store_id", "parent_article_id", "sub_article_id", "parent_rate", "sub_rate",
+    }
     missing_events = sorted(event_columns - set(observed_events.columns))
     missing_convert = sorted(convert_columns - set(article_convert.columns))
+    if "inc_day" not in article_convert.columns and "business_date" not in article_convert.columns:
+        missing_convert.append("inc_day (or business_date)")
     if missing_events:
         raise KeyError(f"pack events missing columns: {missing_events}")
     if missing_convert:
@@ -28,6 +33,17 @@ def build_pack_plan(
             "relation_type", "relation_snapshot_id",
         ])
 
+    event_keys = ["store_id", "business_date", "parent_article_id", "sub_article_id"]
+    if observed_events[event_keys].isna().any().any():
+        raise ValueError("pack event keys cannot contain NULL")
+    if (
+        observed_events[event_keys]
+        .astype(str)
+        .apply(lambda column: column.str.strip().str.lower().isin({"", "nan", "none", "null"}))
+        .any().any()
+    ):
+        raise ValueError("pack event keys cannot be blank")
+
     snapshot_id = assert_formal_pairs(
         observed_events,
         resolution,
@@ -36,19 +52,38 @@ def build_pack_plan(
         target_column="sub_article_id",
     )
 
-    convert = article_convert[list(convert_columns)].copy()
+    convert_date_column = "inc_day" if "inc_day" in article_convert.columns else "business_date"
+    convert = article_convert[[*sorted(convert_columns), convert_date_column]].copy()
+    convert = convert.rename(columns={convert_date_column: "business_date"})
+    convert_keys = ["store_id", "business_date", "parent_article_id", "sub_article_id"]
+    if convert[convert_keys].isna().any().any():
+        raise ValueError("article_convert keys cannot contain NULL")
+    convert[convert_keys] = convert[convert_keys].astype(str)
+    if (
+        convert[convert_keys]
+        .apply(lambda column: column.str.strip().str.lower().isin({"", "nan", "none", "null"}))
+        .any().any()
+    ):
+        raise ValueError("article_convert keys cannot be blank")
+    event_key_frame = observed_events[convert_keys].astype(str)
+    observed_keys = set(event_key_frame.itertuples(index=False, name=None))
+    convert = convert.loc[
+        convert[convert_keys].apply(tuple, axis=1).isin(observed_keys)
+    ].copy()
     convert["parent_rate"] = pd.to_numeric(convert["parent_rate"], errors="raise")
     convert["sub_rate"] = pd.to_numeric(convert["sub_rate"], errors="raise")
-    if convert.duplicated(["parent_article_id", "sub_article_id"]).any():
+    if not np.isfinite(convert[["parent_rate", "sub_rate"]].to_numpy(dtype=float)).all():
+        raise ValueError("pack conversion rates must be finite")
+    if convert.duplicated(convert_keys).any():
         duplicates = convert.loc[
-            convert.duplicated(["parent_article_id", "sub_article_id"], keep=False)
+            convert.duplicated(convert_keys, keep=False)
         ]
-        rate_counts = duplicates.groupby(["parent_article_id", "sub_article_id"])[
+        rate_counts = duplicates.groupby(convert_keys)[
             ["parent_rate", "sub_rate"]
         ].nunique()
         if (rate_counts > 1).any().any():
-            raise ValueError("article_convert contains conflicting rates for the same pair")
-        convert = convert.drop_duplicates(["parent_article_id", "sub_article_id"])
+            raise ValueError("article_convert contains conflicting rates for the same store/date/pair")
+        convert = convert.drop_duplicates(convert_keys)
     if ((convert["parent_rate"] <= 0) | (convert["sub_rate"] <= 0)).any():
         raise ValueError("pack conversion rates must be positive")
     reciprocal_error = (convert["parent_rate"] * convert["sub_rate"] - 1.0).abs()
@@ -57,15 +92,12 @@ def build_pack_plan(
         raise ValueError(f"pack reciprocal factors are inconsistent: {bad}")
 
     plan = observed_events.copy()
-    if plan.duplicated(["store_id", "business_date", "parent_article_id", "sub_article_id"]).any():
+    if plan.duplicated(event_keys).any():
         raise ValueError("pack events must be unique per store/date/pair")
-    plan["parent_article_id"] = plan["parent_article_id"].astype(str)
-    plan["sub_article_id"] = plan["sub_article_id"].astype(str)
-    convert["parent_article_id"] = convert["parent_article_id"].astype(str)
-    convert["sub_article_id"] = convert["sub_article_id"].astype(str)
+    plan[event_keys] = plan[event_keys].astype(str)
     plan = plan.merge(
         convert,
-        on=["parent_article_id", "sub_article_id"],
+        on=convert_keys,
         how="left",
         validate="many_to_one",
         indicator=True,
@@ -73,8 +105,17 @@ def build_pack_plan(
     if plan["_merge"].ne("both").any():
         raise ValueError("observed pack event has no valid article_convert relation")
     plan = plan.drop(columns="_merge")
-    plan["parent_qty"] = pd.to_numeric(plan["parent_qty"], errors="coerce")
-    plan["sub_qty"] = pd.to_numeric(plan["sub_qty"], errors="coerce")
+    for quantity_column in ("parent_qty", "sub_qty"):
+        if plan[quantity_column].map(
+            lambda value: isinstance(value, str) and not value.strip()
+        ).any():
+            raise ValueError("pack observed quantities cannot use blank strings as missing values")
+        plan[quantity_column] = pd.to_numeric(plan[quantity_column], errors="raise")
+    quantities = plan[["parent_qty", "sub_qty"]].to_numpy(dtype=float)
+    if np.isinf(quantities).any():
+        raise ValueError("pack observed quantities must be finite when present")
+    if (plan[["parent_qty", "sub_qty"]] < 0).any().any():
+        raise ValueError("pack observed quantities cannot be negative")
     has_parent = plan["parent_qty"].notna() & plan["parent_qty"].gt(0)
     has_sub = plan["sub_qty"].notna() & plan["sub_qty"].gt(0)
     if (~(has_parent | has_sub)).any():

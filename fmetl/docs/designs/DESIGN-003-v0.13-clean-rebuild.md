@@ -34,7 +34,7 @@
 `sync_strategy_fm.sh` 实际同步 28 张 StarRocks 表, 全部限定 A3XV, 包括:
 
 - 销售、进货、SCM、损耗、加工、促销、让利;
-- 日清、商品、门店、日历、可售维度;
+- 日清、商品、门店、日历、可订可售维度;
 - receive_sale、订验关系、单位换算、BOM 关系边、盘点明细;
 - offline/online 订单明细和 trade user;
 - full_link、store_daily、article_sale、chdj_article 公司结果表。
@@ -46,6 +46,21 @@ v0.13 不把 Hive 表名写入运行 SQL。Hive 血缘只在 contract 和文档�
 Hive 镜像目标，因此在 registry 中明确标为 `managed_by_sync_script=false` 的辅助观测源，
 不能伪装成 `sync_strategy_fm.sh` 的同步目标；除这一项 v1_5 既有原生源外，核心事实与维度
 均来自该脚本维护的镜像表。
+
+可订可售的权威源明确为同步脚本第 26 步生成的
+`strategy_fm_dim_order_saleable`（Hive 血缘
+`dim_store_article_order_sale_info_di`），日粒度业务键为
+`store_id + inc_day + article_id`。v1.5 `step1_flag_sku_di.sql` 只消费
+`saleable` 做售罄展示，但镜像同时提供 `is_order`。v0.13 分别保存：
+
+```text
+is_order  -> is_orderable（可订）
+saleable  -> is_saleable（可售）
+status    -> saleability_status（源状态）
+```
+
+三列不得合并。`strategy_fm_purchase_order_tmp` 是下单商品池和订货参数快照，
+不是最终可订可售标记，也不进入库存成本池。
 
 ### 2.2 订单符号（2026-07-01 至 2026-07-14, StarRocks 镜像）
 
@@ -119,8 +134,8 @@ receive_sale 近 14 日跨 SKU 关系:
 | 镜像 | 可进核心的字段 | 禁止作为重构真值的字段 |
 |---|---|---|
 | sales_di | 销售数量/金额、订单观测 | 公司派生利润 |
-| purchase_di | 源期初、验收数量/金额 | 上游未知损耗推导 |
-| scm_di | SAP 出入库/财务底项 | 公司全链路利润 |
+| purchase_di | 门店销售 SKU 进货 `sale_article_qty/sale_article_purchase_amt`；源期初作首日基线 | 用 `avg_inbound_price/inventory_cost` 覆盖当日真实进货额；上游未知损耗推导 |
+| scm_di | 门店订货、DC 实际出库、应付额、SCM 账面成本、已带符号退仓 | 把 DC 出库/采购成本再次记作门店库存进货；公司全链路利润 |
 | loss_di | 登记已知损耗 | 方程未知损耗 |
 | compose_di | 实际 compose in/out qty; 源金额作对照 | 无追溯的成本覆盖 |
 | bom_relation | parent/sub、rate、split_mode、unit | 不经分流的“全部都是 BOM”假设 |
@@ -129,10 +144,36 @@ receive_sale 近 14 日跨 SKU 关系:
 | order offline/online | 有符号金额/数量、订单客次、渠道 | 强制去重的商品行 |
 | trade_user | 订单身份和首单日 | 未去重直接 JOIN 订单明细 |
 | store_daily | A3XV 有效营业日 | SKU 销售事实 |
+| dim_order_saleable | `is_order`、`saleable`、`status` 及订货基数 | 库存数量、采购/进货成本 |
+| purchase_order_tmp | 下单商品池、订货参数的参考快照 | 最终可订可售标记、采购/进货事实 |
 | chdj_article | day_clear/业务标签的兼容参考 | profit、stock、loss、avg7d |
 | full_link/article_sale | 验收和影子对比 | 核心利润/库存上游 |
 
 DuckDB `mirror_*`/`atomic_*` 是这些授权字段的幂等本地副本, 不发明新业务事实。
+
+### 3.1 采购、出库、进货三套账
+
+```text
+供应链订货:
+  qty = store_order_qty / order_qty_payean
+  amt = order_amt
+
+DC 实际出库及供应链财务:
+  qty = total_outstock_qty
+  结算/收入 = out_stock_pay_amt
+  供应链成本 = out_stock_amt_cb
+
+门店销售 SKU 进货（库存池唯一外部入流）:
+  qty = purchase_di.sale_article_qty
+  amt = purchase_di.sale_article_purchase_amt
+```
+
+SCM 退仓字段已经是负数，原样进入 SCM 净额对账，禁止再次翻号。它们默认不直接
+改变门店库存成本池；门店实物退仓必须有独立的门店事件证据。
+
+`receive_sale` 的 parent `inbound_qty/inbound_amount` 会在每个 child 行重复，只有在
+猪肉/包装采用 parent 重构模式时，才可先按 parent 做一致性检查和去重后形成一次外部
+进货。此时同一 parent 的 `purchase_di` child 分配行只作 shadow 对账，不能再次入池。
 
 ---
 
@@ -351,7 +392,9 @@ dim_matnr_member_snapshot
 t_calc_relation_resolution
 ```
 
-加工关系每次运行开始时从权威 API/SQLite 导出一次, 写入 DuckDB 快照并记录 checksum。同一 run 不再访问可变外部状态。
+加工关系每次运行开始时从 Foodmart 经营监控平台公开代理
+`/api/proc-rel/export` 导出一次, 写入 DuckDB 快照并记录 checksum。同一 run 不再
+访问可变外部状态。不得直连平台内部 `:5003` 端口；不得在请求失败时静默读取历史 JSON。
 
 ### 8.2 唯一关系类型
 
@@ -395,9 +438,29 @@ QUARANTINED
 2. purchase + BOM relation + dressing rate 重建 shadow;
 3. 销售/损耗权重反推只作差异分析。
 
+成本分摊优先级（金额始终守恒）:
+
+1. 当日源 child 拆分金额完整、全部活跃 child 有正金额时，使用源拆分金额比例；
+2. 零价赠品或同一 parent 出现有价/零价混合 child 时，全组使用
+   `sale_recev_rate`，不能只让零价 child 继承零成本；
+3. 前两项不可用时，只有所有活跃部位已可靠换算到同一库存计量单位（例如全部为 kg）
+   才可按标准重量分摊父品总成本。此时各部位取得相同的公共单位成本：
+   `child_in_amt = normalized_child_qty * parent_total_cost / sum(normalized_child_qty)`；
+4. 单位换算覆盖不足，尤其“件”和“公斤”无法可靠互换时，进入 quarantine，不得直接
+   假定每件等于每公斤。
+
+当前构建里程碑已实现第 1、2 层；第 3 层尚缺“部位库存数量 -> 公共标准重量”的 100%
+覆盖 adapter，代码会按第 4 层 fail closed。该 adapter 完成并通过真实周测前，不得宣称
+“同公共单位成本”已进入正式过账。
+
+“先算猪肉分类毛利率，再把同一毛利率回填每个部位”只允许作为报表展示分摊口径。
+它通过销售额反推 SKU 成本，会形成循环并污染跨日库存金额，因此禁止写入核心库存成本、
+SKU 会计毛利或下一日期初。展示表使用时必须保留 `allocation_basis=REPORT_ONLY_CATEGORY_MARGIN`。
+
 ### 8.4 蔬菜/水果 PACK_CONVERT
 
 - article_convert 优先于 matnr/name 推断;
+- 必须按 `store_id + business_date + parent + sub` 使用当天镜像快照，禁止借用其他日期比例;
 - 有实际 receive_sale/compose 换码事件才产生 pack out/in;
 - 无事件时不因关系存在而虚构数量;
 - 按公共重量单位守恒;
@@ -478,9 +541,16 @@ store_id + business_date + article_id
 两种成本:
 
 ```text
-issue_unit_cost     = 当日对外/内部转出定价
+available_qty       = D-1 end_qty + 当日门店进货 + 正式内部流入 + 实物退货/盘盈
+available_amt       = D-1 end_amt + 当日门店进货额 + 正式内部流入额 + 实物退货/盘盈额
+issue_unit_cost     = available_amt / available_qty
+内部/销售/损耗转出 = 对应数量 * issue_unit_cost
 ending_unit_cost    = end_stock_amt / end_stock_qty, 传给次日
 ```
+
+镜像事实只有日粒度，因此这是“跨日滚动、日内期间加权”，不是按单据时间排序的实时
+移动平均。D+1 必须直接复制 D 的 `end_qty/end_amt`，禁止用展示时四舍五入后的
+`ending_unit_cost` 反算金额。
 
 任一历史输入/规则/关系快照改变, 从受影响日重放至最新日, 除非能证明所有 SKU 期末数量和金额已收敛一致。
 
@@ -595,6 +665,8 @@ sum(child bom_in_amt) - parent bom_out_amt ~= 0.01
 parent bom_out_qty <= parent available qty
 consume_all parent end_stock=0 and standalone profit~=0
 shared parents are one connected component
+same-common-unit fallback requires 100% verified unit conversion coverage
+report-only category margin allocation never writes back to inventory cost
 ```
 
 ### 12.5 蔬菜/包装
@@ -604,6 +676,7 @@ article_convert pair never defaults to DISASSEMBLY_BOM
 no observed conversion -> no invented pack flow
 common-weight residual ~= 0
 invalid reciprocal factor -> quarantine
+article_convert must match the same store and business date
 ```
 
 回归 SKU 至少包括:

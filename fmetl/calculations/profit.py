@@ -4,7 +4,7 @@ from __future__ import annotations
 def calculate_accounting_profit(
     *,
     sale_amt: float,
-    receive_amt: float,
+    store_receive_amt: float,
     bom_in_amt: float,
     bom_out_amt: float,
     pack_in_amt: float,
@@ -19,7 +19,7 @@ def calculate_accounting_profit(
 ) -> float:
     """Consume finalized amount flows; do not recalculate costs here."""
     return float(
-        sale_amt - receive_amt
+        sale_amt - store_receive_amt
         - bom_in_amt + bom_out_amt
         - pack_in_amt + pack_out_amt
         - compose_in_amt + compose_out_amt

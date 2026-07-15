@@ -44,6 +44,51 @@ AUXILIARY_STARROCKS_TABLES: tuple[str, ...] = (
 
 
 EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
+    "store_receipt": MirrorContract(
+        name="strategy_fm_purchase_di",
+        authority=MirrorAuthority.OBSERVATION,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=(
+            "store_id", "business_date", "inc_day", "day_clear",
+            "article_id", "article_name", "sale_article_id", "sale_article_name",
+            "sale_article_qty", "sale_article_purchase_amt", "avg_inbound_price",
+            "init_stock_qty", "init_stock_amt", "end_stock_qty", "end_stock_amt",
+            "inventory_cost",
+        ),
+        expected_grain=(
+            "store_id", "business_date", "article_id", "sale_article_id", "day_clear",
+        ),
+        shard_key="sale_article_id",
+        shards=16,
+        note=(
+            "Only external store-receipt pool source. Use sale_article_qty and "
+            "sale_article_purchase_amt; avg_inbound_price/inventory_cost are reference only."
+        ),
+    ),
+    "supply_chain": MirrorContract(
+        name="strategy_fm_scm_di",
+        authority=MirrorAuthority.OBSERVATION,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=(
+            "store_id", "business_date", "inc_day", "article_id",
+            "store_order_qty", "order_qty_payean", "order_amt",
+            "original_outstock_qty", "promotion_outstock_qty", "gift_outstock_qty",
+            "total_outstock_qty", "out_stock_pay_amt", "out_stock_pay_amt_notax",
+            "out_stock_amt_cb", "out_stock_amt_cb_notax",
+            "return_stock_qty", "return_stock_pay_amt", "return_stock_pay_amt_notax",
+            "return_stock_amt_cb", "return_stock_amt_cb_notax",
+        ),
+        expected_grain=("store_id", "business_date", "article_id"),
+        shard_key="article_id",
+        shards=8,
+        allow_empty=True,
+        note=(
+            "Supply-chain order/outbound/financial account only. Never post these amounts "
+            "again as store receipt inventory. Return fields are already signed."
+        ),
+    ),
     "store_daily": MirrorContract(
         name="strategy_fm_store_daily_di",
         authority=MirrorAuthority.REFERENCE_ONLY,
@@ -174,6 +219,24 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         shards=4,
         allow_empty=True,
         note="Historical coverage currently ends 2025-11-17.",
+    ),
+    "order_saleability": MirrorContract(
+        name="strategy_fm_dim_order_saleable",
+        authority=MirrorAuthority.DIMENSION,
+        partition_column="inc_day",
+        store_column="store_id",
+        projection=(
+            "store_id", "inc_day", "effective_date", "article_id", "article_name",
+            "is_order", "saleable", "status", "vendor_id", "vendor_name",
+            "order_base", "min_order_base", "max_order_base",
+        ),
+        expected_grain=("store_id", "inc_day", "article_id"),
+        shard_key="article_id",
+        shards=8,
+        note=(
+            "Authoritative daily flags from v1.5 sync step 26. is_order and "
+            "saleable are independent and must not be collapsed."
+        ),
     ),
     "goods": MirrorContract(
         name="strategy_fm_dim_goods",

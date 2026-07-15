@@ -18,7 +18,7 @@
 仍属于后续阶段。当前代码不会写生产 DuckDB，也不会自动 SSH/SCP。
 
 > 合并门禁：服务器现有 cron 仍调用 `python -m fmetl.executor`。v0.13 在兼容 executor 完成或
-> cron 显式切换前禁止合并到 `main`；当前开发只允许停留在 `codex/fmetl-v0-12-rebuild`。
+> cron 显式切换前禁止合并到 `main`；当前开发只允许停留在 `codex/fmetl-v0-13-rebuild`。
 
 ## 数据边界
 
@@ -28,7 +28,7 @@
 - 特殊损耗按 v1.5 读取同 catalog 的原生业务表 `cuihua_t_purchase_wastage`，在合同中显式标为
   非同步脚本管理的辅助观测源。
 - 范围固定为滨江宏岸店 `A3XV`，其他门店会阻断。
-- 本地开发库默认 `data/fm_v012.duckdb`；生产权威库仍是服务器
+- 本地开发库默认 `data/fm_v013.duckdb`；生产权威库仍是服务器
   `/opt/fm/data/fm.duckdb`，当前阶段不发布。
 
 ## 本地检查
