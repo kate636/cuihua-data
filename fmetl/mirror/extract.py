@@ -67,6 +67,13 @@ class MirrorExtractor:
                 f"{contract.name}: projection mismatch missing={missing_columns}, unexpected={unexpected_columns}"
             )
         result = result.reindex(columns=contract.projection)
+        # 上游 Hive 表 JOIN 门店维表时，门店改名会产生仅 store_name 不同的双份记录；
+        # 投影列不含 store_name，这类行是完全重复行，安全去重。
+        # 数值不同的真粒度冲突仍会被下方 assert_unique 拦截。
+        exact_duplicates = int(result.duplicated(keep="first").sum())
+        if exact_duplicates:
+            result = result.drop_duplicates(ignore_index=True)
+        result.attrs["exact_duplicates_dropped"] = exact_duplicates
         if result.empty and not contract.allow_empty:
             raise RuntimeError(f"{contract.name}: required non-empty source partition {source_day} is empty")
         if contract.store_column:

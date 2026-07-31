@@ -50,6 +50,49 @@ class MirrorExtractorTests(unittest.TestCase):
         self.assertEqual(result.attrs["requested_business_day"], "2026-01-01")
         self.assertEqual(result.attrs["source_snapshot_day"], "2026-07-14")
 
+    def test_exact_duplicate_rows_are_deduplicated(self) -> None:
+        # 上游门店改名导致 JOIN 双份：投影后完全重复的行应去重且不违反粒度
+        contract = MirrorContract(
+            name="strategy_fm_compose_di", authority=MirrorAuthority.OBSERVATION,
+            partition_column="inc_day", store_column="store_id",
+            projection=("store_id", "business_date", "inc_day", "article_id", "compose_in_qty"),
+            expected_grain=("store_id", "business_date", "article_id"),
+        )
+        api = FakeApi([
+            pd.DataFrame({"row_count": [2]}),
+            pd.DataFrame({
+                "store_id": ["A3XV", "A3XV"],
+                "business_date": ["2026-07-24", "2026-07-24"],
+                "inc_day": ["2026-07-24", "2026-07-24"],
+                "article_id": ["20005016", "20005016"],
+                "compose_in_qty": [1.0, 1.0],
+            }),
+        ])
+        result = MirrorExtractor(api).extract_day(contract, "2026-07-24")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.attrs["exact_duplicates_dropped"], 1)
+
+    def test_conflicting_duplicate_grain_still_raises(self) -> None:
+        # 同粒度但数值不同的行不是重复，必须继续报 GrainViolation
+        contract = MirrorContract(
+            name="strategy_fm_compose_di", authority=MirrorAuthority.OBSERVATION,
+            partition_column="inc_day", store_column="store_id",
+            projection=("store_id", "business_date", "inc_day", "article_id", "compose_in_qty"),
+            expected_grain=("store_id", "business_date", "article_id"),
+        )
+        api = FakeApi([
+            pd.DataFrame({"row_count": [2]}),
+            pd.DataFrame({
+                "store_id": ["A3XV", "A3XV"],
+                "business_date": ["2026-07-24", "2026-07-24"],
+                "inc_day": ["2026-07-24", "2026-07-24"],
+                "article_id": ["20005016", "20005016"],
+                "compose_in_qty": [1.0, 2.0],
+            }),
+        ])
+        with self.assertRaises(ValueError):
+            MirrorExtractor(api).extract_day(contract, "2026-07-24")
+
     def test_null_store_is_blocked(self) -> None:
         contract = MirrorContract(
             name="bad_store", authority=MirrorAuthority.OBSERVATION,
