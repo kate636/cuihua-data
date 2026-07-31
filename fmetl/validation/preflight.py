@@ -3,7 +3,12 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from fmetl.mirror.registry import AUXILIARY_STARROCKS_TABLES, EXTRACTION_CONTRACTS, SYNC_MIRROR_TABLES
+from fmetl.mirror.registry import (
+    AUXILIARY_STARROCKS_TABLES,
+    EXTRACTION_CONTRACTS,
+    HIVE_SOURCE_BY_MIRROR,
+    SYNC_MIRROR_TABLES,
+)
 
 
 SYNC_SCRIPT_SHA256 = "42a42695eaed454a932216caf12c07e28126dd6fa9f0745f453d0893d36693cf"
@@ -21,6 +26,15 @@ def verify_sync_script(path: Path) -> str:
 def validate_mirror_registry() -> None:
     if len(SYNC_MIRROR_TABLES) != 28 or len(set(SYNC_MIRROR_TABLES)) != 28:
         raise ValueError("v1.5 sync mirror contract must contain exactly 28 unique targets")
+    if set(HIVE_SOURCE_BY_MIRROR) != set(SYNC_MIRROR_TABLES):
+        missing = sorted(set(SYNC_MIRROR_TABLES) - set(HIVE_SOURCE_BY_MIRROR))
+        extra = sorted(set(HIVE_SOURCE_BY_MIRROR) - set(SYNC_MIRROR_TABLES))
+        raise ValueError(f"Hive mirror lineage mismatch missing={missing}, extra={extra}")
+    if any(
+        not sources or any(not source.startswith("hive.") for source in sources)
+        for sources in HIVE_SOURCE_BY_MIRROR.values()
+    ):
+        raise ValueError("every synchronized mirror must trace to a field-manual Hive source")
     allowed = set(SYNC_MIRROR_TABLES) | set(AUXILIARY_STARROCKS_TABLES)
     unknown = sorted(contract.name for contract in EXTRACTION_CONTRACTS.values() if contract.name not in allowed)
     if unknown:

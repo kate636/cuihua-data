@@ -1,6 +1,13 @@
 {
-  "version": "v1_5-frozen-20260715",
+  "version": "v1_5-v2.5-20260720",
   "source": "huajia_yonghong_etl/versions/v1_5/sql/step1_flag_sku_di.sql",
+  "cooked_override_source": "huajia_yonghong_etl/config/shushi_skus.json@v2.5-20260720",
+  "cooked_override_skus": ["21315626", "21316166", "21316203", "21316227"],
+  "cooked_override_effective_from": {
+    "21316166": "2026-07-19",
+    "21316203": "2026-07-19",
+    "21316227": "2026-07-19"
+  },
   "frozen_skus": [
     "20691561", "20700102", "21234057", "21255021", "21138461", "21231377",
     "20114084", "20892111", "21262098", "20666545", "21201677", "21254055",

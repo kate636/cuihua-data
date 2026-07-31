@@ -37,6 +37,7 @@ dist/
 .ruff_cache/
 
 # ========== 输出产物 ==========
+/outputs/
 fm_etl_v3/output/
 fm_etl_v2/output/
 legacy_scripts/**/output/

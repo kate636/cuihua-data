@@ -28,6 +28,11 @@ def build_wastage_trace(wastage: pd.DataFrame) -> pd.DataFrame:
     source["store_id"] = "A3XV"
     source["reason_code"] = source["reason"].map({"炒菜机成本": "ccj", "生熟联动": "ssls"})
     hash_columns = sorted(wastage.columns)
+    if source.empty:
+        source["source_row_hash"] = pd.Series(dtype=str)
+        source["duplicate_ordinal"] = pd.Series(dtype=int)
+        source["source_record_id"] = pd.Series(dtype=str)
+        return source
 
     def row_hash(row: pd.Series) -> str:
         payload = "\x1f".join(

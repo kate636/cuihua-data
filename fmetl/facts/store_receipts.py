@@ -98,6 +98,88 @@ def _parent_bridge(
     return consistency
 
 
+def _fill_missing_same_code_receipts(
+    purchase: pd.DataFrame,
+    receive_sale: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fill a missing direct receipt from the independent receipt bridge.
+
+    ``purchase_di`` is a downstream split snapshot and can contain a same-code
+    row whose allocated quantity and amount are both NULL.  ``receive_sale``
+    still carries the actual accepted quantity and amount for that receipt.
+    Only an exact same-code row may use this fallback; cross-code rows continue
+    through the formal relation and parent-reconstruction paths.
+    """
+    required = {
+        "store_id", "inc_day", "article_id", "sale_article_id",
+        "inbound_qty", "inbound_amount",
+    }
+    _require(receive_sale, required, "receive_sale")
+    bridge = receive_sale[list(required)].copy()
+    if bridge.empty:
+        purchase["_receipt_fallback"] = False
+        return purchase
+    _validate_keys(
+        bridge, ["store_id", "inc_day", "article_id", "sale_article_id"],
+        "receive_sale",
+    )
+    bridge[["store_id", "inc_day", "article_id", "sale_article_id"]] = bridge[
+        ["store_id", "inc_day", "article_id", "sale_article_id"]
+    ].astype(str)
+    bridge = bridge.loc[bridge["article_id"].eq(bridge["sale_article_id"])].copy()
+    if bridge.empty:
+        purchase["_receipt_fallback"] = False
+        return purchase
+    _numeric_nonnegative(bridge, ("inbound_qty", "inbound_amount"), "receive_sale")
+    keys = ["store_id", "inc_day", "article_id", "sale_article_id"]
+    consistency = bridge.groupby(keys, dropna=False).agg(
+        qty_min=("inbound_qty", "min"),
+        qty_max=("inbound_qty", "max"),
+        amt_min=("inbound_amount", "min"),
+        amt_max=("inbound_amount", "max"),
+    ).reset_index()
+    bad = consistency.loc[
+        consistency["qty_max"].sub(consistency["qty_min"]).abs().gt(0.000001)
+        | consistency["amt_max"].sub(consistency["amt_min"]).abs().gt(0.000001)
+    ]
+    if not bad.empty:
+        raise ValueError(
+            "receive_sale repeats inconsistent direct receipt values: "
+            f"{bad[keys].head(10).to_dict(orient='records')}"
+        )
+    lookup = consistency.rename(columns={
+        "inc_day": "business_date",
+        "qty_max": "_bridge_qty",
+        "amt_max": "_bridge_amt",
+    })[
+        ["store_id", "business_date", "article_id", "sale_article_id",
+         "_bridge_qty", "_bridge_amt"]
+    ]
+    output = purchase.merge(
+        lookup,
+        on=["store_id", "business_date", "article_id", "sale_article_id"],
+        how="left",
+        validate="one_to_one",
+    )
+    purchase_qty = pd.to_numeric(output["sale_article_qty"], errors="raise").fillna(0.0)
+    purchase_amt = pd.to_numeric(
+        output["sale_article_purchase_amt"], errors="raise"
+    ).fillna(0.0)
+    bridge_qty = pd.to_numeric(output["_bridge_qty"], errors="coerce").fillna(0.0)
+    bridge_amt = pd.to_numeric(output["_bridge_amt"], errors="coerce").fillna(0.0)
+    fallback = (
+        output["article_id"].eq(output["sale_article_id"])
+        & purchase_qty.abs().le(0.000001)
+        & purchase_amt.abs().le(0.000001)
+        & bridge_qty.gt(0.000001)
+        & bridge_amt.gt(0.000001)
+    )
+    output.loc[fallback, "sale_article_qty"] = bridge_qty.loc[fallback]
+    output.loc[fallback, "sale_article_purchase_amt"] = bridge_amt.loc[fallback]
+    output["_receipt_fallback"] = fallback
+    return output.drop(columns=["_bridge_qty", "_bridge_amt"])
+
+
 def build_store_receipts(
     purchase: pd.DataFrame,
     receive_sale: pd.DataFrame,
@@ -124,6 +206,7 @@ def build_store_receipts(
     source[["store_id", "business_date", "article_id", "sale_article_id", "day_clear"]] = source[
         ["store_id", "business_date", "article_id", "sale_article_id", "day_clear"]
     ].astype(str)
+    source = _fill_missing_same_code_receipts(source, receive_sale)
     unexpected = sorted(set(source["store_id"]) - {store_id})
     if unexpected:
         raise ValueError(f"purchase contains stores outside {store_id}: {unexpected}")
@@ -154,14 +237,22 @@ def build_store_receipts(
         quarantined = direct_amount_only[list(QUARANTINE_COLUMNS)].reset_index(drop=True)
     direct["source_parent_article_id"] = direct["article_id"]
     direct["article_id"] = direct["sale_article_id"]
-    direct["external_event_group_id"] = (
+    direct["external_event_group_id"] = np.where(
+        direct["_receipt_fallback"],
+        "RECEIVE_SALE_DIRECT|" + direct["store_id"] + "|" + direct["business_date"]
+        + "|" + direct["source_parent_article_id"],
         "PURCHASE|" + direct["store_id"] + "|" + direct["business_date"] + "|"
-        + direct["source_parent_article_id"] + "|" + direct["article_id"] + "|" + direct["day_clear"]
+        + direct["source_parent_article_id"] + "|" + direct["article_id"] + "|"
+        + direct["day_clear"],
     )
     direct["posting_role"] = "DIRECT_SALE_SKU_RECEIPT"
     direct["receive_qty"] = direct["sale_article_qty"]
     direct["receive_amt"] = direct["sale_article_purchase_amt"]
-    direct["cost_source"] = "PURCHASE_DI_ALLOCATED_RECEIPT"
+    direct["cost_source"] = np.where(
+        direct["_receipt_fallback"],
+        "RECEIVE_SALE_DIRECT_FALLBACK",
+        "PURCHASE_DI_ALLOCATED_RECEIPT",
+    )
     direct["pool_effect"] = "EXTERNAL_IN"
 
     parent_source = active.loc[reconstruct_mask]

@@ -57,6 +57,38 @@ class StoreReceiptTests(unittest.TestCase):
             "DIRECT_RECEIPT_AMOUNT_WITHOUT_QUANTITY",
         )
 
+    def test_missing_same_code_purchase_is_filled_from_receipt_fact(self) -> None:
+        missing = self.purchase.copy()
+        missing.loc[missing["article_id"].eq("S"), [
+            "sale_article_qty", "sale_article_purchase_amt",
+        ]] = None
+        bridge = pd.concat([
+            self.bridge,
+            pd.DataFrame([{
+                "store_id": "A3XV", "inc_day": "2026-07-14",
+                "article_id": "S", "sale_article_id": "S",
+                "inbound_qty": 1.0, "inbound_amount": 20.0,
+            }]),
+        ], ignore_index=True)
+
+        result = build_store_receipts(missing, bridge)
+
+        posting = result.postings.loc[result.postings["article_id"].eq("S")].iloc[0]
+        self.assertEqual(1.0, posting.receive_qty)
+        self.assertEqual(20.0, posting.receive_amt)
+        self.assertEqual("RECEIVE_SALE_DIRECT_FALLBACK", posting.cost_source)
+        self.assertTrue(posting.external_event_group_id.startswith("RECEIVE_SALE_DIRECT|"))
+
+    def test_zero_same_code_purchase_without_receipt_stays_zero(self) -> None:
+        zero = self.purchase.copy()
+        zero.loc[zero["article_id"].eq("S"), [
+            "sale_article_qty", "sale_article_purchase_amt",
+        ]] = 0.0
+
+        result = build_store_receipts(zero, self.bridge)
+
+        self.assertNotIn("S", set(result.postings["article_id"]))
+
     def test_inconsistent_repeated_parent_values_are_blocked(self) -> None:
         broken = self.bridge.copy()
         broken.loc[1, "inbound_amount"] = 99

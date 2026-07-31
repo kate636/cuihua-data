@@ -6,6 +6,7 @@ import pandas as pd
 
 from fmetl.calculations.ledger import run_weighted_ledger
 from fmetl.outputs.shadow_levels import build_shadow_levels_daily
+from fmetl.validation.v014 import validate_v014_ledger
 
 
 def _activity(article_ids: list[str]) -> pd.DataFrame:
@@ -31,6 +32,33 @@ def _openings(article_ids: list[str]) -> pd.DataFrame:
 
 
 class ShadowLedgerTests(unittest.TestCase):
+    def test_external_observations_are_preserved_exactly(self) -> None:
+        activity = _activity(["A"])
+        activity.loc[0, [
+            "gross_sale_qty", "sale_return_qty", "net_sale_qty", "net_sale_amt",
+            "known_lost_qty", "store_receive_qty", "store_receive_amt",
+        ]] = [2.0, 1.0, 1.0, 20.0, 0.5, 5.0, 50.0]
+        empty_source = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_target = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+        ledger = run_weighted_ledger(
+            activity, _openings(["A"]), empty_source, empty_target
+        )
+        validation = validate_v014_ledger(
+            ledger.sku_daily,
+            ledger.internal_postings,
+            source_activities=activity,
+        ).set_index("check_name")
+        self.assertTrue(
+            bool(validation.loc["EXTERNAL_OBSERVATION_CONSERVATION", "passed"])
+        )
+
     def test_bom_pack_compose_chain_prices_once_and_conserves_internal_amount(self) -> None:
         articles = ["P", "C1", "C2", "K", "R", "F"]
         activity = _activity(articles).set_index("article_id")
@@ -99,6 +127,30 @@ class ShadowLedgerTests(unittest.TestCase):
         mixed_opening.loc[0, ["opening_qty", "opening_amt"]] = [1.0, 10.0]
         mixed_result = run_weighted_ledger(mixed, mixed_opening, empty_sources, empty_targets)
         self.assertEqual(mixed_result.sku_daily.loc[0, "sale_return_cost_basis"], 19)
+
+    def test_return_after_zero_stock_uses_last_observed_issue_cost(self) -> None:
+        activity = pd.concat([_activity(["A"]), _activity(["A"])], ignore_index=True)
+        activity.loc[0, ["store_receive_qty", "store_receive_amt", "gross_sale_qty",
+                         "net_sale_qty", "net_sale_amt"]] = [1.0, 10.0, 1.0, 1.0, 20.0]
+        activity.loc[1, "business_date"] = "2026-07-15"
+        activity.loc[1, ["sale_return_qty", "net_sale_qty", "net_sale_amt"]] = [
+            1.0, -1.0, -20.0
+        ]
+        empty_sources = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_targets = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+        result = run_weighted_ledger(
+            activity, _openings(["A"]), empty_sources, empty_targets
+        ).sku_daily.set_index("business_date")
+        self.assertEqual(0.0, result.loc["2026-07-14", "end_qty"])
+        self.assertEqual(10.0, result.loc["2026-07-15", "sale_return_cost_basis"])
+        self.assertEqual(10.0, result.loc["2026-07-15", "end_amt"])
 
     def test_internal_cycle_is_blocked(self) -> None:
         activity = _activity(["A", "B"])

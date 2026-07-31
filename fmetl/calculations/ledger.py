@@ -36,6 +36,11 @@ TARGET_COLUMNS = (
     "target_article_id", "target_in_qty", "amount_allocation_ratio",
     "quantity_source", "relation_snapshot_id",
 )
+POSTING_COLUMNS = (
+    "posting_id", "event_group_id", "relation_snapshot_id", "store_id",
+    "business_date", "relation_type", "article_id", "posting_role", "qty",
+    "amt", "quantity_source", "cost_source", "formal_flow_allowed",
+)
 
 
 @dataclass(frozen=True)
@@ -101,8 +106,20 @@ def _validate_internal(
     target[["store_id", "business_date", "event_group_id", "target_article_id"]] = target[
         ["store_id", "business_date", "event_group_id", "target_article_id"]
     ].astype(str)
-    if source.duplicated(source_keys).any() or target.duplicated(target_keys).any():
-        raise ValueError("internal event legs must be unique per event/article")
+    duplicate_sources = source.loc[
+        source.duplicated(source_keys, keep=False),
+        source_keys + ["relation_type", "source_out_qty", "quantity_source"],
+    ]
+    duplicate_targets = target.loc[
+        target.duplicated(target_keys, keep=False),
+        target_keys + ["relation_type", "target_in_qty", "quantity_source"],
+    ]
+    if not duplicate_sources.empty or not duplicate_targets.empty:
+        raise ValueError(
+            "internal event legs must be unique per event/article; "
+            f"duplicate_sources={duplicate_sources.head(20).to_dict('records')}; "
+            f"duplicate_targets={duplicate_targets.head(20).to_dict('records')}"
+        )
     _required_numeric(source, ("source_out_qty",), "internal_sources")
     _required_numeric(
         target, ("target_in_qty", "amount_allocation_ratio"), "internal_targets"
@@ -222,6 +239,13 @@ def run_weighted_ledger(
         (row.store_id, row.article_id): (float(row.opening_qty), float(row.opening_amt))
         for row in opening.itertuples(index=False)
     }
+    last_unit_cost = {
+        (row.store_id, row.article_id): (
+            float(row.opening_amt) / float(row.opening_qty)
+            if float(row.opening_qty) > 0.001 else np.nan
+        )
+        for row in opening.itertuples(index=False)
+    }
     opening_meta = {
         (row.store_id, row.article_id): (str(row.opening_source), str(row.opening_source_day))
         for row in opening.itertuples(index=False)
@@ -231,39 +255,65 @@ def run_weighted_ledger(
 
     for day in days:
         for store in stores:
-            day_activity = activity.loc[
+            day_activity_frame = activity.loc[
                 activity["store_id"].eq(store) & activity["business_date"].eq(day)
-            ].set_index("article_id", drop=False)
+            ]
+            day_activity = {
+                str(row.article_id): row
+                for row in day_activity_frame.itertuples(index=False)
+            }
             day_source = source.loc[source["store_id"].eq(store) & source["business_date"].eq(day)]
             day_target = target.loc[target["store_id"].eq(store) & target["business_date"].eq(day)]
+            source_by_event = {
+                str(event_id): legs
+                for event_id, legs in day_source.groupby("event_group_id", sort=False)
+            }
+            target_by_event = {
+                str(event_id): legs
+                for event_id, legs in day_target.groupby("event_group_id", sort=False)
+            }
+            source_by_article = {
+                str(article_id): legs
+                for article_id, legs in day_source.groupby("source_article_id", sort=False)
+            }
+            target_by_article = {
+                str(article_id): legs
+                for article_id, legs in day_target.groupby("target_article_id", sort=False)
+            }
+            expected_sources_by_event = {
+                event_id: set(legs["source_article_id"].astype(str))
+                for event_id, legs in source_by_event.items()
+            }
+            empty_source = day_source.iloc[0:0]
+            empty_target = day_target.iloc[0:0]
             edges: list[tuple[str, str]] = []
-            for event_id, source_legs in day_source.groupby("event_group_id", sort=False):
-                target_legs = day_target.loc[day_target["event_group_id"].eq(event_id)]
+            for event_id, source_legs in source_by_event.items():
+                target_legs = target_by_event.get(event_id, empty_target)
                 edges.extend(
                     (str(source_id), str(target_id))
                     for source_id in source_legs["source_article_id"]
                     for target_id in target_legs["target_article_id"]
                 )
             graph_order = topological_order(edges) if edges else []
-            isolated = sorted(set(day_activity.index.astype(str)) - set(graph_order))
+            isolated = sorted(set(day_activity) - set(graph_order))
             order = [*graph_order, *isolated]
-            if set(order) != set(day_activity.index.astype(str)):
+            if set(order) != set(day_activity):
                 raise ValueError("internal relation references an article outside the dense activity grid")
 
             event_source_amounts: dict[str, dict[str, float]] = {}
             day_results: dict[str, dict[str, object]] = {}
             for article_id in order:
-                row = day_activity.loc[article_id]
+                row = day_activity[article_id]
                 init_qty, init_amt = current[(store, article_id)]
                 incoming_qty = {flow: 0.0 for flow in RELATION_FLOW.values()}
                 incoming_amt = {flow: 0.0 for flow in RELATION_FLOW.values()}
-                incoming_legs = day_target.loc[day_target["target_article_id"].astype(str).eq(article_id)]
+                incoming_legs = target_by_article.get(article_id, empty_target)
                 for leg in incoming_legs.itertuples(index=False):
                     source_amounts = event_source_amounts.get(str(leg.event_group_id), {})
-                    expected_sources = day_source.loc[
-                        day_source["event_group_id"].eq(leg.event_group_id), "source_article_id"
-                    ].astype(str)
-                    if set(source_amounts) != set(expected_sources):
+                    expected_sources = expected_sources_by_event.get(
+                        str(leg.event_group_id), set()
+                    )
+                    if set(source_amounts) != expected_sources:
                         raise ValueError("target reached before every internal source leg was priced")
                     event_amt = sum(source_amounts.values())
                     flow_name = RELATION_FLOW[str(leg.relation_type)]
@@ -271,7 +321,7 @@ def run_weighted_ledger(
                     incoming_amt[flow_name] += event_amt * float(leg.amount_allocation_ratio)
 
                 outgoing_qty = {flow: 0.0 for flow in RELATION_FLOW.values()}
-                outgoing_legs = day_source.loc[day_source["source_article_id"].astype(str).eq(article_id)]
+                outgoing_legs = source_by_article.get(article_id, empty_source)
                 for leg in outgoing_legs.itertuples(index=False):
                     outgoing_qty[RELATION_FLOW[str(leg.relation_type)]] += float(leg.source_out_qty)
 
@@ -283,11 +333,20 @@ def run_weighted_ledger(
                     pre_return_amt = (
                         init_amt + float(row.store_receive_amt) + sum(incoming_amt.values())
                     )
-                    if pre_return_qty <= 0.001:
-                        raise ValueError(
-                            f"sale return has no inventory cost evidence: {store}/{day}/{article_id}"
-                        )
-                    return_cost_basis = pre_return_amt / pre_return_qty
+                    if pre_return_qty > 0.001:
+                        return_cost_basis = pre_return_amt / pre_return_qty
+                    else:
+                        prior_cost = float(last_unit_cost[(store, article_id)])
+                        if not np.isfinite(prior_cost) or prior_cost <= 0:
+                            raise ValueError(
+                                "sale return has no inventory cost evidence: "
+                                f"{store}/{day}/{article_id}"
+                            )
+                        # A prior observed weighted issue cost remains valid cost
+                        # evidence after the quantity pool reaches zero.  This
+                        # lets a later customer return re-enter inventory without
+                        # inventing a zero cost or reading a v1.5 result.
+                        return_cost_basis = prior_cost
                     sale_return_amt = return_qty * return_cost_basis
                 else:
                     return_cost_basis = 0.0
@@ -374,7 +433,7 @@ def run_weighted_ledger(
                 first_day = day == days[0]
                 source_name, source_day = opening_meta[(store, article_id)]
                 day_results[article_id] = {
-                    **row.to_dict(),
+                    **row._asdict(),
                     "init_stock_qty": init_qty,
                     "init_stock_amt": init_amt,
                     "opening_source": source_name if first_day else "ROLL_FORWARD",
@@ -422,8 +481,11 @@ def run_weighted_ledger(
             state_rows.extend(day_results.values())
             for article_id, row in day_results.items():
                 current[(store, article_id)] = (float(row["end_qty"]), float(row["end_amt"]))
+                issue_cost = float(row["issue_unit_cost"])
+                if np.isfinite(issue_cost) and issue_cost > 0:
+                    last_unit_cost[(store, article_id)] = issue_cost
 
-    postings = pd.DataFrame(posting_rows)
+    postings = pd.DataFrame(posting_rows, columns=POSTING_COLUMNS)
     if not postings.empty:
         if postings["posting_id"].duplicated().any():
             raise ValueError("internal posting_id must be unique")

@@ -67,6 +67,20 @@ class DailyState:
     branch: str
 
 
+_NUMERIC_FLOW_FIELDS = (
+    "init_qty", "init_amt", "store_receive_qty", "store_receive_amt",
+    "bom_in_qty", "bom_in_amt", "bom_out_qty", "bom_out_amt",
+    "pack_in_qty", "pack_in_amt", "pack_out_qty", "pack_out_amt",
+    "compose_in_qty", "compose_in_amt", "compose_out_qty", "compose_out_amt",
+    "residual_transfer_in_qty", "residual_transfer_in_amt",
+    "residual_transfer_out_qty", "residual_transfer_out_amt",
+    "store_return_qty", "sale_return_qty", "sale_return_amt",
+    "inventory_gain_qty", "inventory_gain_amt", "sale_qty", "known_lost_qty",
+    "fallback_cost",
+)
+_NONNEGATIVE_FLOW_FIELDS = frozenset(_NUMERIC_FLOW_FIELDS)
+
+
 def _finite(value: float, name: str) -> float:
     value = float(value)
     if not math.isfinite(value):
@@ -78,31 +92,25 @@ def transition_day(flow: DailyFlow) -> DailyState:
     """Apply one SKU/day transition after all formal internal flows are posted."""
     if flow.day_clear not in {"0", "1"}:
         raise ValueError(f"day_clear must be '0' or '1', got {flow.day_clear!r}")
-    values = {name: _finite(value, name) for name, value in flow.__dict__.items()
-              if isinstance(value, (int, float)) and not isinstance(value, bool)}
+    values: dict[str, float] = {}
+    dust: dict[str, float] = {}
+    for name in _NUMERIC_FLOW_FIELDS:
+        value = _finite(getattr(flow, name), name)
+        values[name] = value
+        if value != 0.0 and abs(value) < 1e-10:
+            dust[name] = 0.0
     # Cross-day amount subtraction can leave machine-epsilon dust such as
     # -8.88e-16 after a pool is fully consumed. Normalize only numerical dust;
     # genuine negative business values remain blocked below.
-    flow = replace(
-        flow,
-        **{name: 0.0 if abs(value) < 1e-10 else value for name, value in values.items()},
-    )
-    values = {name: float(getattr(flow, name)) for name in values}
+    if dust:
+        flow = replace(flow, **dust)
+        values.update(dust)
     actual = None if flow.actual_stock_qty is None else _finite(flow.actual_stock_qty, "actual_stock_qty")
     if actual is not None and actual < 0:
         raise ValueError("actual_stock_qty cannot be negative")
-    nonnegative = {
-        "init_qty", "init_amt", "store_receive_qty", "store_receive_amt",
-        "bom_in_qty", "bom_in_amt", "bom_out_qty", "bom_out_amt",
-        "pack_in_qty", "pack_in_amt", "pack_out_qty", "pack_out_amt",
-        "compose_in_qty", "compose_in_amt", "compose_out_qty", "compose_out_amt",
-        "residual_transfer_in_qty", "residual_transfer_in_amt",
-        "residual_transfer_out_qty", "residual_transfer_out_amt",
-        "store_return_qty",
-        "sale_return_qty", "sale_return_amt", "inventory_gain_qty", "inventory_gain_amt",
-        "sale_qty", "known_lost_qty", "fallback_cost",
-    }
-    bad = sorted(name for name in nonnegative if values.get(name, 0.0) < 0)
+    bad = sorted(
+        name for name in _NONNEGATIVE_FLOW_FIELDS if values.get(name, 0.0) < 0
+    )
     if bad:
         raise ValueError(f"daily flow fields cannot be negative: {bad}")
     if actual is not None and (flow.inventory_gain_qty > 0 or flow.inventory_gain_amt > 0):
@@ -169,43 +177,23 @@ def transition_day(flow: DailyFlow) -> DailyState:
         end_qty = actual
         unknown_qty = eq_qty - actual
         branch = "counted"
-    elif flow.day_clear == "0":
-        new_supply = (
-            flow.store_receive_qty + flow.bom_in_qty - flow.bom_out_qty
-            + flow.pack_in_qty - flow.pack_out_qty
-            + flow.compose_in_qty - flow.compose_out_qty
-            + flow.residual_transfer_in_qty - flow.residual_transfer_out_qty
-            - flow.store_return_qty
-            + flow.sale_return_qty + flow.inventory_gain_qty
-        )
-        end_qty = max(0.0, flow.init_qty - max(0.0, flow.sale_qty + flow.known_lost_qty - new_supply))
-        unknown_qty = new_supply - flow.sale_qty - flow.known_lost_qty
-        branch = "day_clear"
     elif eq_qty < 0:
         end_qty = 0.0
-        unknown_qty = eq_qty
         neg_clamp_qty = -eq_qty
         branch = "negative_clamp"
     elif flow.known_lost_qty > 0:
         end_qty = eq_qty
         branch = "known_loss"
-    elif actual is not None and actual > eq_qty + 0.001:
-        end_qty = actual
-        unknown_qty = eq_qty - actual
-        branch = "snapshot_gain"
     else:
         end_qty = eq_qty
         branch = "normal"
 
-    if branch in {"counted", "day_clear"}:
+    if branch == "counted":
         end_amt = end_qty * issue_cost
         unknown_amt = eq_amt - end_amt
     elif branch == "negative_clamp":
         end_amt = 0.0
-        unknown_amt = unknown_qty * issue_cost
-    elif branch == "snapshot_gain":
-        end_amt = end_qty * issue_cost
-        unknown_amt = eq_amt - end_amt
+        unknown_amt = 0.0
     else:
         end_amt = eq_amt
         unknown_amt = 0.0
@@ -217,10 +205,9 @@ def transition_day(flow: DailyFlow) -> DailyState:
     ending_cost = end_amt / end_qty if end_qty > 0 else issue_cost
     if issue_cost < 0 or ending_cost < 0:
         raise ValueError("daily state produced a negative unit cost")
-    # Display loss and accounting balance are separate. In soft day-clear the
-    # display metric can describe opening-stock consumption even when the
-    # equation residual is different (for example when demand exceeds all
-    # available stock). The balance posting is always the actual residual.
+    # Unknown loss is a physical-count difference only.  The independent
+    # balance residual keeps the equation auditable when a negative theoretical
+    # balance is clamped to zero; that overdraft is never re-labelled as loss.
     balance_unknown_qty = eq_qty - end_qty
     balance_unknown_amt = eq_amt - end_amt
     qty_residual = eq_qty - end_qty - balance_unknown_qty

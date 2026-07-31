@@ -1,14 +1,10 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前开发版本为
-**v0.14**，源码直接位于现有 `fmetl/`；当前只运行 A3XV 本地七日影子库，尚未切换服务器
-生产任务。v0.14 从字段手册登记的 Hive→StarRocks 镜像读取事实，独立计算关系、库存、
-成本、损耗和毛利；v1.5 只提供输出合同与只读诊断。完整边界见 `fmetl/README.md` 和
-`fmetl/docs/designs/DESIGN-005-v0.14-product-group-etl-plan.md`。
+**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v0.11**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
 
 ## Project Skills
 
@@ -187,9 +183,7 @@ GROUP BY article_id
 
 ---
 
-## Production Legacy Reference: 3-Layer ETL (v0.11)
-
-以下内容记录尚未切换的 v0.11 生产链路，仅供兼容和回归参考，不代表 v0.14 当前实现。
+## Architecture: 3-Layer ETL (v0.11)
 
 ### 设计原则
 - **简单SQL，复杂逻辑Python**: SQL 仅做 SELECT/JOIN/GROUP BY/WHERE。计算、分支、窗口函数在 Python（pandas + NumPy）完成
@@ -497,7 +491,7 @@ v0.11 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。
 ├── _archived/               # 历史归档 (deploy/tests/docs/旧版脚本等)
 ├── legacy_scripts/          # 旧版独立脚本 (参考/备份)
 ├── data/                    # DuckDB数据文件 (不上GitHub)
-└── .claude/                 # Claude Code 配置
+└── .Codex/                 # Codex 配置
 ```
 
 ## Deployment Architecture
@@ -721,8 +715,8 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 
 ## Documentation Conventions
 
-- **CLAUDE.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
-- **公式单一信源**: 核心公式（profit / EUC / BOM 分摊 / 库存方程 / 6 分支）的 canonical 定义只在 **CLAUDE.md「Core Business Logic」+ `docs/architecture/ETL_v0.11_完整处理逻辑.md`** 两处维护。子目录 README 可展开实现细节，但顶部需声明"以信源为准"，改公式时先改信源、再同步子 README，避免漂移（历史教训：calculated/README 曾把 `bom_alloc_qty_sub` 误写成 `bom_alloc_qty`，险些诱导 euc 暴涨 bug 复现）。
+- **AGENTS.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
+- **公式单一信源**: 核心公式（profit / EUC / BOM 分摊 / 库存方程 / 6 分支）的 canonical 定义只在 **AGENTS.md「Core Business Logic」+ `docs/architecture/ETL_v0.11_完整处理逻辑.md`** 两处维护。子目录 README 可展开实现细节，但顶部需声明"以信源为准"，改公式时先改信源、再同步子 README，避免漂移（历史教训：calculated/README 曾把 `bom_alloc_qty_sub` 误写成 `bom_alloc_qty`，险些诱导 euc 暴涨 bug 复现）。
 - **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
 - **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
 - **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本

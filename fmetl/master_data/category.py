@@ -20,6 +20,8 @@ class CategoryDecision:
 class CategoryMapper:
     version: str
     frozen_skus: frozenset[str]
+    cooked_override_skus: frozenset[str]
+    cooked_override_effective_from: dict[str, str]
 
     def __post_init__(self) -> None:
         if len(self.frozen_skus) != 119:
@@ -32,6 +34,7 @@ class CategoryMapper:
         level2: object,
         level3: object,
         sale_unit: object,
+        business_date: object | None = None,
     ) -> CategoryDecision:
         sku = "" if pd.isna(article_id) else str(article_id)
         l1 = "" if pd.isna(level1) else str(level1)
@@ -71,8 +74,12 @@ class CategoryMapper:
             and unit == "千克"
         ):
             return CategoryDecision("熟食类", "weighted_ready_food")
-        if sku == "21315626":
-            return CategoryDecision("熟食类", "explicit_cooked_sku")
+        business_day = "" if business_date is None or pd.isna(business_date) else str(business_date)
+        override_from = self.cooked_override_effective_from.get(sku, "")
+        if sku in self.cooked_override_skus and (
+            not business_day or not override_from or business_day >= override_from
+        ):
+            return CategoryDecision("熟食类", "v1_5_cooked_override")
         if l3.endswith("熟食"):
             return CategoryDecision("熟食类", "level3_cooked_suffix")
         if l1 in {"冷藏及加工类", "预制菜"}:
@@ -92,8 +99,14 @@ class CategoryMapper:
             raise KeyError(f"category input missing columns: {missing}")
         out = df.copy()
         decisions = [
-            self.decide(row.article_id, row.category_level1_description, row.category_level2_description,
-                        row.category_level3_description, row.sale_unit)
+            self.decide(
+                row.article_id,
+                row.category_level1_description,
+                row.category_level2_description,
+                row.category_level3_description,
+                row.sale_unit,
+                getattr(row, "business_date", None),
+            )
             for row in out.itertuples(index=False)
         ]
         out["report_category_name"] = [decision.name for decision in decisions]
@@ -108,4 +121,11 @@ def load_category_mapper(path: Path = RULE_PATH) -> CategoryMapper:
     return CategoryMapper(
         version=str(payload["version"]),
         frozen_skus=frozenset(str(value) for value in payload["frozen_skus"]),
+        cooked_override_skus=frozenset(
+            str(value) for value in payload.get("cooked_override_skus", [])
+        ),
+        cooked_override_effective_from={
+            str(key): str(value)
+            for key, value in payload.get("cooked_override_effective_from", {}).items()
+        },
     )

@@ -32,27 +32,31 @@ class DailyStateTests(unittest.TestCase):
         state = transition_day(DailyFlow(init_qty=1, init_amt=10, sale_qty=2))
         self.assertEqual(state.branch, "negative_clamp")
         self.assertEqual(state.end_qty, 0)
-        self.assertEqual(state.unknown_lost_qty, -1)
+        self.assertEqual(state.unknown_lost_qty, 0)
+        self.assertEqual(state.balance_unknown_qty, -1)
         self.assertEqual(state.neg_clamp_cost_amt, 10)
 
-    def test_soft_day_clear_opening_stock_consumption_is_not_double_posted(self) -> None:
+    def test_day_clear_is_only_a_label_and_uses_the_inventory_equation(self) -> None:
         state = transition_day(DailyFlow(
             init_qty=5, init_amt=50, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
-        self.assertEqual(state.unknown_lost_qty, -2)
+        self.assertEqual(state.branch, "normal")
+        self.assertEqual(state.unknown_lost_qty, 0)
         self.assertEqual(state.balance_unknown_qty, 0)
         self.assertEqual(state.end_qty, 3)
         self.assertAlmostEqual(state.qty_balance_residual, 0)
 
-    def test_soft_day_clear_shortage_posts_equation_residual(self) -> None:
+    def test_day_clear_shortage_is_overdraft_not_unknown_loss(self) -> None:
         state = transition_day(DailyFlow(
             init_qty=1, init_amt=10, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
+        self.assertEqual(state.branch, "negative_clamp")
         self.assertEqual(state.end_qty, 0)
-        self.assertEqual(state.unknown_lost_qty, -2)
+        self.assertEqual(state.unknown_lost_qty, 0)
         self.assertEqual(state.balance_unknown_qty, -1)
+        self.assertEqual(state.neg_clamp_qty, 1)
         self.assertAlmostEqual(state.qty_balance_residual, 0)
 
     def test_profit_consumes_finalized_flows(self) -> None:

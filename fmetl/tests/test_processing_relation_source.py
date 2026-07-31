@@ -26,9 +26,11 @@ class _Session:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
         self.calls = 0
+        self.urls = []
 
     def get(self, url: str, timeout: int) -> _Response:
         self.calls += 1
+        self.urls.append(url)
         return _Response(self.payload)
 
 
@@ -41,6 +43,25 @@ def _settings() -> Settings:
 
 
 class ProcessingRelationSourceTests(unittest.TestCase):
+    def test_dated_snapshot_uses_current_version_timestamp(self) -> None:
+        session = _Session([{
+            "id": 7, "finished_sku": "F", "finished_name": "finished",
+            "raw_sku": "R", "raw_name": "raw", "raw_qty": 2,
+            "raw_unit": "kg", "yield_qty": 3, "yield_unit": "个",
+            "category_type": "烘焙类", "is_active": 1,
+            "created_at": "2026-05-01 09:00:00",
+            "updated_at": "2026-07-10 12:00:00",
+        }])
+        source = ProcessingRelationSource(_settings(), session=session)
+        first = source.fetch_dated_once()
+        second = source.fetch_dated_once()
+        self.assertIs(first, second)
+        self.assertEqual(session.calls, 1)
+        self.assertTrue(session.urls[0].endswith("/list?active_only=1"))
+        self.assertEqual(first.frame.loc[0, "relation_id"], "PROCESSING|7")
+        self.assertEqual(first.frame.loc[0, "effective_from"], "2026-07-10")
+        self.assertTrue(first.frame.loc[0, "approved"])
+
     def test_fetches_once_and_returns_an_immutable_run_snapshot(self) -> None:
         session = _Session({
             "exported_at": "2026-07-15T09:00:00", "count": 1,

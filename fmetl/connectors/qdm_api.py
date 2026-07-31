@@ -33,9 +33,16 @@ class QdmApi:
     Extractors must shard a mirror query until each shard is below page_size.
     """
 
-    def __init__(self, settings: Settings | None = None, session: requests.Session | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        session: requests.Session | None = None,
+        *,
+        request_timeout: int = 90,
+    ):
         self.settings = settings or get_settings()
         self.session = session or requests.Session()
+        self.request_timeout = request_timeout
 
     def _request(self, sql: str) -> tuple[str, str]:
         body = {
@@ -90,7 +97,7 @@ class QdmApi:
             url,
             data=body.encode("utf-8"),
             headers={"Content-Type": "application/json"},
-            timeout=600,
+            timeout=self.request_timeout,
         )
         response.raise_for_status()
         payload = response.json()

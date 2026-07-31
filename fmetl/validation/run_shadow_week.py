@@ -11,7 +11,6 @@ import subprocess
 import duckdb
 import pandas as pd
 
-from fmetl import __version__
 from fmetl.calculations.ledger import run_weighted_ledger
 from fmetl.calculations.special_wastage import adjust_sku_wastage, build_wastage_trace
 from fmetl.connectors import QdmApi
@@ -432,7 +431,9 @@ except (OSError, subprocess.CalledProcessError):
     git_dirty = True
 run_manifest = pd.DataFrame([asdict(RunManifest(
     run_id=f"v0.13:{STORE}:{START}:{END}:{source_manifest_checksum[:12]}",
-    version=__version__,
+    # This fixed historical replay remains a v0.13 diagnostic after the main
+    # package version advances to v0.14.
+    version="0.13",
     git_commit=git_commit,
     requested_start=START,
     requested_end=END,
