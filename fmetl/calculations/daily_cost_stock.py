@@ -78,7 +78,10 @@ _NUMERIC_FLOW_FIELDS = (
     "inventory_gain_qty", "inventory_gain_amt", "sale_qty", "known_lost_qty",
     "fallback_cost",
 )
-_NONNEGATIVE_FLOW_FIELDS = frozenset(_NUMERIC_FLOW_FIELDS)
+_NONNEGATIVE_FLOW_FIELDS = frozenset(
+    name for name in _NUMERIC_FLOW_FIELDS
+    if name not in {"store_receive_qty", "store_receive_amt"}
+)
 
 
 def _finite(value: float, name: str) -> float:
@@ -113,6 +116,15 @@ def transition_day(flow: DailyFlow) -> DailyState:
     )
     if bad:
         raise ValueError(f"daily flow fields cannot be negative: {bad}")
+    if (
+        abs(flow.store_receive_qty) > 0.000001
+        and abs(flow.store_receive_amt) > 0.01
+        and math.copysign(1.0, flow.store_receive_qty)
+        != math.copysign(1.0, flow.store_receive_amt)
+    ):
+        raise ValueError("store receipt quantity and amount signs must match")
+    if abs(flow.store_receive_qty) <= 0.000001 and abs(flow.store_receive_amt) > 0.01:
+        raise ValueError("store receipt amount requires nonzero quantity")
     if actual is not None and (flow.inventory_gain_qty > 0 or flow.inventory_gain_amt > 0):
         raise ValueError("actual stock and inventory_gain cannot both adjust the same day")
 
@@ -126,6 +138,8 @@ def transition_day(flow: DailyFlow) -> DailyState:
         + flow.compose_in_amt + flow.residual_transfer_in_amt
         + flow.sale_return_amt + flow.inventory_gain_amt
     )
+    if inflow_qty < -0.001 or inflow_amt < -0.01:
+        raise ValueError("signed store receipt return exceeds the available inventory pool")
     internal_out_qty = (
         flow.bom_out_qty + flow.pack_out_qty + flow.compose_out_qty
         + flow.residual_transfer_out_qty + flow.store_return_qty

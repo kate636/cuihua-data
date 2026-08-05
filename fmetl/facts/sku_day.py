@@ -148,7 +148,7 @@ def normalize_known_loss(loss: pd.DataFrame, *, store_id: str = "A3XV") -> pd.Da
 
 
 def normalize_inventory_counts(detail: pd.DataFrame, *, store_id: str = "A3XV") -> pd.DataFrame:
-    """Normalize valid end-balance observations without guessing who performed a count."""
+    """Normalize explicit operator counts and retain system snapshots for audit only."""
     required = {
         "shop_id", "inventory_date", "inc_day", "sku_code", "sale_stock_qty",
         "actual_stock_qty", "profit_loss_qty", "created_by", "updated_by",
@@ -186,17 +186,16 @@ def normalize_inventory_counts(detail: pd.DataFrame, *, store_id: str = "A3XV") 
     operator_updater = ~updater.str.lower().isin(system_tokens)
     operator_evidence = operator_creator | operator_updater
     nonnegative_actual = finite_actual & frame["actual_stock_qty"].ge(0)
-    formal_balance = nonnegative_actual
+    formal_balance = operator_evidence & nonnegative_actual
     frame["source_actual_stock_qty"] = frame["actual_stock_qty"]
     frame["actual_stock_qty"] = frame["actual_stock_qty"].where(formal_balance, np.nan)
     frame["source_sale_stock_qty"] = frame["sale_stock_qty"]
     frame["source_profit_loss_qty"] = frame["profit_loss_qty"]
-    # A system row does not prove there was no manual count: upstream can reset both
-    # sale_stock_qty and actual_stock_qty after a physical count.  Treat every valid
-    # nonnegative snapshot as an observed end balance, while retaining provenance.
+    # Business operations require the counting account to be logged in.  A system
+    # snapshot remains an observation for audit, but it cannot overwrite the ledger.
     frame["is_counted"] = formal_balance
-    frame["is_explicit_operator_count"] = operator_evidence & formal_balance
-    frame["count_status"] = "FORMAL_SYSTEM_BALANCE_SNAPSHOT"
+    frame["is_explicit_operator_count"] = formal_balance
+    frame["count_status"] = "SYSTEM_SNAPSHOT_AUDIT_ONLY"
     frame.loc[~operator_evidence & ~nonnegative_actual, "count_status"] = "INVALID_SYSTEM_ACTUAL"
     frame.loc[operator_evidence & ~nonnegative_actual, "count_status"] = "INVALID_OPERATOR_ACTUAL"
     frame.loc[operator_evidence & formal_balance, "count_status"] = "FORMAL_OPERATOR_COUNT"

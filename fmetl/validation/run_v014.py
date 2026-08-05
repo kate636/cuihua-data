@@ -29,7 +29,12 @@ from fmetl.relations.registry import (
     freeze_product_group_snapshot,
     resolve_relation_registry,
 )
-from fmetl.validation.v014 import assert_hard_gates, validate_v014_ledger
+from fmetl.validation.v014 import (
+    assert_hard_gates,
+    is_publishable,
+    validate_publishability,
+    validate_v014_ledger,
+)
 from fmetl.contracts.staging import validate_stage_database
 from fmetl.mirror.v014_source import DAILY_SOURCE_KEYS, LATEST_SOURCE_KEYS
 
@@ -64,6 +69,7 @@ def select_complete_window(
     *,
     store_id: str,
     end: str,
+    start: str | None = None,
     required_sources: frozenset[str] = REQUIRED_SOURCE_NAMES,
     lookback_days: int = 90,
 ) -> ShadowWindow:
@@ -80,6 +86,23 @@ def select_complete_window(
     complete_days = {day for day, sources in coverage.items() if required_sources.issubset(sources)}
     if not complete_days:
         raise ValueError("no day has all required v0.14 sources")
+    if start is not None:
+        start_day = date.fromisoformat(start)
+        end_day = date.fromisoformat(end)
+        if start_day > end_day:
+            raise ValueError(f"v0.14 shadow start must not exceed end: {start} > {end}")
+        days = tuple(
+            (start_day + timedelta(days=offset)).isoformat()
+            for offset in range((end_day - start_day).days + 1)
+        )
+        warmup_day = (start_day - timedelta(days=1)).isoformat()
+        missing_days = sorted(set((warmup_day, *days)) - complete_days)
+        if missing_days:
+            raise ValueError(
+                "explicit v0.14 window is incomplete; "
+                f"missing required source days={missing_days}"
+            )
+        return ShadowWindow(days[0], days[-1], days)
     if end == "auto":
         upper = min(date.today() - timedelta(days=1), max(date.fromisoformat(day) for day in complete_days))
     else:
@@ -139,6 +162,41 @@ def _combine_quarantine(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return pd.concat([frame.reindex(columns=columns) for frame in present], ignore_index=True)
 
 
+def _ledger_cost_quarantine(sku_daily: pd.DataFrame) -> pd.DataFrame:
+    """Make every zero-cost issue explicit instead of silently accepting it."""
+    outflow_qty = (
+        sku_daily["gross_sale_qty"]
+        + sku_daily["known_lost_qty"]
+        + sku_daily["bom_out_qty"]
+        + sku_daily["pack_out_qty"]
+        + sku_daily["compose_out_qty"]
+        + sku_daily["residual_transfer_out_qty"]
+    )
+    gap = sku_daily["issue_unit_cost"].le(0.000001) & outflow_qty.gt(0.001)
+    if not gap.any():
+        return pd.DataFrame(
+            columns=["store_id", "business_date", "article_id", "reason_code", "detail"]
+        )
+    rows = sku_daily.loc[
+        gap,
+        [
+            "store_id", "business_date", "article_id", "gross_sale_qty",
+            "known_lost_qty", "store_receive_qty", "store_receive_amt",
+            "init_stock_qty", "init_stock_amt",
+        ],
+    ].copy()
+    rows["reason_code"] = "MISSING_COST_EVIDENCE"
+    rows["detail"] = rows.apply(
+        lambda row: (
+            f"init=({row.init_stock_qty},{row.init_stock_amt});"
+            f"receive=({row.store_receive_qty},{row.store_receive_amt});"
+            f"sale={row.gross_sale_qty};known_loss={row.known_lost_qty}"
+        ),
+        axis=1,
+    )
+    return rows[["store_id", "business_date", "article_id", "reason_code", "detail"]]
+
+
 def _spill_relation_audit(
     directory: Path,
     registry: pd.DataFrame,
@@ -172,7 +230,10 @@ def _assemble_report_input(ledger: pd.DataFrame, metrics: pd.DataFrame) -> pd.Da
         "accounting_full_profit", "accounting_profit", "loss_amount", "loss_qty",
         "store_know_lost_amt", "store_unknow_lost_amt", "inbound_amount",
         "inbound_qty", "total_sale_qty", "total_sale_amount",
-        "loss_rate_qty_denominator",
+        "loss_rate_qty_denominator", "loss_rate_denominator",
+        "store_expected_profit_amount", "store_pricing_profit_rate_numerator",
+        "soldout_16_numerator", "soldout_16_denominator",
+        "soldout_20_numerator", "soldout_20_denominator",
     }
     required_metrics = (
         (DIMENSION_COLUMNS - {"article_group_id", "article_group_name"})
@@ -263,6 +324,7 @@ def run_v014_shadow_week(
     *,
     store_id: str,
     end: str,
+    start: str | None = None,
     source_db: Path | str,
     output_db: Path | str,
 ) -> V014RunResult:
@@ -297,7 +359,9 @@ def run_v014_shadow_week(
         if not _table_exists(conn, "v014_stage_source_completeness"):
             raise KeyError("v014_stage_source_completeness is required for whole-window selection")
         completeness = conn.execute("SELECT * FROM v014_stage_source_completeness").df()
-        window = select_complete_window(completeness, store_id=store_id, end=end)
+        window = select_complete_window(
+            completeness, store_id=store_id, end=end, start=start
+        )
         warmup_day = (
             date.fromisoformat(window.start) - timedelta(days=1)
         ).isoformat()
@@ -401,7 +465,13 @@ def run_v014_shadow_week(
         targets = pd.concat([
             formal_events.targets, inferred.targets, inferred_pack.targets,
         ], ignore_index=True)
+        stage_quarantine = (
+            _read_window(conn, "v014_stage_quarantine", compute_window, store_id)
+            if _table_exists(conn, "v014_stage_quarantine")
+            else pd.DataFrame()
+        )
         quarantine = _combine_quarantine([
+            stage_quarantine,
             relation_quarantine, normalized_counts.quarantined,
             formal_events.quarantined, inferred.quarantined,
             inferred_pack.quarantined,
@@ -413,6 +483,9 @@ def run_v014_shadow_week(
         )
         gc.collect()
         ledger = run_weighted_ledger(activities, openings, sources, targets)
+        quarantine = _combine_quarantine([
+            quarantine, _ledger_cost_quarantine(ledger.sku_daily),
+        ])
         validation = validate_v014_ledger(
             ledger.sku_daily,
             ledger.internal_postings,
@@ -437,6 +510,10 @@ def run_v014_shadow_week(
                 window.start, window.end
             )
             quarantine = quarantine.loc[keep].copy()
+        validation = pd.concat(
+            [validation, validate_publishability(sku_daily)],
+            ignore_index=True,
+        )
         # The seven-day report frame is wide. Release relation and inference
         # intermediates before building it so local shadow runs do not depend
         # on the workstation's transient memory pressure.
@@ -481,6 +558,11 @@ def run_v014_shadow_week(
         levels = build_v014_levels_result(report_input, customer_events)
         del report_input, product_group, customer_events
         gc.collect()
+        publishable = is_publishable(validation)
+        publish_blockers = validation.loc[
+            validation["gate_type"].eq("PUBLISH") & ~validation["passed"],
+            "check_name",
+        ].astype(str).tolist()
         manifest = pd.DataFrame([{
             "run_id": f"v014-{store_id}-{window.start}-{window.end}-{relation_version}",
             "store_id": store_id, "start_date": window.start, "end_date": window.end,
@@ -493,15 +575,37 @@ def run_v014_shadow_week(
                     f"{field.name}|{field.duckdb_type}|{field.label}" for field in OUTPUT_CONTRACT
                 ).encode("utf-8")
             ).hexdigest(),
-            "status": "VALIDATED_LOCAL_SHADOW", "server_write_count": 0,
+            "status": (
+                "VALIDATED_LOCAL_SHADOW"
+                if publishable else "DIAGNOSTIC_ONLY_COST_GAP"
+            ),
+            "publish_eligible": publishable,
+            "publish_blockers": json.dumps(publish_blockers, ensure_ascii=False),
+            "server_write_count": 0,
             "source_provenance": "HIVE_MIRRORS_PLUS_RELATION_EVIDENCE",
         }])
+        # Relation evidence for D-1 is needed to calculate the warm-up ledger,
+        # but it is not part of the published seven-day output.  Materialize
+        # only the selected report window into the final shadow database.
+        audit = duckdb.connect(str(relation_audit_path), read_only=True)
+        try:
+            relation_registry = audit.execute(
+                "SELECT * FROM v014_relation_registry "
+                "WHERE business_date BETWEEN ? AND ?",
+                [window.start, window.end],
+            ).df()
+            relation_resolution = audit.execute(
+                "SELECT * FROM v014_relation_resolution "
+                "WHERE business_date BETWEEN ? AND ?",
+                [window.start, window.end],
+            ).df()
+        finally:
+            audit.close()
         persist_v014_shadow(
             output_path,
             levels_result=levels,
-            relation_registry=None,
-            relation_resolution=None,
-            relation_audit_db=relation_audit_path,
+            relation_registry=relation_registry,
+            relation_resolution=relation_resolution,
             internal_posting=internal_postings,
             sku_daily=sku_daily,
             quarantine=quarantine,

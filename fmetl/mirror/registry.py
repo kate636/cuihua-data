@@ -316,9 +316,8 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         shards=4,
         allow_empty=True,
         note=(
-            "Every nonnegative actual_stock_qty is an observed end balance. Creator/updater "
-            "metadata records evidence strength only: system rows may include manual counts "
-            "whose operator provenance was erased upstream."
+            "Only a nonnegative actual_stock_qty with explicit creator/updater operator "
+            "evidence may overwrite the ledger. System snapshots are audit-only."
         ),
     ),
     "chdj_day_clear": MirrorContract(
@@ -575,7 +574,11 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         ),
         expected_grain=("shop_id", "inventory_date", "sku_code"),
         shard_key="sku_code",
-        shards=8,
+        # 该表仅保留最新 inc_day 分区，且单分区含全历史 inventory_date
+        # （2026-07-30 为 321 日 × ~3031 SKU ≈ 50.5 万行，每日约 +3000 行）。
+        # shard 键 sku_code 只有 ~3031 个去重值、每值自带全部日期，分桶偏斜明显
+        # （32 shard 实测最大桶 20276 行超线）；64 shard 平均 ~7900 行/桶，留足偏斜余量。
+        shards=64,
         allow_empty=True,
         note=(
             "Hive inventory-pool snapshot. cost_price is an external observation only; "

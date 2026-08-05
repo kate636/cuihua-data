@@ -27,9 +27,11 @@ from fmetl.mirror.v014_source import (
     DAILY_SOURCE_KEYS,
     LATEST_SOURCE_KEYS,
     MirrorSourceBundle,
+    _write_mirror_frame,
     extract_and_persist_v014_mirror_sources,
     extract_v014_mirror_sources,
     persist_mirror_source_bundle,
+    shadow_source_days_between,
     shadow_source_days_ending,
 )
 from fmetl.mirror.v014_stage import (
@@ -37,6 +39,8 @@ from fmetl.mirror.v014_stage import (
     _build_day_clear_frame,
     _exclude_receipt_backed_conversion_events,
     _exclude_bom_backed_explicit_relations,
+    _flow_backed_explicit_pairs,
+    _observed_receipt_relation_pairs,
     _split_processing_and_packaging,
     build_v014_stage_bundle,
 )
@@ -75,6 +79,45 @@ class V014MirrorSourceTests(unittest.TestCase):
             ),
             shadow_source_days_ending("2026-07-30"),
         )
+
+    def test_explicit_shadow_range_has_one_warmup_and_all_publish_days(self) -> None:
+        self.assertEqual(
+            (
+                "2026-07-26", "2026-07-27", "2026-07-28", "2026-07-29",
+                "2026-07-30", "2026-07-31", "2026-08-01", "2026-08-02",
+                "2026-08-03", "2026-08-04",
+            ),
+            shadow_source_days_between("2026-07-27", "2026-08-04"),
+        )
+
+    def test_nonempty_partition_rebuilds_schema_after_empty_frame(self) -> None:
+        contract = EXTRACTION_CONTRACTS["inventory_pool"]
+        empty = pd.DataFrame(columns=contract.projection)
+        populated = pd.DataFrame([{
+            column: (
+                "2026-07-30" if column in {"inc_day", "inventory_date"}
+                else "A3XV" if column == "shop_id"
+                else "SKU-1" if column == "sku_code"
+                else None
+            )
+            for column in contract.projection
+        }])
+        conn = duckdb.connect(":memory:")
+        try:
+            _write_mirror_frame(conn, "inventory_pool", contract, empty)
+            self.assertEqual(
+                0,
+                conn.execute("SELECT COUNT(*) FROM v014_mirror_inventory_pool").fetchone()[0],
+            )
+            _write_mirror_frame(conn, "inventory_pool", contract, populated)
+            self.assertEqual(
+                ("2026-07-30", "SKU-1"),
+                conn.execute(
+                    "SELECT inc_day, sku_code FROM v014_mirror_inventory_pool"
+                ).fetchone(),
+            )
+        finally:
+            conn.close()
 
     def test_pork_without_sku_label_uses_day_clear_fallback(self) -> None:
         days = ("2026-07-20", "2026-07-21")
@@ -371,6 +414,34 @@ class V014RelationTests(unittest.TestCase):
         kept = _exclude_receipt_backed_conversion_events(events, purchase)
         self.assertTrue(kept.empty)
 
+    def test_dense_zero_receipt_snapshot_does_not_create_relation_candidate(self) -> None:
+        purchase = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "A", "sale_article_id": "B",
+                "sale_article_qty": 0.0, "sale_article_purchase_amt": 0.0,
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "C", "sale_article_id": "D",
+                "sale_article_qty": -2.0, "sale_article_purchase_amt": -20.0,
+            },
+        ])
+        observed = _observed_receipt_relation_pairs(purchase)
+        self.assertEqual([("C", "D")], list(observed[["article_id", "sale_article_id"]].itertuples(index=False, name=None)))
+
+    def test_static_convert_without_event_is_not_a_dated_flow_candidate(self) -> None:
+        explicit = pd.DataFrame([
+            {"source_article_id": "A", "target_article_id": "B", "actual_event": False, "fixed_rule": False},
+            {"source_article_id": "C", "target_article_id": "D", "actual_event": True, "fixed_rule": False},
+            {"source_article_id": "E", "target_article_id": "F", "actual_event": False, "fixed_rule": True},
+        ])
+        observed = _flow_backed_explicit_pairs(explicit)
+        self.assertEqual(
+            [("C", "D"), ("E", "F")],
+            list(observed[["source_article_id", "target_article_id"]].itertuples(index=False, name=None)),
+        )
+
     def test_group_identity_is_candidate_not_flow(self) -> None:
         groups = freeze_product_group_snapshot(self.groups_raw)
         pairs = build_product_group_candidates(self.candidates, groups)
@@ -540,6 +611,20 @@ class V014ProcessingTests(unittest.TestCase):
         self.assertTrue(plan.sources.empty)
         self.assertEqual("PROCESSING_RAW_UNAVAILABLE", plan.quarantined.iloc[0]["reason_code"])
 
+    def test_negative_finished_external_transaction_is_also_quarantined(self) -> None:
+        finished, raw, recipes, registry = self._inputs()
+        finished["external_receive_qty"] = -1.0
+
+        plan = infer_processing_postings(
+            finished, raw, recipes, registry, relation_snapshot_id="r1"
+        )
+
+        self.assertTrue(plan.sources.empty)
+        self.assertEqual(
+            "PROCESSING_FINISHED_EXTERNAL_RECEIPT",
+            plan.quarantined.iloc[0]["reason_code"],
+        )
+
     def test_processing_plan_prices_through_main_daily_ledger(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
         activities = pd.DataFrame([
@@ -681,6 +766,23 @@ class V014InventoryTests(unittest.TestCase):
 
 
 class V014WindowTests(unittest.TestCase):
+    def test_explicit_window_keeps_requested_start_and_end(self) -> None:
+        rows = []
+        for offset in range(10):
+            day = (date(2026, 7, 26) + timedelta(days=offset)).isoformat()
+            for source in REQUIRED_SOURCE_NAMES:
+                rows.append({
+                    "store_id": "A3XV", "business_date": day,
+                    "source_name": source, "is_complete": True,
+                })
+        window = select_complete_window(
+            pd.DataFrame(rows), store_id="A3XV",
+            start="2026-07-27", end="2026-08-04",
+        )
+        self.assertEqual("2026-07-27", window.start)
+        self.assertEqual("2026-08-04", window.end)
+        self.assertEqual(9, len(window.days))
+
     def test_auto_window_requires_all_sources_for_all_seven_days(self) -> None:
         end = date(2026, 7, 20)
         rows = []
@@ -746,6 +848,15 @@ class V014OutputTests(unittest.TestCase):
         self.assertAlmostEqual(0.3, float(sku["store_profit_rate"]))
         self.assertEqual("G1", sku["article_group_id"])
 
+    def test_near_zero_aggregated_denominator_does_not_create_unbounded_rate(self) -> None:
+        row = self._sku_row()
+        row["loss_amount"] = 10.0
+        row["loss_rate_denominator"] = 1e-12
+        result = build_v014_levels_result(
+            pd.DataFrame([row]), self._events([row])
+        )
+        self.assertTrue(result["loss_rate"].eq(0.0).all())
+
     def test_unmapped_product_group_uses_blank_contract_fields(self) -> None:
         source = pd.DataFrame([self._sku_row()])
         source["article_group_id"] = None
@@ -804,9 +915,28 @@ class V014OutputTests(unittest.TestCase):
             & result["category_level1_description"].eq("熟食类")
             & result["day_clear"].eq("2")
         ].iloc[0]
+        source_sku = result.loc[
+            result["level_description"].eq("sku")
+            & result["sku_id"].eq("SOURCE")
+            & result["day_clear"].eq("2")
+        ].iloc[0]
+        cooked_sku = result.loc[
+            result["level_description"].eq("sku")
+            & result["sku_id"].eq("COOKED")
+            & result["day_clear"].eq("2")
+        ].iloc[0]
         self.assertEqual(70.0, float(store["store_profit_amount"]))
         self.assertEqual(53.0, float(pork["store_profit_amount"]))
         self.assertEqual(17.0, float(cooked_level["store_profit_amount"]))
+        self.assertEqual(50.0, float(source_sku["store_profit_amount"]))
+        self.assertEqual(20.0, float(cooked_sku["store_profit_amount"]))
+        for level in ("大分类", "spu", "sku"):
+            level_total = result.loc[
+                result["level_description"].eq(level)
+                & result["day_clear"].eq("2"),
+                "store_profit_amount",
+            ].sum()
+            self.assertEqual(float(store["store_profit_amount"]), float(level_total))
 
     def test_nonreportable_material_is_excluded_from_public_output(self) -> None:
         reportable = self._sku_row()
@@ -1033,6 +1163,8 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                 for table in (
                     "t_v014_levels_result",
                     "v014_sku_daily",
+                    "v014_relation_registry",
+                    "v014_relation_resolution",
                 ):
                     published_days = read.execute(
                         f'SELECT MIN(business_date), MAX(business_date) FROM "{table}"'

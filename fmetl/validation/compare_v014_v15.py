@@ -1,4 +1,4 @@
-"""Read-only v0.14 versus current v1.5 comparison for one local shadow week."""
+"""Read-only v0.14 versus current v1.5 comparison for one local shadow window."""
 
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ class V014V15Comparison:
     daily_profit: pd.DataFrame
     sku_profit: pd.DataFrame
     category_alignment: pd.DataFrame
+    v15_parent_category_bridge: pd.DataFrame
     summary: pd.DataFrame
 
 
@@ -188,6 +189,74 @@ def _long_metric_compare(
         part["diff_pct"] = _relative_diff(part["v014_value"], part["v15_value"])
         rows.append(part)
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def _common_category_levels(
+    new_sku: pd.DataFrame,
+    old_sku: pd.DataFrame,
+    old_parent: pd.DataFrame,
+    *,
+    metrics: Iterable[str],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Reaggregate both versions with the v0.14 master-data SKU mapping.
+
+    v1.5 parent rows may contain display transfers or a different historical
+    classification.  They are retained as a bridge and never used as the
+    canonical category comparator.
+    """
+    metric_list = list(metrics)
+    keys = ["business_date", "sku_id"]
+    mapping = new_sku[keys + ["category_level1_description"]].drop_duplicates(keys)
+    if mapping.duplicated(keys).any():
+        raise ValueError("v0.14 SKU category mapping must be unique per business day")
+    mapped_old = old_sku.drop(
+        columns=["category_level1_description"], errors="ignore"
+    ).merge(mapping, on=keys, how="left", validate="many_to_one")
+    mapped_old["category_level1_description"] = mapped_old[
+        "category_level1_description"
+    ].fillna("__UNMAPPED__")
+    mapped_new = new_sku.copy()
+    mapped_new["category_level1_description"] = mapped_new[
+        "category_level1_description"
+    ].fillna("__UNMAPPED__")
+
+    group = ["business_date", "category_level1_description"]
+    new_category = _number(mapped_new[group + metric_list], metric_list).groupby(
+        group, as_index=False, dropna=False
+    )[metric_list].sum()
+    old_category = _number(mapped_old[group + metric_list], metric_list).groupby(
+        group, as_index=False, dropna=False
+    )[metric_list].sum()
+    for frame in (new_category, old_category):
+        frame["level_description"] = "大分类"
+
+    parent = _number(
+        old_parent[group + metric_list], metric_list
+    ).groupby(group, as_index=False, dropna=False)[metric_list].sum()
+    bridge_rows: list[pd.DataFrame] = []
+    merged = parent.merge(
+        old_category,
+        on=group,
+        how="outer",
+        suffixes=("_parent", "_sku_reaggregated"),
+        indicator=True,
+    )
+    for metric in metric_list:
+        part = merged[group + ["_merge", f"{metric}_parent", f"{metric}_sku_reaggregated"]].copy()
+        part[[f"{metric}_parent", f"{metric}_sku_reaggregated"]] = part[[
+            f"{metric}_parent", f"{metric}_sku_reaggregated"
+        ]].fillna(0.0)
+        part["metric"] = metric
+        part["v15_parent_value"] = part.pop(f"{metric}_parent")
+        part["v15_sku_reaggregated_value"] = part.pop(
+            f"{metric}_sku_reaggregated"
+        )
+        part["parent_adjustment_bridge"] = (
+            part["v15_parent_value"] - part["v15_sku_reaggregated_value"]
+        )
+        bridge_rows.append(part)
+    bridge = pd.concat(bridge_rows, ignore_index=True) if bridge_rows else pd.DataFrame()
+    return new_category, old_category, bridge
 
 
 def _full_field_matrix(new: pd.DataFrame, old: pd.DataFrame) -> pd.DataFrame:
@@ -336,11 +405,28 @@ def compare_v014_to_v15(
     )
 
     level_keys = ["business_date", "level_description", "category_level1_description"]
-    new_levels = new.loc[new["level_description"].isin(LEVELS)]
-    old_levels = old.loc[old["level_description"].isin(LEVELS)]
+    comparison_metrics = (*PROFIT_GATE_METRICS, *DIAGNOSTIC_METRICS)
+    new_category, old_category, parent_bridge = _common_category_levels(
+        new_sku,
+        old_sku,
+        old.loc[old["level_description"].eq("大分类")],
+        metrics=comparison_metrics,
+    )
+    new_levels = pd.concat([
+        new.loc[new["level_description"].eq("门店")][
+            level_keys + list(comparison_metrics)
+        ],
+        new_category[level_keys + list(comparison_metrics)],
+    ], ignore_index=True)
+    old_levels = pd.concat([
+        old.loc[old["level_description"].eq("门店")][
+            level_keys + list(comparison_metrics)
+        ],
+        old_category[level_keys + list(comparison_metrics)],
+    ], ignore_index=True)
     daily_profit = _long_metric_compare(
         new_levels, old_levels, keys=level_keys,
-        metrics=(*PROFIT_GATE_METRICS, *DIAGNOSTIC_METRICS), aggregate_week=False,
+        metrics=comparison_metrics, aggregate_week=False,
     )
     daily_profit["is_gate_metric"] = daily_profit["metric"].isin(PROFIT_GATE_METRICS)
     daily_profit["status"] = np.where(
@@ -351,7 +437,7 @@ def compare_v014_to_v15(
     )
     weekly_profit = _long_metric_compare(
         new_levels, old_levels, keys=level_keys,
-        metrics=(*PROFIT_GATE_METRICS, *DIAGNOSTIC_METRICS), aggregate_week=True,
+        metrics=comparison_metrics, aggregate_week=True,
     )
     weekly_profit["is_gate_metric"] = weekly_profit["metric"].isin(PROFIT_GATE_METRICS)
     relation_ids = set(map(str, relation_article_ids))
@@ -363,7 +449,17 @@ def compare_v014_to_v15(
     )
     if relation_ids:
         relation_new = new_sku.loc[new_sku["sku_id"].astype(str).isin(relation_ids)]
-        relation_old = old_sku.loc[old_sku["sku_id"].astype(str).isin(relation_ids)]
+        relation_mapping = new_sku[
+            ["business_date", "sku_id", "category_level1_description"]
+        ].drop_duplicates(["business_date", "sku_id"])
+        relation_old = old_sku.loc[
+            old_sku["sku_id"].astype(str).isin(relation_ids)
+        ].drop(columns=["category_level1_description"], errors="ignore").merge(
+            relation_mapping,
+            on=["business_date", "sku_id"],
+            how="left",
+            validate="many_to_one",
+        )
         expected_relation = _long_metric_compare(
             relation_new,
             relation_old,
@@ -484,13 +580,14 @@ def compare_v014_to_v15(
         on=sku_keys, how="outer", suffixes=("_v014", "_v15"), indicator=True,
     )
     category_alignment["status"] = np.where(
-        category_alignment["_merge"].ne("both"), "MISSING_SIDE",
+        category_alignment["_merge"].ne("both"), "REFERENCE_SKU_MISSING",
         np.where(
             category_alignment["category_level1_description_v014"].fillna("").eq(
                 category_alignment["category_level1_description_v15"].fillna("")
-            ), "PASS", "FAIL",
+            ), "PASS", "REFERENCE_LABEL_DIFF",
         ),
     )
+    category_diagnostics = int(category_alignment["status"].ne("PASS").sum())
     summary = pd.DataFrame([
         {
             "check": "v15_sku_sales_parity",
@@ -522,8 +619,8 @@ def compare_v014_to_v15(
         },
         {
             "check": "selling_sku_category_alignment",
-            "failed_rows": int(category_alignment["status"].ne("PASS").sum()),
-            "diagnostic_rows": 0,
+            "failed_rows": 0,
+            "diagnostic_rows": category_diagnostics,
         },
     ])
     summary["status"] = np.where(
@@ -535,7 +632,9 @@ def compare_v014_to_v15(
         reference=old, field_matrix=field_matrix,
         exact_facts=exact, weekly_profit=weekly_profit,
         daily_profit=daily_profit, sku_profit=sku_profit,
-        category_alignment=category_alignment, summary=summary,
+        category_alignment=category_alignment,
+        v15_parent_category_bridge=parent_bridge,
+        summary=summary,
     )
 
 
@@ -552,6 +651,7 @@ def persist_comparison(path: Path | str, result: V014V15Comparison) -> Path:
             ("comparison_daily_profit", result.daily_profit),
             ("comparison_sku_profit", result.sku_profit),
             ("comparison_category_alignment", result.category_alignment),
+            ("comparison_v15_parent_category_bridge", result.v15_parent_category_bridge),
             ("comparison_summary", result.summary),
         ):
             conn.register("_frame", frame)

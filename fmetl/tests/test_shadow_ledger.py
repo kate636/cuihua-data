@@ -6,7 +6,12 @@ import pandas as pd
 
 from fmetl.calculations.ledger import run_weighted_ledger
 from fmetl.outputs.shadow_levels import build_shadow_levels_daily
-from fmetl.validation.v014 import validate_v014_ledger
+from fmetl.validation.v014 import (
+    assert_hard_gates,
+    is_publishable,
+    validate_publishability,
+    validate_v014_ledger,
+)
 
 
 def _activity(article_ids: list[str]) -> pd.DataFrame:
@@ -32,6 +37,65 @@ def _openings(article_ids: list[str]) -> pd.DataFrame:
 
 
 class ShadowLedgerTests(unittest.TestCase):
+    def test_zero_cost_outflow_blocks_publish_but_keeps_diagnostic_run(self) -> None:
+        activity = _activity(["A"])
+        activity.loc[0, ["gross_sale_qty", "net_sale_qty", "net_sale_amt"]] = [
+            1.0, 1.0, 10.0,
+        ]
+        empty_source = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_target = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+        ledger = run_weighted_ledger(
+            activity, _openings(["A"]), empty_source, empty_target
+        )
+        hard = validate_v014_ledger(ledger.sku_daily, ledger.internal_postings)
+        publish = validate_publishability(ledger.sku_daily)
+        validation = pd.concat([hard, publish], ignore_index=True)
+        assert_hard_gates(validation)
+        self.assertFalse(is_publishable(validation))
+        self.assertEqual(
+            1,
+            int(
+                validation.loc[
+                    validation["check_name"].eq("ISSUE_COST_EVIDENCE"),
+                    "failure_count",
+                ].iloc[0]
+            ),
+        )
+
+    def test_signed_purchase_return_rolls_through_profit_and_ending_inventory(self) -> None:
+        activity = _activity(["A"])
+        activity.loc[0, [
+            "store_receive_qty", "store_receive_amt", "gross_sale_qty",
+            "net_sale_qty", "net_sale_amt",
+        ]] = [-16.0, -139.2, 3.0, 3.0, 35.7]
+        opening = _openings(["A"])
+        opening.loc[0, ["opening_qty", "opening_amt"]] = [22.0, 191.4]
+        empty_source = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_target = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+
+        row = run_weighted_ledger(
+            activity, opening, empty_source, empty_target
+        ).sku_daily.iloc[0]
+
+        self.assertAlmostEqual(8.7, row.issue_unit_cost)
+        self.assertAlmostEqual(3.0, row.end_qty)
+        self.assertAlmostEqual(26.1, row.end_amt)
+        self.assertAlmostEqual(9.6, row.accounting_profit)
+
     def test_external_observations_are_preserved_exactly(self) -> None:
         activity = _activity(["A"])
         activity.loc[0, [
@@ -151,6 +215,29 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertEqual(0.0, result.loc["2026-07-14", "end_qty"])
         self.assertEqual(10.0, result.loc["2026-07-15", "sale_return_cost_basis"])
         self.assertEqual(10.0, result.loc["2026-07-15", "end_amt"])
+
+    def test_same_day_return_can_net_against_gross_sale_without_inventing_cost(self) -> None:
+        activity = _activity(["A"])
+        activity.loc[0, [
+            "gross_sale_qty", "sale_return_qty", "net_sale_qty", "net_sale_amt",
+        ]] = [2.608, 0.396, 2.212, 35.16]
+        empty_sources = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_targets = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+
+        row = run_weighted_ledger(
+            activity, _openings(["A"]), empty_sources, empty_targets
+        ).sku_daily.iloc[0]
+
+        self.assertEqual(0.0, row.sale_return_cost_basis)
+        self.assertAlmostEqual(2.212, row.neg_clamp_qty)
+        self.assertEqual(0.0, row.end_amt)
 
     def test_internal_cycle_is_blocked(self) -> None:
         activity = _activity(["A", "B"])

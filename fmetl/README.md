@@ -100,8 +100,7 @@ flowchart TB
 
 **图解**
 
-- StarRocks 是 Hive 数据的访问镜像，不是新的业务口径；源字段语义以字段手册登记的 Hive
-  血缘为准。
+- StarRocks 提供 Hive 数据的访问镜像；源字段语义以字段手册登记的 Hive 血缘为准。
 - 商品集、换码明细和加工关系只提供关系证据，不替代销售、验收、盘点和报损事实。
 - v1.5 不连接关系、账本或成本模块，只连接最终对比模块。
 - `source`、`stage`、`shadow` 三个 DuckDB 文件必须分开，防止原始缓存被计算结果覆盖。
@@ -141,14 +140,16 @@ flowchart TB
 
 **图解**
 
-- `--end auto` 不直接取“昨天”，而是从前一业务日向前寻找所有必需源共同完整的
-  `D-1 + 连续 7 天`；D-1 只用于计算首个发布日的正确期初。
+- `--end auto` 从前一业务日向前寻找所有必需源共同完整的 `D-1 + 连续 7 天`；D-1 只用于
+  计算首个发布日的正确期初。
 - 显式 `--end YYYY-MM-DD` 严格使用该日期作为第 7 个发布日，不自动回退；缺少必需源时
   运行失败并标明具体源表和日期。
+- 显式 `--start YYYY-MM-DD --end YYYY-MM-DD` 发布完整连续区间，并额外抽取开始日前一日
+  作为期初预热；适用于连续重刷超过 7 天的数据。
 - 任一必需源缺失时，整个窗口一起回退，不拼接不同来源的不同日期。
 - 镜像按“源表 × 日期”断点续拉；成功分区立即提交，重跑时跳过，超时不会丢失已完成数据。
-- `source` 和 `stage` 保存 D-1；`t_v014_levels_result`、SKU 日账和正式内部过账只保存
-  7 个发布日。新窗口事务替换旧 v0.14 表，因此不会混入上一次窗口。
+- `source` 和 `stage` 保存 D-1；正式结果、SKU 日账、关系登记、正式内部过账
+  和异常表只保存发布区间。新窗口事务替换旧 v0.14 表，因此不会混入上一次窗口。
 - 关系、来源、阶段表和输出合同都生成校验和，便于复现同一次运行。
 - 硬门禁在输出落库前执行；任一硬门禁失败，运行立即终止。
 
@@ -159,10 +160,10 @@ flowchart TB
 | 业务域 | 主要镜像 | v0.14 用途 |
 |---|---|---|
 | 销售 | `strategy_fm_sales_di`、`strategy_fm_article_sale_di` | 销售、退回、渠道、客数和折扣 |
-| 门店验收 | `strategy_fm_purchase_di` | 唯一正式外部进货数量和金额 |
+| 门店验收 | `strategy_fm_purchase_di` | 唯一正式外部净进货数量和金额；采购退回保留负号 |
 | 供应链 | `strategy_fm_scm_di`、`strategy_fm_scm_adjust_di` | 订货、出库成本、结算和供应链毛利 |
 | 报损 | `strategy_fm_loss_di` | 已知报损数量；上游未知损耗仅审计 |
-| 盘点 | `strategy_fm_store_article_inventory_detail_di` | 非负实际库存和盘点证据 |
+| 盘点 | `strategy_fm_store_article_inventory_detail_di` | 仅有明确人工创建人或更新人的非负记录覆盖期末；系统快照只审计 |
 | 订单 | `strategy_fm_order_offline_di`、`strategy_fm_order_online_di` | 订单键、渠道客数、新老客 |
 | 商品 | `strategy_fm_dim_goods` | SKU、SPU、单位和分类维度 |
 | 日清 | `strategy_fm_dim_day_clear`、`strategy_fm_chdj_article_di`、销售日清标签 | 正式名单优先，其次销售标签，最后默认非日清 |
@@ -222,6 +223,8 @@ flowchart TB
 - 正式 BOM、正式加工和显式换码没有静默优先级；同日同关系对命中多个正式类型时直接隔离。
 - 只有 `status=ACTIVE` 且 `formal_flow_allowed=true` 的关系可以生成内部流。
 - 商品集只生成候选关系。没有当日数量或获批固定规则时，不产生库存和成本。
+- `purchase_di` 是稠密日快照；只有当日验收数量或金额非零的行才生成订验候选。
+- 静态 `article_convert` 只证明单位兼容；只有当日转换事件或获批固定规则才进入当日关系登记。
 - 每条登记记录保存关系版本、证据来源、生效日期、数量比例和成本比例。
 
 关系类型：
@@ -431,7 +434,8 @@ SCM 退货金额保留在独立退货指标中，不在供应链毛利中重复�
 
 - 同码且没有内部流的 SKU 日，可使用 Hive 库存观察量形成兼容展示毛利；
 - 有 BOM、加工或包装内部流的 SKU 日，继续使用 v0.14 关系账本结果；
-- 炒菜机和生熟联动只调整公共损耗、门店毛利和全链路毛利字段；
+- 炒菜机金额从损耗扣除并加回各层兼容展示毛利；
+- 生熟联动从损耗扣除，只在大分类执行来源类加回、熟食类扣减，门店、SPU 和 SKU 毛利不增加；
 - 展示调整不修改内部库存、单位成本和 `v014_internal_posting`。
 
 这样既保留 v0.14 的关系修正，也避免为兼容展示反向污染会计底项。
@@ -507,6 +511,18 @@ flowchart TB
 
 隔离表保存门店、日期、SKU 或关系对、原因码和证据明细，便于从大分类下钻到 SKU。
 
+隔离按执行时机分为两类：
+
+- **阻断型**：发生在日账前。无效盘点不覆盖期末；冲突或缺证据的关系不生成内部转出、转入腿；
+  有金额无数量的验收行不进入加权成本池。其他合法外部事实继续记账。
+- **发布阻断型**：发生在日账后。`MISSING_COST_EVIDENCE` 保留 SKU 日账和诊断输出，同时使
+  `ISSUE_COST_EVIDENCE` 发布门禁失败。运行状态标记为 `DIAGNOSTIC_ONLY_COST_GAP`，禁止将
+  零成本毛利作为正式结果发布。
+
+隔离表每次影子运行重新生成，当前用于技术审计和差异下钻，未包含责任人、处理状态或关闭时间。
+完整执行分支和当前 1,583 条原因明细见
+[`V0.14_IMPLEMENTED_ARCHITECTURE.md`](docs/architecture/V0.14_IMPLEMENTED_ARCHITECTURE.md#111-异常隔离的执行语义)。
+
 ## 13. 校验体系
 
 ### 13.1 账本硬门禁
@@ -524,15 +540,18 @@ flowchart TB
 
 任一校验失败，影子运行失败。
 
+另有发布门禁 `ISSUE_COST_EVIDENCE`：销售、损耗或内部转出必须具有正的支出单位成本。该门禁
+失败时仍保留本地诊断库，`v014_run_manifest.publish_eligible=false`，不得发布正式结果。
+
 ### 13.2 v1.5 只读对比
 
 ```mermaid
 flowchart LR
-    V014["v0.14 七日结果"] --> EXACT["完全一致校验"]
-    V15["v1.5 七日结果，只读"] --> EXACT
+    V014["v0.14 连续区间结果"] --> EXACT["完全一致校验"]
+    V15["v1.5 同期结果，只读"] --> EXACT
     EXACT --> SALES["SKU 销售额、销售数量"]
     EXACT --> RECEIVE["门店日验收金额"]
-    EXACT --> CATEGORY["发生销售 SKU 的大分类"]
+    EXACT --> CATEGORY["两边 SKU 按 master-data v2.3 重聚合的大分类"]
 
     V014 --> PROFIT["毛利校验"]
     V15 --> PROFIT
@@ -547,6 +566,7 @@ flowchart LR
 
 - 销售和验收属于同一事实，要求完全一致。
 - 门店和大分类毛利默认按 2% 检查；SKU 毛利允许因 BOM、库存和损耗逻辑修正而不同。
+- v1.5 原大分类行与其 SKU 重聚合结果的差额单列为父层展示桥，不作为成本或库存依据。
 - 能由正式关系过账完整解释的分类差异标记为 `EXPECTED_RELATION_DELTA`，必须保留金额证据。
 - 冻结的 123 个字段全部进入字段矩阵；v1.5 查询接口未返回的字段标记
   `REFERENCE_UNAVAILABLE`，不按 0 比较。
@@ -602,6 +622,18 @@ pip install duckdb pandas numpy python-dotenv requests
   --reuse-source-cache
 ```
 
+连续区间重刷示例：
+
+```bash
+.venv/bin/python -m fmetl.cli v014-shadow-week \
+  --store A3XV \
+  --start 2026-07-27 \
+  --end 2026-08-04 \
+  --source-db data/fm_v014_source.duckdb \
+  --stage-db data/fm_v014_stage.duckdb \
+  --db data/fm_v014_shadow.duckdb
+```
+
 ### 14.5 与 v1.5 对比
 
 ```bash
@@ -610,7 +642,8 @@ pip install duckdb pandas numpy python-dotenv requests
   --comparison-db data/fm_v014_comparison.duckdb
 ```
 
-该命令只读 v1.5 参考表，并将差异写入本地 comparison DB。
+该命令使用影子库内的完整连续日期区间，只读 v1.5 同期参考表，并将差异写入
+本地 comparison DB。区间可为 1 天或多天；日期断档时拒绝运行。
 
 ### 14.6 测试
 
@@ -665,22 +698,23 @@ fmetl/
 
 ## 17. 当前验证状态
 
-本地影子验证范围：A3XV，2026-07-17 至 2026-07-23。
+本地影子验证范围：A3XV，2026-07-27 至 2026-08-04。
 
 | 项目 | 结果 |
 |---|---:|
-| `t_v014_levels_result` | 122,061 行 |
+| `t_v014_levels_result` | 133,659 行 |
 | 输出字段 | 125 |
-| 单元测试 | 137 个通过 |
+| 单元测试 | 155 个通过 |
 | 账本硬门禁 | 8 项全部通过 |
-| SKU 销售事实差异 | 0 |
-| 门店日验收金额差异 | 0 |
-| 发生销售 SKU 大分类差异 | 0 |
-| 门店毛利差异率 | -0.14% |
-| 全链路毛利差异率 | -0.11% |
+| v1.5 只读对比 | 未通过发布门禁 |
+| 2026-07-28 验收额差异 | -76.83 元 |
+| 门店周门店毛利差异率 | +3.62% |
+| 门店周全链路毛利差异率 | +2.81% |
 | 服务器写入 | 0 |
 
-详细结果见
+代码实现与当前状态见
+[v0.14 已实现架构与全链路处理流程](docs/architecture/V0.14_IMPLEMENTED_ARCHITECTURE.md)。
+07-17～23 的历史验证快照仍保留在
 [v0.14 七日影子验证](docs/reviews/V0.14_SHADOW_VALIDATION.md)。
 
 ## 18. 发布前阻塞项
@@ -688,7 +722,9 @@ fmetl/
 - 确认 A3XV 商品集通用区域快照的生产权威性。
 - 补齐未确认牛肉 BOM、蔬菜固定转码和乳品包装比例。
 - 对高金额隔离关系补齐方向、数量、比例和生效日期。
-- 确认 v1.5 查询接口未返回的 16 个参考字段是否历史全空。
+- 解释 07-28 验收额差异和门店／大分类毛利差异，达到发布阈值。
+- 修复比较汇总与分类明细的失败计数不一致。
+- 将本地分类规则与服务器 master-data 权威版本再次同步核对。
 - 完成生产并行、回滚演练和单独发布审批。
 
 当前状态为 `foundation_ready_not_publishable`，不得直接切换生产 executor 或服务器 cron。

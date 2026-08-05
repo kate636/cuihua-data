@@ -18,6 +18,7 @@ def validate_v014_ledger(
         rows.append({
             "check_name": name, "passed": bool(passed),
             "failure_count": int(failures), "detail": detail,
+            "gate_type": "HARD",
         })
 
     negative_qty = int(sku_daily["end_qty"].lt(-qty_tolerance).sum())
@@ -116,8 +117,50 @@ def validate_v014_ledger(
     return pd.DataFrame(rows)
 
 
+def validate_publishability(
+    sku_daily: pd.DataFrame,
+    *,
+    qty_tolerance: float = 0.001,
+    cost_tolerance: float = 0.000001,
+) -> pd.DataFrame:
+    """Return release gates that may fail without discarding diagnostics."""
+    outflow_qty = (
+        sku_daily["gross_sale_qty"]
+        + sku_daily["known_lost_qty"]
+        + sku_daily["bom_out_qty"]
+        + sku_daily["pack_out_qty"]
+        + sku_daily["compose_out_qty"]
+        + sku_daily["residual_transfer_out_qty"]
+    )
+    missing_cost = sku_daily["issue_unit_cost"].le(cost_tolerance) & outflow_qty.gt(
+        qty_tolerance
+    )
+    failures = int(missing_cost.sum())
+    return pd.DataFrame([{
+        "check_name": "ISSUE_COST_EVIDENCE",
+        "passed": failures == 0,
+        "failure_count": failures,
+        "detail": "every sale, loss and internal outflow has a positive issue unit cost",
+        "gate_type": "PUBLISH",
+    }])
+
+
 def assert_hard_gates(validation: pd.DataFrame) -> None:
-    failed = validation.loc[~validation["passed"]]
+    hard = (
+        validation["gate_type"].eq("HARD")
+        if "gate_type" in validation
+        else pd.Series(True, index=validation.index)
+    )
+    failed = validation.loc[hard & ~validation["passed"]]
     if not failed.empty:
         names = ", ".join(failed["check_name"].astype(str))
         raise ValueError(f"v0.14 hard validation failed: {names}")
+
+
+def is_publishable(validation: pd.DataFrame) -> bool:
+    publish = (
+        validation["gate_type"].eq("PUBLISH")
+        if "gate_type" in validation
+        else pd.Series(False, index=validation.index)
+    )
+    return bool(validation.loc[publish, "passed"].all())

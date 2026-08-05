@@ -44,21 +44,29 @@ class V014V15ComparisonTests(unittest.TestCase):
         ]
         self.assertTrue(sales["status"].eq("PASS").all())
         gate = result.weekly_profit.loc[result.weekly_profit["metric"].eq("store_profit_amount")]
-        self.assertTrue(gate["status"].eq("PASS").all())
+        store_gate = gate.loc[gate["level_description"].eq("门店")]
+        category_gate = gate.loc[gate["level_description"].eq("大分类")]
+        self.assertTrue(store_gate["status"].eq("PASS").all())
+        self.assertTrue(category_gate["status"].eq("FAIL").all())
         self.assertTrue(result.sku_profit["status"].eq("LOCATE_ONLY").all())
         summary = result.summary.set_index("check")
-        self.assertEqual(
-            "DIAGNOSTIC",
-            summary.loc["weekly_profit_within_2pct", "status"],
-        )
+        self.assertEqual("FAIL", summary.loc["weekly_profit_within_2pct", "status"])
         self.assertEqual(123, len(result.field_matrix))
 
-    def test_category_mismatch_is_a_hard_failure(self) -> None:
+    def test_reference_category_label_mismatch_is_diagnostic(self) -> None:
         old = pd.DataFrame([_row(level="sku", sku="S1", category="熟食类", profit=20.0)])
         new = old.copy()
         new["category_level1_description"] = "预制菜"
         result = compare_v014_to_v15(new, old)
-        self.assertEqual(result.category_alignment.loc[0, "status"], "FAIL")
+        self.assertEqual(
+            result.category_alignment.loc[0, "status"],
+            "REFERENCE_LABEL_DIFF",
+        )
+        summary = result.summary.set_index("check")
+        self.assertEqual(
+            "DIAGNOSTIC",
+            summary.loc["selling_sku_category_alignment", "status"],
+        )
 
     def test_receipt_code_reallocation_does_not_break_category_alignment(self) -> None:
         old = pd.DataFrame([
@@ -87,11 +95,12 @@ class V014V15ComparisonTests(unittest.TestCase):
 
     def test_weekly_profit_over_two_percent_is_a_hard_failure(self) -> None:
         old = pd.DataFrame([
+            _row(level="sku", sku="S1", category="水果类", profit=100.0),
             _row(level="大分类", sku="", category="水果类", profit=100.0),
             _row(level="门店", sku="", category="", profit=100.0),
         ])
         new = old.copy()
-        new.loc[new["level_description"].eq("大分类"), "store_profit_amount"] = 103.0
+        new.loc[new["level_description"].isin({"sku", "大分类"}), "store_profit_amount"] = 103.0
         result = compare_v014_to_v15(new, old)
         failed = result.weekly_profit.loc[
             result.weekly_profit["is_gate_metric"]
@@ -126,6 +135,25 @@ class V014V15ComparisonTests(unittest.TestCase):
         self.assertEqual("EXPECTED_RELATION_DELTA", category["status"])
         summary = result.summary.set_index("check")
         self.assertNotEqual("FAIL", summary.loc["weekly_profit_within_2pct", "status"])
+
+    def test_v15_parent_category_adjustment_is_a_bridge_only(self) -> None:
+        old = pd.DataFrame([
+            _row(level="sku", sku="S1", category="猪肉类", profit=100.0),
+            _row(level="大分类", sku="", category="猪肉类", profit=130.0),
+            _row(level="门店", sku="", category="", profit=100.0),
+        ])
+        new = old.copy()
+        new.loc[new["level_description"].eq("大分类"), "store_profit_amount"] = 100.0
+        result = compare_v014_to_v15(new, old)
+        category = result.weekly_profit.loc[
+            result.weekly_profit["level_description"].eq("大分类")
+            & result.weekly_profit["metric"].eq("store_profit_amount")
+        ].iloc[0]
+        self.assertEqual("PASS", category["status"])
+        bridge = result.v15_parent_category_bridge.loc[
+            result.v15_parent_category_bridge["metric"].eq("store_profit_amount")
+        ].iloc[0]
+        self.assertEqual(30.0, float(bridge["parent_adjustment_bridge"]))
 
 
 if __name__ == "__main__":

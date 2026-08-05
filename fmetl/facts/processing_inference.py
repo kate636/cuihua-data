@@ -133,7 +133,7 @@ def infer_processing_postings(
                 "reason_code": "PROCESSING_MISSING_FINISHED_COUNT", "detail": "",
             })
             continue
-        if float(item.external_receive_qty) > tolerance:
+        if abs(float(item.external_receive_qty)) > tolerance:
             quarantine_rows.append({
                 "store_id": store, "business_date": day, "article_id": finished_id,
                 "reason_code": "PROCESSING_FINISHED_EXTERNAL_RECEIPT", "detail": str(item.external_receive_qty),

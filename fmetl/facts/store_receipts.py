@@ -35,13 +35,38 @@ def _require(frame: pd.DataFrame, columns: set[str], label: str) -> None:
         raise KeyError(f"{label} missing columns: {missing}")
 
 
-def _numeric_nonnegative(frame: pd.DataFrame, columns: tuple[str, ...], label: str) -> None:
+def _numeric_finite(frame: pd.DataFrame, columns: tuple[str, ...], label: str) -> None:
     for column in columns:
         frame[column] = pd.to_numeric(frame[column], errors="raise").fillna(0.0)
         if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
             raise ValueError(f"{label}.{column} must be finite")
-        if frame[column].lt(-0.000001).any():
-            raise ValueError(f"{label}.{column} cannot be negative")
+
+
+def _validate_signed_receipt(
+    frame: pd.DataFrame,
+    qty_column: str,
+    amt_column: str,
+    label: str,
+) -> None:
+    """Validate a signed net receipt without erasing purchase returns.
+
+    The Hive receipt facts use negative quantity and amount for a purchase
+    return/correction.  Quantity and amount therefore have to point in the
+    same direction; zero-cost gifts remain valid.
+    """
+    _numeric_finite(frame, (qty_column, amt_column), label)
+    qty = frame[qty_column]
+    amt = frame[amt_column]
+    sign_mismatch = (
+        qty.abs().gt(0.000001)
+        & amt.abs().gt(0.01)
+        & np.sign(qty).ne(np.sign(amt))
+    )
+    if sign_mismatch.any():
+        raise ValueError(
+            f"{label} quantity and amount signs must match: "
+            f"{frame.loc[sign_mismatch, [qty_column, amt_column]].head(10).to_dict('records')}"
+        )
 
 
 def _validate_keys(frame: pd.DataFrame, columns: list[str], label: str) -> None:
@@ -75,7 +100,7 @@ def _parent_bridge(
     bridge = bridge.loc[row_keys.isin(expected_keys)].copy()
     if bridge.empty and expected_keys:
         raise ValueError(f"parent reconstruction missing receive_sale rows: {sorted(expected_keys)}")
-    _numeric_nonnegative(bridge, ("inbound_qty", "inbound_amount"), "receive_sale")
+    _validate_signed_receipt(bridge, "inbound_qty", "inbound_amount", "receive_sale")
 
     keys = ["store_id", "inc_day", "article_id"]
     consistency = bridge.groupby(keys, dropna=False).agg(
@@ -130,7 +155,7 @@ def _fill_missing_same_code_receipts(
     if bridge.empty:
         purchase["_receipt_fallback"] = False
         return purchase
-    _numeric_nonnegative(bridge, ("inbound_qty", "inbound_amount"), "receive_sale")
+    _validate_signed_receipt(bridge, "inbound_qty", "inbound_amount", "receive_sale")
     keys = ["store_id", "inc_day", "article_id", "sale_article_id"]
     consistency = bridge.groupby(keys, dropna=False).agg(
         qty_min=("inbound_qty", "min"),
@@ -213,7 +238,9 @@ def build_store_receipts(
     grain = ["store_id", "business_date", "article_id", "sale_article_id", "day_clear"]
     if source.duplicated(grain).any():
         raise ValueError(f"purchase grain is not unique: {grain}")
-    _numeric_nonnegative(source, ("sale_article_qty", "sale_article_purchase_amt"), "purchase")
+    _validate_signed_receipt(
+        source, "sale_article_qty", "sale_article_purchase_amt", "purchase"
+    )
     active = source.loc[
         source["sale_article_qty"].abs().gt(0.000001)
         | source["sale_article_purchase_amt"].abs().gt(0.000001)
@@ -226,8 +253,8 @@ def build_store_receipts(
     reconstruct_mask = active_keys.isin(reconstruction_keys)
     direct = active.loc[~reconstruct_mask].copy()
     direct_amount_only = direct.loc[
-        direct["sale_article_qty"].le(0.000001)
-        & direct["sale_article_purchase_amt"].gt(0.000001)
+        direct["sale_article_qty"].abs().le(0.000001)
+        & direct["sale_article_purchase_amt"].abs().gt(0.01)
     ].copy()
     direct = direct.drop(index=direct_amount_only.index)
     if direct_amount_only.empty:
@@ -253,7 +280,7 @@ def build_store_receipts(
         "RECEIVE_SALE_DIRECT_FALLBACK",
         "PURCHASE_DI_ALLOCATED_RECEIPT",
     )
-    direct["pool_effect"] = "EXTERNAL_IN"
+    direct["pool_effect"] = "EXTERNAL_NET"
 
     parent_source = active.loc[reconstruct_mask]
     expected_parent_keys = set(zip(
@@ -275,7 +302,7 @@ def build_store_receipts(
             "receive_qty": bridge["qty_max"],
             "receive_amt": bridge["amt_max"],
             "cost_source": "RECEIVE_SALE_PARENT_DEDUP",
-            "pool_effect": "EXTERNAL_IN",
+            "pool_effect": "EXTERNAL_NET",
         })
 
     posting_frames = [direct[list(POSTING_COLUMNS)]]

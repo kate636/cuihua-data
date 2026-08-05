@@ -52,12 +52,19 @@ DISTINCT_COUNT_INPUTS = {
 
 
 def _divide(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    denominator_values = denominator.to_numpy(dtype=float)
+    # Additive money/quantity denominators can retain floating cancellation
+    # residue after multi-level aggregation.  Values below the persisted
+    # DECIMAL(18,4) precision are accounting zero and must not create an
+    # unbounded rate.
+    valid = np.isfinite(denominator_values) & (np.abs(denominator_values) >= 0.00005)
     values = np.divide(
         numerator.to_numpy(dtype=float),
-        denominator.to_numpy(dtype=float),
+        denominator_values,
         out=np.zeros(len(numerator), dtype=float),
-        where=denominator.to_numpy(dtype=float) != 0,
+        where=valid,
     )
+    values[~np.isfinite(values)] = 0.0
     return pd.Series(values, index=numerator.index)
 
 
@@ -265,8 +272,11 @@ def build_v014_levels_result(
     # and profit fields; they never change inventory, cost, or internal posting.
     special_amt = output["ccj_amt"] + output["ssls_amt"]
     special_qty = output["ccj_qty"] + output["ssls_qty"]
-    output["accounting_profit"] += special_amt
-    output["accounting_full_profit"] += special_amt
+    # CCJ is a compatible display add-back at every aggregation level.  SSLS
+    # is a category-only transfer: credit the source large category and debit
+    # 熟食.  Applying SSLS at SKU/SPU/store creates a non-additive hierarchy.
+    output["accounting_profit"] += output["ccj_amt"]
+    output["accounting_full_profit"] += output["ccj_amt"]
     output["loss_amount"] -= special_amt
     output["loss_qty"] -= special_qty
     output["store_know_lost_amt"] -= special_amt
@@ -280,12 +290,16 @@ def build_v014_levels_result(
         how="left",
         validate="many_to_one",
     )
+    large_category = output["level_description"].eq("大分类")
+    output.loc[large_category, "accounting_profit"] += output.loc[
+        large_category, "ssls_amt"
+    ]
+    output.loc[large_category, "accounting_full_profit"] += output.loc[
+        large_category, "ssls_amt"
+    ]
     ssls_debit = (
-        output["level_description"].eq("门店")
-        | (
-            output["level_description"].eq("大分类")
-            & output["category_level1_description"].eq("熟食类")
-        )
+        large_category
+        & output["category_level1_description"].eq("熟食类")
     )
     output.loc[ssls_debit, "accounting_profit"] -= output.loc[
         ssls_debit, "_total_ssls_amt"

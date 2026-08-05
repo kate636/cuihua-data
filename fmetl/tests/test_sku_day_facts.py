@@ -87,7 +87,7 @@ class SkuDayFactTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_known_loss(source)
 
-    def test_valid_system_snapshot_is_formal_balance_but_not_explicit_operator_count(self) -> None:
+    def test_only_explicit_operator_snapshot_is_formal_balance(self) -> None:
         source = pd.DataFrame([
             {"shop_id": "A3XV", "inventory_date": "2026-07-14", "inc_day": "2026-07-14",
              "sku_code": "human",
@@ -109,12 +109,13 @@ class SkuDayFactTests(unittest.TestCase):
         self.assertTrue(bool(result.loc["human", "is_counted"]))
         self.assertTrue(bool(result.loc["human", "is_explicit_operator_count"]))
         self.assertEqual(result.loc["human", "actual_stock_qty"], 2)
-        self.assertTrue(bool(result.loc["system-zero", "is_counted"]))
+        self.assertFalse(bool(result.loc["system-zero", "is_counted"]))
         self.assertFalse(bool(result.loc["system-zero", "is_explicit_operator_count"]))
         self.assertEqual(
-            result.loc["system-zero", "count_status"], "FORMAL_SYSTEM_BALANCE_SNAPSHOT"
+            result.loc["system-zero", "count_status"], "SYSTEM_SNAPSHOT_AUDIT_ONLY"
         )
-        self.assertEqual(result.loc["system-zero", "actual_stock_qty"], 0)
+        self.assertTrue(pd.isna(result.loc["system-zero", "actual_stock_qty"]))
+        self.assertEqual(result.loc["system-zero", "source_actual_stock_qty"], 0)
         self.assertEqual(result.loc["bad-human", "count_status"], "INVALID_OPERATOR_ACTUAL")
 
     def test_inventory_snapshot_infinity_is_blocked(self) -> None:
@@ -140,6 +141,30 @@ class SkuDayFactTests(unittest.TestCase):
         source.loc[0, "inc_day"] = "2026-07-14"
         source.loc[0, "profit_loss_qty"] = 0
         with self.assertRaises(ValueError):
+            normalize_inventory_counts(source)
+
+    def test_operator_and_system_rows_for_same_sku_day_are_rejected(self) -> None:
+        source = pd.DataFrame([
+            {
+                "shop_id": "A3XV", "inventory_date": "2026-07-27",
+                "inc_day": "2026-07-27", "sku_code": "A",
+                "sale_stock_qty": 2, "actual_stock_qty": 3, "profit_loss_qty": 1,
+                "created_by": "162032", "updated_by": "162032",
+                "created_at": "2026-07-27 21:00:00",
+                "updated_at": "2026-07-27 21:00:00",
+            },
+            {
+                "shop_id": "A3XV", "inventory_date": "2026-07-27",
+                "inc_day": "2026-07-27", "sku_code": "A",
+                "sale_stock_qty": 2, "actual_stock_qty": 3, "profit_loss_qty": 1,
+                "created_by": "系统", "updated_by": "系统",
+                "created_at": "2026-07-27 23:00:00",
+                "updated_at": "2026-07-27 23:00:00",
+            },
+        ])
+        with self.assertRaisesRegex(
+            ValueError, "inventory_detail source grain must be unique"
+        ):
             normalize_inventory_counts(source)
 
     def test_chdj_day_clear_requires_unique_binary_daily_label(self) -> None:

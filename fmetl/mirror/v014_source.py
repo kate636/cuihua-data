@@ -59,6 +59,41 @@ class MirrorSourceBundle:
     completeness: pd.DataFrame
 
 
+def _write_mirror_frame(
+    conn: duckdb.DuckDBPyConnection,
+    source_name: str,
+    contract: object,
+    frame: pd.DataFrame,
+) -> None:
+    """Persist one source partition without freezing an all-DOUBLE empty schema."""
+    table = f"v014_mirror_{source_name}"
+    registered = "_v014_increment"
+    conn.register(registered, frame)
+    try:
+        exists = bool(conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name=?",
+            [table],
+        ).fetchone()[0])
+        if exists:
+            row_count = int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
+            if row_count == 0 and not frame.empty:
+                conn.execute(f'DROP TABLE "{table}"')
+                conn.execute(f'CREATE TABLE "{table}" AS SELECT * FROM "{registered}"')
+                return
+            partition = getattr(contract, "partition_column")
+            values = tuple(frame[partition].dropna().astype(str).unique())
+            for value in values:
+                conn.execute(
+                    f'DELETE FROM "{table}" WHERE CAST("{partition}" AS VARCHAR)=?',
+                    [value],
+                )
+            conn.execute(f'INSERT INTO "{table}" BY NAME SELECT * FROM "{registered}"')
+        else:
+            conn.execute(f'CREATE TABLE "{table}" AS SELECT * FROM "{registered}"')
+    finally:
+        conn.unregister(registered)
+
+
 def seven_days_ending(end: str | date) -> tuple[str, ...]:
     end_day = date.fromisoformat(end) if isinstance(end, str) else end
     return tuple((end_day - timedelta(days=6 - offset)).isoformat() for offset in range(7))
@@ -68,6 +103,19 @@ def shadow_source_days_ending(end: str | date) -> tuple[str, ...]:
     """Return D-1 warm-up plus the seven publishable business days."""
     end_day = date.fromisoformat(end) if isinstance(end, str) else end
     return tuple((end_day - timedelta(days=7 - offset)).isoformat() for offset in range(8))
+
+
+def shadow_source_days_between(start: str | date, end: str | date) -> tuple[str, ...]:
+    """Return D-1 warm-up plus one explicit continuous publish window."""
+    start_day = date.fromisoformat(start) if isinstance(start, str) else start
+    end_day = date.fromisoformat(end) if isinstance(end, str) else end
+    if start_day > end_day:
+        raise ValueError(f"v0.14 shadow start must not exceed end: {start_day} > {end_day}")
+    warmup_day = start_day - timedelta(days=1)
+    return tuple(
+        (warmup_day + timedelta(days=offset)).isoformat()
+        for offset in range((end_day - warmup_day).days + 1)
+    )
 
 
 def discover_latest_mirror_day(
@@ -280,27 +328,6 @@ def extract_and_persist_v014_mirror_sources(
                 [store_id, business_day, source_name],
             ).fetchone()[0])
 
-        def write_frame(source_name: str, contract: object, frame: pd.DataFrame) -> None:
-            table = f"v014_mirror_{source_name}"
-            registered = "_v014_increment"
-            conn.register(registered, frame)
-            if table_exists(table):
-                partition = getattr(contract, "partition_column")
-                values = tuple(frame[partition].dropna().astype(str).unique())
-                for value in values:
-                    conn.execute(
-                        f'DELETE FROM "{table}" WHERE CAST("{partition}" AS VARCHAR)=?',
-                        [value],
-                    )
-                conn.execute(
-                    f'INSERT INTO "{table}" BY NAME SELECT * FROM "{registered}"'
-                )
-            else:
-                conn.execute(
-                    f'CREATE TABLE "{table}" AS SELECT * FROM "{registered}"'
-                )
-            conn.unregister(registered)
-
         for source_name in DAILY_SOURCE_KEYS:
             contract = EXTRACTION_CONTRACTS[source_name]
             for business_day in requested_days:
@@ -321,7 +348,7 @@ def extract_and_persist_v014_mirror_sources(
                     ) from exc
                 conn.execute("BEGIN TRANSACTION")
                 try:
-                    write_frame(source_name, contract, frame)
+                    _write_mirror_frame(conn, source_name, contract, frame)
                     conn.execute(
                         "DELETE FROM v014_mirror_source_completeness "
                         "WHERE store_id=? AND business_date=? AND source_name=?",

@@ -22,6 +22,31 @@ class DailyStateTests(unittest.TestCase):
         self.assertAlmostEqual(state.qty_balance_residual, 0)
         self.assertAlmostEqual(state.amount_balance_residual, 0)
 
+    def test_signed_purchase_return_reduces_the_external_inventory_pool(self) -> None:
+        # A3XV / 2026-07-24 / 21364600: 22 opening, return 16, sell 3, end 3.
+        state = transition_day(DailyFlow(
+            init_qty=22,
+            init_amt=191.4,
+            store_receive_qty=-16,
+            store_receive_amt=-139.2,
+            sale_qty=3,
+        ))
+
+        self.assertAlmostEqual(8.7, state.issue_unit_cost)
+        self.assertAlmostEqual(3.0, state.end_qty)
+        self.assertAlmostEqual(26.1, state.end_amt)
+        self.assertAlmostEqual(0.0, state.qty_balance_residual)
+        self.assertAlmostEqual(0.0, state.amount_balance_residual)
+
+    def test_signed_purchase_return_cannot_exceed_the_available_pool(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exceeds the available inventory pool"):
+            transition_day(DailyFlow(
+                init_qty=1,
+                init_amt=10,
+                store_receive_qty=-2,
+                store_receive_amt=-20,
+            ))
+
     def test_machine_epsilon_negative_opening_is_normalized_but_real_negative_is_blocked(self) -> None:
         state = transition_day(DailyFlow(init_qty=0, init_amt=-8.88e-16))
         self.assertEqual(state.end_amt, 0)

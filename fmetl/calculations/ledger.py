@@ -185,11 +185,15 @@ def run_weighted_ledger(
         activity,
         (
             "gross_sale_qty", "sale_return_qty", "known_lost_qty",
-            "store_receive_qty", "store_receive_amt",
         ),
         "activities",
     )
-    _required_numeric(activity, ("net_sale_qty", "net_sale_amt"), "activities", nonnegative=False)
+    _required_numeric(
+        activity,
+        ("net_sale_qty", "net_sale_amt", "store_receive_qty", "store_receive_amt"),
+        "activities",
+        nonnegative=False,
+    )
     def strict_bool(value: object) -> bool:
         if isinstance(value, (bool, np.bool_)):
             return bool(value)
@@ -337,16 +341,22 @@ def run_weighted_ledger(
                         return_cost_basis = pre_return_amt / pre_return_qty
                     else:
                         prior_cost = float(last_unit_cost[(store, article_id)])
-                        if not np.isfinite(prior_cost) or prior_cost <= 0:
+                        if np.isfinite(prior_cost) and prior_cost > 0:
+                            return_cost_basis = prior_cost
+                        elif (
+                            float(row.gross_sale_qty) + 0.001 >= return_qty
+                            and float(row.net_sale_qty) >= -0.001
+                        ):
+                            # A same-day return that is fully offset by gross
+                            # sales can be netted physically even when this SKU
+                            # has no cost pool yet. The zero basis is explicit;
+                            # the runner quarantines the resulting cost gap.
+                            return_cost_basis = 0.0
+                        else:
                             raise ValueError(
                                 "sale return has no inventory cost evidence: "
                                 f"{store}/{day}/{article_id}"
                             )
-                        # A prior observed weighted issue cost remains valid cost
-                        # evidence after the quantity pool reaches zero.  This
-                        # lets a later customer return re-enter inventory without
-                        # inventing a zero cost or reading a v1.5 result.
-                        return_cost_basis = prior_cost
                     sale_return_amt = return_qty * return_cost_basis
                 else:
                     return_cost_basis = 0.0

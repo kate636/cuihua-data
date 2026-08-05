@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date, timedelta
 import json
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from fmetl.mirror.v014_source import (
     discover_latest_mirror_day,
     extract_and_persist_v014_mirror_sources,
     load_mirror_source_bundle,
+    shadow_source_days_between,
     shadow_source_days_ending,
 )
 from fmetl.mirror.v014_stage import build_v014_stage_bundle, persist_v014_stage_bundle
@@ -18,6 +20,7 @@ from fmetl.connectors import QdmApi
 from fmetl.connectors.processing_relations import ProcessingRelationSource
 from fmetl.validation.preflight import SYNC_SCRIPT_SHA256, validate_mirror_registry, verify_sync_script
 from fmetl.validation.run_v014 import run_v014_shadow_week
+from fmetl.validation.v014 import is_publishable
 from fmetl.validation.compare_v014_v15 import (
     compare_v014_to_v15,
     fetch_v15_reference,
@@ -80,6 +83,10 @@ def main() -> int:
         help="read Hive mirrors, normalize internal stages and run a local v0.14 shadow week",
     )
     shadow.add_argument("--store", default="A3XV")
+    shadow.add_argument(
+        "--start",
+        help="optional first publish day; requires a complete D-1 warm-up through --end",
+    )
     shadow.add_argument("--end", default="auto")
     shadow.add_argument("--db", type=Path, default=Path("data/fm_v014_shadow.duckdb"))
     shadow.add_argument(
@@ -103,6 +110,10 @@ def main() -> int:
         help="read one common seven-day window from Hive-backed mirrors into a local source cache",
     )
     mirror.add_argument("--store", default="A3XV")
+    mirror.add_argument(
+        "--start",
+        help="optional first publish day; the cache also includes its D-1 warm-up",
+    )
     mirror.add_argument("--end", default="auto")
     mirror.add_argument(
         "--source-db", type=Path, default=Path("data/fm_v014_source.duckdb"),
@@ -148,7 +159,10 @@ def main() -> int:
                 if args.end == "auto"
                 else args.end
             )
-            days = shadow_source_days_ending(run_end)
+            days = (
+                shadow_source_days_between(args.start, run_end)
+                if args.start else shadow_source_days_ending(run_end)
+            )
             mirrors = extract_and_persist_v014_mirror_sources(
                 store_id=args.store, days=days, path=args.source_db
             )
@@ -159,9 +173,11 @@ def main() -> int:
         result = run_v014_shadow_week(
             store_id=args.store,
             end=run_end,
+            start=args.start,
             source_db=args.stage_db,
             output_db=args.db,
         )
+        publishable = is_publishable(result.validation)
         print(json.dumps({
             "version": __version__, "store_id": args.store,
             "start": result.window.start, "end": result.window.end,
@@ -170,7 +186,11 @@ def main() -> int:
             "output_db": str(result.db_path), "result_rows": result.row_count,
             "quarantine_rows": result.quarantine_count,
             "source_provenance": "HIVE_MIRRORS_PLUS_RELATION_EVIDENCE",
-            "status": "validated_local_shadow",
+            "publish_eligible": publishable,
+            "status": (
+                "validated_local_shadow"
+                if publishable else "diagnostic_only_cost_gap"
+            ),
         }, ensure_ascii=False, indent=2))
         return 0
     if args.command == "v014-fetch-mirrors":
@@ -181,7 +201,10 @@ def main() -> int:
             if args.end == "auto"
             else args.end
         )
-        days = shadow_source_days_ending(source_end)
+        days = (
+            shadow_source_days_between(args.start, source_end)
+            if args.start else shadow_source_days_ending(source_end)
+        )
         bundle = extract_and_persist_v014_mirror_sources(
             store_id=args.store, days=days, path=args.source_db
         )
@@ -213,8 +236,14 @@ def main() -> int:
     if args.command == "v014-compare-v15":
         local = load_v014_result(args.db)
         days = tuple(sorted(local["business_date"].astype(str).unique()))
-        if len(days) != 7:
-            raise ValueError(f"v0.14 comparison requires exactly seven dates, got {days}")
+        if not days:
+            raise ValueError("v0.14 comparison requires at least one date")
+        expected_days = tuple(
+            (date.fromisoformat(days[0]) + timedelta(days=offset)).isoformat()
+            for offset in range((date.fromisoformat(days[-1]) - date.fromisoformat(days[0])).days + 1)
+        )
+        if days != expected_days:
+            raise ValueError(f"v0.14 comparison requires consecutive dates, got {days}")
         reference = fetch_v15_reference(QdmApi(), days=days)
         result = compare_v014_to_v15(
             local,

@@ -422,6 +422,25 @@ def _exclude_receipt_backed_conversion_events(
     return probe.loc[probe["_receipt_backed"].isna(), events.columns].reset_index(drop=True)
 
 
+def _observed_receipt_relation_pairs(purchase: pd.DataFrame) -> pd.DataFrame:
+    """Return dated receipt pairs backed by a non-zero quantity or amount."""
+    columns = ["store_id", "business_date", "article_id", "sale_article_id"]
+    qty = pd.to_numeric(purchase["sale_article_qty"], errors="coerce").fillna(0.0)
+    amt = pd.to_numeric(
+        purchase["sale_article_purchase_amt"], errors="coerce"
+    ).fillna(0.0)
+    return purchase.loc[qty.abs().gt(0.000001) | amt.abs().gt(0.01), columns]
+
+
+def _flow_backed_explicit_pairs(explicit: pd.DataFrame) -> pd.DataFrame:
+    """Exclude static compatibility rows that do not prove a dated flow."""
+    if explicit.empty:
+        return explicit.copy()
+    return explicit.loc[
+        explicit["actual_event"].map(_bool) | explicit["fixed_rule"].map(_bool)
+    ].copy()
+
+
 def _bom_events(receive_sale: pd.DataFrame, bom: pd.DataFrame) -> pd.DataFrame:
     columns = (
         "store_id", "business_date", "event_group_id", "source_article_id",
@@ -1016,7 +1035,14 @@ def build_v014_stage_bundle(
     ], ignore_index=True)
 
     candidate_frames: list[pd.DataFrame] = []
-    purchase_candidates = purchase[["store_id", "business_date", "article_id", "sale_article_id"]].rename(
+    # ``purchase_di`` is a dense daily SKU snapshot.  Only rows with an
+    # observed receipt amount or quantity are evidence that this source/target
+    # pair participated in the day's receipt flow; zero snapshots must not
+    # create thousands of unresolved relation candidates.
+    observed_purchase = _observed_receipt_relation_pairs(purchase)
+    purchase_candidates = observed_purchase[
+        ["store_id", "business_date", "article_id", "sale_article_id"]
+    ].rename(
         columns={"article_id": "source_article_id", "sale_article_id": "target_article_id"}
     )
     candidate_frames.append(purchase_candidates)
@@ -1029,7 +1055,11 @@ def build_v014_stage_bundle(
             "raw_article_id": "source_article_id", "finished_article_id": "target_article_id",
         })[["store_id", "business_date", "source_article_id", "target_article_id"]])
     if not explicit.empty:
-        candidate_frames.append(explicit[[
+        # A static article-convert row proves compatibility only.  It enters
+        # the dated posting registry only when an actual event or an approved
+        # fixed conversion rule exists.
+        explicit_event = _flow_backed_explicit_pairs(explicit)
+        candidate_frames.append(explicit_event[[
             "store_id", "business_date", "source_article_id", "target_article_id",
         ]])
     candidates = pd.concat(candidate_frames, ignore_index=True)

@@ -89,6 +89,25 @@ class StoreReceiptTests(unittest.TestCase):
 
         self.assertNotIn("S", set(result.postings["article_id"]))
 
+    def test_signed_purchase_return_remains_a_negative_external_flow(self) -> None:
+        returned = self.purchase.loc[self.purchase["article_id"].eq("S")].copy()
+        returned[["sale_article_qty", "sale_article_purchase_amt"]] = [-16.0, -139.2]
+
+        result = build_store_receipts(returned, self.bridge.iloc[:0])
+
+        posting = result.postings.iloc[0]
+        self.assertEqual(-16.0, posting.receive_qty)
+        self.assertEqual(-139.2, posting.receive_amt)
+        self.assertEqual("EXTERNAL_NET", posting.pool_effect)
+        self.assertTrue(result.quarantined.empty)
+
+    def test_receipt_quantity_and_amount_sign_mismatch_is_blocked(self) -> None:
+        broken = self.purchase.loc[self.purchase["article_id"].eq("S")].copy()
+        broken[["sale_article_qty", "sale_article_purchase_amt"]] = [-1.0, 20.0]
+
+        with self.assertRaisesRegex(ValueError, "signs must match"):
+            build_store_receipts(broken, self.bridge.iloc[:0])
+
     def test_inconsistent_repeated_parent_values_are_blocked(self) -> None:
         broken = self.bridge.copy()
         broken.loc[1, "inbound_amount"] = 99
