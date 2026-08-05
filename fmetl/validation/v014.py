@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+from fmetl.master_data.category import CategoryMapper
+
 
 def validate_v014_ledger(
     sku_daily: pd.DataFrame,
@@ -145,6 +147,38 @@ def validate_publishability(
     }])
 
 
+def validate_category_evidence(
+    mapper: CategoryMapper,
+    *,
+    start_date: str,
+    end_date: str,
+) -> pd.DataFrame:
+    """Require dated immutable category evidence before release.
+
+    Legacy static rules remain deterministic and can support diagnostics. They
+    cannot prove the classification state of a later business day.
+    """
+    declared_immutable = mapper.evidence_status == "DATED_IMMUTABLE_SNAPSHOT"
+    covers_window = bool(
+        mapper.snapshot_start
+        and mapper.snapshot_end
+        and mapper.snapshot_start <= start_date
+        and mapper.snapshot_end >= end_date
+    )
+    failures = 0 if declared_immutable and covers_window else 1
+    return pd.DataFrame([{
+        "check_name": "CATEGORY_SNAPSHOT_EVIDENCE",
+        "passed": failures == 0,
+        "failure_count": failures,
+        "detail": (
+            "category mapping must be a dated immutable snapshot covering "
+            f"{start_date}..{end_date}; status={mapper.evidence_status}, "
+            f"coverage={mapper.snapshot_start or '-'}..{mapper.snapshot_end or '-'}"
+        ),
+        "gate_type": "PUBLISH",
+    }])
+
+
 def assert_hard_gates(validation: pd.DataFrame) -> None:
     hard = (
         validation["gate_type"].eq("HARD")
@@ -154,7 +188,7 @@ def assert_hard_gates(validation: pd.DataFrame) -> None:
     failed = validation.loc[hard & ~validation["passed"]]
     if not failed.empty:
         names = ", ".join(failed["check_name"].astype(str))
-        raise ValueError(f"v0.14 hard validation failed: {names}")
+        raise ValueError(f"v0.16 hard validation failed: {names}")
 
 
 def is_publishable(validation: pd.DataFrame) -> bool:

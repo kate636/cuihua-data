@@ -13,8 +13,9 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from fmetl import __version__
 from fmetl.calculations.ledger import run_weighted_ledger
-from fmetl.master_data.category import load_category_mapper
+from fmetl.master_data.category import CategoryMapper, load_category_mapper
 from fmetl.validation.manifest import stable_frame_checksum
 from fmetl.contracts.v014 import OUTPUT_CONTRACT
 
@@ -32,6 +33,7 @@ from fmetl.relations.registry import (
 from fmetl.validation.v014 import (
     assert_hard_gates,
     is_publishable,
+    validate_category_evidence,
     validate_publishability,
     validate_v014_ledger,
 )
@@ -224,7 +226,12 @@ def _spill_relation_audit(
     return path
 
 
-def _assemble_report_input(ledger: pd.DataFrame, metrics: pd.DataFrame) -> pd.DataFrame:
+def _assemble_report_input(
+    ledger: pd.DataFrame,
+    metrics: pd.DataFrame,
+    *,
+    category_mapper: CategoryMapper | None = None,
+) -> pd.DataFrame:
     keys = ["store_id", "business_date", "article_id"]
     ledger_derived = {
         "accounting_full_profit", "accounting_profit", "loss_amount", "loss_qty",
@@ -311,7 +318,8 @@ def _assemble_report_input(ledger: pd.DataFrame, metrics: pd.DataFrame) -> pd.Da
         eligible & output["end_stock_qty"].abs().le(0.001)
         & has_sale_time & output["last_sale_hour"].lt(20)
     ).astype(float)
-    mapped = load_category_mapper().map_frame(output)
+    mapper = category_mapper or load_category_mapper()
+    mapped = mapper.map_frame(output)
     mapped["category_level1_description"] = mapped["report_category_name"]
     output = mapped.drop(
         columns=["report_category_name", "report_category_code", "category_rule_reason"],
@@ -328,7 +336,7 @@ def run_v014_shadow_week(
     source_db: Path | str,
     output_db: Path | str,
 ) -> V014RunResult:
-    """Execute v0.14 against program-generated normalized local stage tables.
+    """Execute v0.16 against program-generated compatible v014 stage tables.
 
     The runner performs no network calls and cannot write any server table.
     The stage is built by :mod:`fmetl.mirror.v014_stage` from Hive-backed
@@ -338,9 +346,9 @@ def run_v014_shadow_week(
     source_path = Path(source_db).resolve()
     output_path = Path(output_db).resolve()
     if source_path == output_path:
-        raise ValueError("v0.14 stage DB and output shadow DB must be different files")
+        raise ValueError("v0.16 stage DB and output shadow DB must be different files")
     if not source_path.exists():
-        raise FileNotFoundError(f"local v0.14 source DB not found: {source_path}")
+        raise FileNotFoundError(f"local v0.16 source DB not found: {source_path}")
     relation_audit_path: Path | None = None
     conn = duckdb.connect(str(source_path), read_only=True)
     try:
@@ -353,7 +361,7 @@ def run_v014_shadow_week(
         ].fillna("").eq("")
         if bad_hive_lineage.any():
             raise ValueError(
-                "v0.14 Hive-mirror source missing field-manual lineage: "
+                "v0.16 Hive-mirror source missing field-manual lineage: "
                 f"{source_manifest.loc[bad_hive_lineage, 'source_name'].tolist()}"
             )
         if not _table_exists(conn, "v014_stage_source_completeness"):
@@ -510,8 +518,17 @@ def run_v014_shadow_week(
                 window.start, window.end
             )
             quarantine = quarantine.loc[keep].copy()
+        category_mapper = load_category_mapper()
         validation = pd.concat(
-            [validation, validate_publishability(sku_daily)],
+            [
+                validation,
+                validate_publishability(sku_daily),
+                validate_category_evidence(
+                    category_mapper,
+                    start_date=window.start,
+                    end_date=window.end,
+                ),
+            ],
             ignore_index=True,
         )
         # The seven-day report frame is wide. Release relation and inference
@@ -523,7 +540,9 @@ def run_v014_shadow_week(
         gc.collect()
         metrics = _read_window(conn, "v014_stage_reporting_metrics", window, store_id)
         stage_checksums["reporting_metrics"] = stable_frame_checksum(metrics)
-        report_input = _assemble_report_input(sku_daily, metrics)
+        report_input = _assemble_report_input(
+            sku_daily, metrics, category_mapper=category_mapper
+        )
         del metrics
         gc.collect()
         product_group = freeze_product_group_snapshot(
@@ -564,11 +583,18 @@ def run_v014_shadow_week(
             "check_name",
         ].astype(str).tolist()
         manifest = pd.DataFrame([{
-            "run_id": f"v014-{store_id}-{window.start}-{window.end}-{relation_version}",
+            "run_id": f"v{__version__}-{store_id}-{window.start}-{window.end}-{relation_version}",
+            "engine_version": __version__,
             "store_id": store_id, "start_date": window.start, "end_date": window.end,
             "source_db": str(source_path), "output_db": str(output_path),
             "relation_version": relation_version, "required_sources": json.dumps(sorted(REQUIRED_SOURCE_NAMES)),
             "category_rule_version": category_rule_version,
+            "category_rule_source": category_mapper.source,
+            "category_override_source": category_mapper.cooked_override_source,
+            "category_rule_checksum": category_mapper.rule_checksum,
+            "category_evidence_status": category_mapper.evidence_status,
+            "category_snapshot_start": category_mapper.snapshot_start,
+            "category_snapshot_end": category_mapper.snapshot_end,
             "stage_checksums": json.dumps(stage_checksums, sort_keys=True),
             "output_contract_sha256": hashlib.sha256(
                 "\n".join(
@@ -577,7 +603,7 @@ def run_v014_shadow_week(
             ).hexdigest(),
             "status": (
                 "VALIDATED_LOCAL_SHADOW"
-                if publishable else "DIAGNOSTIC_ONLY_COST_GAP"
+                if publishable else "DIAGNOSTIC_ONLY_PUBLISH_BLOCKED"
             ),
             "publish_eligible": publishable,
             "publish_blockers": json.dumps(publish_blockers, ensure_ascii=False),

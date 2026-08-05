@@ -19,6 +19,9 @@ class CategoryAndMirrorTests(unittest.TestCase):
     def test_v15_category_priority(self) -> None:
         mapper = load_category_mapper()
         self.assertEqual(len(mapper.frozen_skus), 119)
+        self.assertEqual("LEGACY_STATIC_SNAPSHOT", mapper.evidence_status)
+        self.assertEqual("2026-07-20", mapper.snapshot_end)
+        self.assertEqual(64, len(mapper.rule_checksum))
         self.assertEqual(
             mapper.cooked_override_skus,
             frozenset({"21315626", "21316166", "21316203", "21316227"}),

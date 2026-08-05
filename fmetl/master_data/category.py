@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 
@@ -19,6 +20,12 @@ class CategoryDecision:
 @dataclass(frozen=True)
 class CategoryMapper:
     version: str
+    source: str
+    cooked_override_source: str
+    rule_checksum: str
+    evidence_status: str
+    snapshot_start: str
+    snapshot_end: str
     frozen_skus: frozenset[str]
     cooked_override_skus: frozenset[str]
     cooked_override_effective_from: dict[str, str]
@@ -117,9 +124,16 @@ class CategoryMapper:
 
 
 def load_category_mapper(path: Path = RULE_PATH) -> CategoryMapper:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw = path.read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
     return CategoryMapper(
         version=str(payload["version"]),
+        source=str(payload.get("source", "")),
+        cooked_override_source=str(payload.get("cooked_override_source", "")),
+        rule_checksum=hashlib.sha256(raw).hexdigest(),
+        evidence_status=str(payload.get("evidence_status", "UNDECLARED")),
+        snapshot_start=str(payload.get("snapshot_start") or ""),
+        snapshot_end=str(payload.get("snapshot_end") or ""),
         frozen_skus=frozenset(str(value) for value in payload["frozen_skus"]),
         cooked_override_skus=frozenset(
             str(value) for value in payload.get("cooked_override_skus", [])

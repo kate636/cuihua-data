@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import unittest
 
 import pandas as pd
@@ -9,9 +10,11 @@ from fmetl.outputs.shadow_levels import build_shadow_levels_daily
 from fmetl.validation.v014 import (
     assert_hard_gates,
     is_publishable,
+    validate_category_evidence,
     validate_publishability,
     validate_v014_ledger,
 )
+from fmetl.master_data.category import load_category_mapper
 
 
 def _activity(article_ids: list[str]) -> pd.DataFrame:
@@ -37,6 +40,30 @@ def _openings(article_ids: list[str]) -> pd.DataFrame:
 
 
 class ShadowLedgerTests(unittest.TestCase):
+    def test_legacy_category_snapshot_blocks_publish_for_later_window(self) -> None:
+        gate = validate_category_evidence(
+            load_category_mapper(),
+            start_date="2026-08-03",
+            end_date="2026-08-04",
+        )
+        self.assertFalse(bool(gate.iloc[0]["passed"]))
+        self.assertEqual("PUBLISH", gate.iloc[0]["gate_type"])
+        self.assertEqual("CATEGORY_SNAPSHOT_EVIDENCE", gate.iloc[0]["check_name"])
+
+    def test_dated_category_snapshot_covering_window_can_publish(self) -> None:
+        mapper = replace(
+            load_category_mapper(),
+            evidence_status="DATED_IMMUTABLE_SNAPSHOT",
+            snapshot_start="2026-08-03",
+            snapshot_end="2026-08-04",
+        )
+        gate = validate_category_evidence(
+            mapper,
+            start_date="2026-08-03",
+            end_date="2026-08-04",
+        )
+        self.assertTrue(bool(gate.iloc[0]["passed"]))
+
     def test_zero_cost_outflow_blocks_publish_but_keeps_diagnostic_run(self) -> None:
         activity = _activity(["A"])
         activity.loc[0, ["gross_sale_qty", "net_sale_qty", "net_sale_amt"]] = [

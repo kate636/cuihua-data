@@ -44,7 +44,7 @@ def _preflight(sync_script: Path | None) -> int:
         "sync_script_verified": verified_checksum is not None,
         "category_rule_version": category.version,
         "frozen_sku_count": len(category.frozen_skus),
-        "status": "foundation_ready_not_publishable",
+        "status": "DIAGNOSTIC_ONLY_PUBLISH_BLOCKED",
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -52,7 +52,7 @@ def _preflight(sync_script: Path | None) -> int:
 
 def _processing_relations(path: Path | None):
     if path is None:
-        # v0.14 must not apply an undated current recipe to historical days.
+        # v0.16 must not apply an undated current recipe to historical days.
         # The dated list endpoint supplies the earliest provable date for the
         # current row version (max(created_at, updated_at)).
         return ProcessingRelationSource().fetch_dated_once().frame
@@ -80,7 +80,7 @@ def main() -> int:
     )
     shadow = subparsers.add_parser(
         "v014-shadow-week",
-        help="read Hive mirrors, normalize internal stages and run a local v0.14 shadow week",
+        help="run the v0.16 engine with the compatible v014 local shadow contract",
     )
     shadow.add_argument("--store", default="A3XV")
     shadow.add_argument(
@@ -120,7 +120,7 @@ def main() -> int:
     )
     stage = subparsers.add_parser(
         "v014-build-stage",
-        help="programmatically normalize the local Hive-mirror cache into the internal v0.14 stage",
+        help="normalize the local Hive-mirror cache into the compatible v014 stage",
     )
     stage.add_argument("--store", default="A3XV")
     stage.add_argument(
@@ -135,7 +135,7 @@ def main() -> int:
     )
     compare = subparsers.add_parser(
         "v014-compare-v15",
-        help="compare a local v0.14 shadow week with the read-only current v1.5 result",
+        help="compare a local v0.16 shadow window with the read-only current v1.5 result",
     )
     compare.add_argument("--db", type=Path, default=Path("data/fm_v014_shadow.duckdb"))
     compare.add_argument(
@@ -147,7 +147,7 @@ def main() -> int:
     if args.command == "v014-shadow-week":
         paths = [Path(args.source_db).resolve(), Path(args.stage_db).resolve(), Path(args.db).resolve()]
         if len(set(paths)) != 3:
-            raise ValueError("v0.14 source cache, internal stage and output DB must be different files")
+            raise ValueError("v0.16 source cache, internal stage and output DB must be different files")
         if args.reuse_source_cache:
             mirrors = load_mirror_source_bundle(args.source_db, store_id=args.store)
             run_end = mirrors.requested_days[-1] if args.end == "auto" else args.end
@@ -189,7 +189,7 @@ def main() -> int:
             "publish_eligible": publishable,
             "status": (
                 "validated_local_shadow"
-                if publishable else "diagnostic_only_cost_gap"
+                if publishable else "diagnostic_only_publish_blocked"
             ),
         }, ensure_ascii=False, indent=2))
         return 0
@@ -237,13 +237,13 @@ def main() -> int:
         local = load_v014_result(args.db)
         days = tuple(sorted(local["business_date"].astype(str).unique()))
         if not days:
-            raise ValueError("v0.14 comparison requires at least one date")
+            raise ValueError("v0.16 comparison requires at least one date")
         expected_days = tuple(
             (date.fromisoformat(days[0]) + timedelta(days=offset)).isoformat()
             for offset in range((date.fromisoformat(days[-1]) - date.fromisoformat(days[0])).days + 1)
         )
         if days != expected_days:
-            raise ValueError(f"v0.14 comparison requires consecutive dates, got {days}")
+            raise ValueError(f"v0.16 comparison requires consecutive dates, got {days}")
         reference = fetch_v15_reference(QdmApi(), days=days)
         result = compare_v014_to_v15(
             local,

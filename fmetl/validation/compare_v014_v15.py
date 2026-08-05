@@ -1,4 +1,4 @@
-"""Read-only v0.14 versus current v1.5 comparison for one local shadow window."""
+"""Read-only v0.16 versus current v1.5 comparison for one local shadow window."""
 
 from __future__ import annotations
 
@@ -48,6 +48,8 @@ class V014V15Comparison:
     exact_facts: pd.DataFrame
     weekly_profit: pd.DataFrame
     daily_profit: pd.DataFrame
+    reported_category_weekly_profit: pd.DataFrame
+    reported_category_daily_profit: pd.DataFrame
     sku_profit: pd.DataFrame
     category_alignment: pd.DataFrame
     v15_parent_category_bridge: pd.DataFrame
@@ -65,7 +67,7 @@ def fetch_v15_reference(
     days: Iterable[str],
     store_name: str = REFERENCE_STORE_NAME,
 ) -> pd.DataFrame:
-    """Fetch current v1.5 result rows without reading any v1.5 values into v0.14."""
+    """Fetch current v1.5 result rows for read-only v0.16 diagnostics."""
     parts: list[pd.DataFrame] = []
     columns = ",".join(REFERENCE_COLUMNS)
     for day in tuple(map(str, days)):
@@ -191,24 +193,23 @@ def _long_metric_compare(
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
-def _common_category_levels(
+def _normalized_category_levels(
     new_sku: pd.DataFrame,
     old_sku: pd.DataFrame,
     old_parent: pd.DataFrame,
     *,
     metrics: Iterable[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Reaggregate both versions with the v0.14 master-data SKU mapping.
+    """Reaggregate both versions with the v0.16 output SKU mapping.
 
-    v1.5 parent rows may contain display transfers or a different historical
-    classification.  They are retained as a bridge and never used as the
-    canonical category comparator.
+    This view isolates ledger and relation deltas. It cannot prove that the
+    v1.5 output used the same classification source.
     """
     metric_list = list(metrics)
     keys = ["business_date", "sku_id"]
     mapping = new_sku[keys + ["category_level1_description"]].drop_duplicates(keys)
     if mapping.duplicated(keys).any():
-        raise ValueError("v0.14 SKU category mapping must be unique per business day")
+        raise ValueError("v0.16 SKU category mapping must be unique per business day")
     mapped_old = old_sku.drop(
         columns=["category_level1_description"], errors="ignore"
     ).merge(mapping, on=keys, how="left", validate="many_to_one")
@@ -257,6 +258,21 @@ def _common_category_levels(
         bridge_rows.append(part)
     bridge = pd.concat(bridge_rows, ignore_index=True) if bridge_rows else pd.DataFrame()
     return new_category, old_category, bridge
+
+
+def _reported_category_levels(
+    frame: pd.DataFrame,
+    *,
+    metrics: Iterable[str],
+) -> pd.DataFrame:
+    """Aggregate SKU rows using the category label reported by that version."""
+    metric_list = list(metrics)
+    group = ["business_date", "category_level1_description"]
+    out = _number(frame[group + metric_list], metric_list).groupby(
+        group, as_index=False, dropna=False
+    )[metric_list].sum()
+    out["level_description"] = "大分类"
+    return out
 
 
 def _full_field_matrix(new: pd.DataFrame, old: pd.DataFrame) -> pd.DataFrame:
@@ -364,7 +380,7 @@ def compare_v014_to_v15(
     relation_category_effects: pd.DataFrame | None = None,
 ) -> V014V15Comparison:
     required = set(REFERENCE_COLUMNS)
-    for label, frame in (("v0.14", v014), ("v1.5", v15)):
+    for label, frame in (("v0.16", v014), ("v1.5", v15)):
         missing = sorted(required - set(frame.columns))
         if missing:
             raise KeyError(f"{label} comparison input missing columns: {missing}")
@@ -406,7 +422,7 @@ def compare_v014_to_v15(
 
     level_keys = ["business_date", "level_description", "category_level1_description"]
     comparison_metrics = (*PROFIT_GATE_METRICS, *DIAGNOSTIC_METRICS)
-    new_category, old_category, parent_bridge = _common_category_levels(
+    new_category, old_category, parent_bridge = _normalized_category_levels(
         new_sku,
         old_sku,
         old.loc[old["level_description"].eq("大分类")],
@@ -428,7 +444,15 @@ def compare_v014_to_v15(
         new_levels, old_levels, keys=level_keys,
         metrics=comparison_metrics, aggregate_week=False,
     )
-    daily_profit["is_gate_metric"] = daily_profit["metric"].isin(PROFIT_GATE_METRICS)
+    daily_profit["comparison_basis"] = np.where(
+        daily_profit["level_description"].eq("门店"),
+        "STORE_TOTAL",
+        "V016_OUTPUT_CATEGORY_NORMALIZED",
+    )
+    daily_profit["is_gate_metric"] = (
+        daily_profit["level_description"].eq("门店")
+        & daily_profit["metric"].isin(PROFIT_GATE_METRICS)
+    )
     daily_profit["status"] = np.where(
         daily_profit["is_gate_metric"]
         & daily_profit["diff_pct"].abs().le(profit_tolerance),
@@ -439,7 +463,15 @@ def compare_v014_to_v15(
         new_levels, old_levels, keys=level_keys,
         metrics=comparison_metrics, aggregate_week=True,
     )
-    weekly_profit["is_gate_metric"] = weekly_profit["metric"].isin(PROFIT_GATE_METRICS)
+    weekly_profit["comparison_basis"] = np.where(
+        weekly_profit["level_description"].eq("门店"),
+        "STORE_TOTAL",
+        "V016_OUTPUT_CATEGORY_NORMALIZED",
+    )
+    weekly_profit["is_gate_metric"] = (
+        weekly_profit["level_description"].eq("门店")
+        & weekly_profit["metric"].isin(PROFIT_GATE_METRICS)
+    )
     relation_ids = set(map(str, relation_article_ids))
     expected_relation = pd.DataFrame(
         columns=[
@@ -565,7 +597,7 @@ def compare_v014_to_v15(
 
     # Category parity is meaningful only for selling SKUs. Receipt-only source
     # codes are intentionally reallocated to a target sales code by v1.5, while
-    # v0.14 preserves the external receipt on the observed source code and posts
+    # v0.16 preserves the external receipt on the observed source code and posts
     # an explicit internal event. Treating inbound-only codes as active creates
     # false category mismatches.
     active_columns = list(SKU_SALES_EXACT_METRICS)
@@ -588,6 +620,29 @@ def compare_v014_to_v15(
         ),
     )
     category_diagnostics = int(category_alignment["status"].ne("PASS").sum())
+    reported_new = _reported_category_levels(new_sku, metrics=comparison_metrics)
+    reported_old = _reported_category_levels(old_sku, metrics=comparison_metrics)
+    reported_category_daily = _long_metric_compare(
+        reported_new,
+        reported_old,
+        keys=level_keys,
+        metrics=comparison_metrics,
+        aggregate_week=False,
+    )
+    reported_category_weekly = _long_metric_compare(
+        reported_new,
+        reported_old,
+        keys=level_keys,
+        metrics=comparison_metrics,
+        aggregate_week=True,
+    )
+    for frame in (reported_category_daily, reported_category_weekly):
+        frame["comparison_basis"] = "EACH_VERSION_REPORTED_CATEGORY"
+        frame["is_gate_metric"] = False
+        frame["status"] = "DIAGNOSTIC"
+    reported_category_diagnostics = int(
+        reported_category_weekly["diff_amount"].abs().gt(money_tolerance).sum()
+    )
     summary = pd.DataFrame([
         {
             "check": "v15_sku_sales_parity",
@@ -609,18 +664,33 @@ def compare_v014_to_v15(
             "diagnostic_rows": 0,
         },
         {
-            "check": "weekly_profit_within_2pct",
+            "check": "weekly_store_profit_within_2pct",
             "failed_rows": int(
                 weekly_profit.loc[weekly_profit["is_gate_metric"], "status"]
                 .isin({"FAIL", "MISSING_SIDE"})
                 .sum()
             ),
-            "diagnostic_rows": int((~weekly_profit["is_gate_metric"]).sum()),
+            "diagnostic_rows": 0,
+        },
+        {
+            "check": "normalized_category_profit_diagnostic",
+            "failed_rows": 0,
+            "diagnostic_rows": int(
+                weekly_profit.loc[
+                    weekly_profit["level_description"].eq("大分类"),
+                    "diff_amount",
+                ].abs().gt(money_tolerance).sum()
+            ),
         },
         {
             "check": "selling_sku_category_alignment",
             "failed_rows": 0,
             "diagnostic_rows": category_diagnostics,
+        },
+        {
+            "check": "reported_category_profit_diagnostic",
+            "failed_rows": 0,
+            "diagnostic_rows": reported_category_diagnostics,
         },
     ])
     summary["status"] = np.where(
@@ -631,7 +701,10 @@ def compare_v014_to_v15(
     return V014V15Comparison(
         reference=old, field_matrix=field_matrix,
         exact_facts=exact, weekly_profit=weekly_profit,
-        daily_profit=daily_profit, sku_profit=sku_profit,
+        daily_profit=daily_profit,
+        reported_category_weekly_profit=reported_category_weekly,
+        reported_category_daily_profit=reported_category_daily,
+        sku_profit=sku_profit,
         category_alignment=category_alignment,
         v15_parent_category_bridge=parent_bridge,
         summary=summary,
@@ -649,6 +722,14 @@ def persist_comparison(path: Path | str, result: V014V15Comparison) -> Path:
             ("comparison_exact_facts", result.exact_facts),
             ("comparison_weekly_profit", result.weekly_profit),
             ("comparison_daily_profit", result.daily_profit),
+            (
+                "comparison_reported_category_weekly_profit",
+                result.reported_category_weekly_profit,
+            ),
+            (
+                "comparison_reported_category_daily_profit",
+                result.reported_category_daily_profit,
+            ),
             ("comparison_sku_profit", result.sku_profit),
             ("comparison_category_alignment", result.category_alignment),
             ("comparison_v15_parent_category_bridge", result.v15_parent_category_bridge),

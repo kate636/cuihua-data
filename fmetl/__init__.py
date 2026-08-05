@@ -1,3 +1,3 @@
-"""fmetl v0.14 product-relationship and store-profit ETL."""
+"""fmetl v0.16 invariant-led product-relationship and store-profit ETL."""
 
-__version__ = "0.14"
+__version__ = "0.16"

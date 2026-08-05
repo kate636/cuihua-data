@@ -20,9 +20,12 @@
 2. 生熟联动只在大分类执行来源类加回和熟食类扣减；门店、SPU、SKU 毛利不增加。
 3. 增加 `ISSUE_COST_EVIDENCE` 发布门禁。门禁失败时保留诊断库，清单标记
    `publish_eligible=false`、`status=DIAGNOSTIC_ONLY_COST_GAP`。
-4. v1.5 大分类对比改为两边 SKU 使用 master-data v2.3 映射后重聚合。
+4. v1.5 大分类对比改为两边 SKU 使用本地冻结分类后重聚合。
 5. v1.5 原大分类行与 SKU 重聚合之间的差额写入
    `comparison_v15_parent_category_bridge`，只作展示桥诊断。
+
+> v0.16 已核实分类平台实际接入范围，并将实际分类与归一分类拆分为两种诊断。
+> 后续口径以 [FIX-025](FIX-025-v016-category-lineage-and-comparison.md) 为准。
 
 ## 验证
 

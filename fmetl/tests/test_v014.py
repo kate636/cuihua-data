@@ -1157,9 +1157,20 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                 self.assertEqual((2.0, 20.0, "G1"), tuple(map(float, sku[:2])) + (sku[2],))
                 self.assertEqual(10.0, float(sku[3]))
                 failures = read.execute(
-                    "SELECT COUNT(*) FROM v014_validation_result WHERE NOT passed"
+                    "SELECT COUNT(*) FROM v014_validation_result "
+                    "WHERE gate_type='HARD' AND NOT passed"
                 ).fetchone()[0]
                 self.assertEqual(0, failures)
+                category_gate = read.execute(
+                    "SELECT passed FROM v014_validation_result "
+                    "WHERE check_name='CATEGORY_SNAPSHOT_EVIDENCE'"
+                ).fetchone()
+                self.assertEqual((False,), category_gate)
+                manifest = read.execute(
+                    "SELECT engine_version, publish_eligible, "
+                    "category_evidence_status FROM v014_run_manifest"
+                ).fetchone()
+                self.assertEqual(("0.16", False, "LEGACY_STATIC_SNAPSHOT"), manifest)
                 for table in (
                     "t_v014_levels_result",
                     "v014_sku_daily",
