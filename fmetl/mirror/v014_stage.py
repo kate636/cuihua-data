@@ -153,6 +153,8 @@ def _processing_stage(
         "store_id", "business_date", "relation_id", "raw_article_id",
         "finished_article_id", "raw_qty", "raw_unit", "yield_qty", "yield_unit",
         "category_type", "effective_from", "effective_to", "approved",
+        "relation_source", "external_finished_receipt_qty",
+        "external_finished_receipt_amt",
     )
     if raw is None or raw.empty:
         return _empty(columns), _empty(
@@ -167,11 +169,16 @@ def _processing_stage(
     source["finished_article_id"] = source["finished_article_id"].astype(str)
     source["raw_qty"] = pd.to_numeric(source["raw_qty"], errors="raise")
     source["yield_qty"] = pd.to_numeric(source["yield_qty"], errors="raise")
+    ratio = source[["raw_qty", "yield_qty"]].to_numpy(dtype=float)
+    if not np.isfinite(ratio).all() or (ratio <= 0).any():
+        raise ValueError("processing relation raw_qty and yield_qty must be finite and positive")
+    source["relation_source"] = source.get(
+        "relation_source", "UNSPECIFIED_PROCESSING_EXPORT"
+    )
     source["relation_id"] = source.get(
         "relation_id",
         "PROCESSING|" + source["finished_article_id"] + "|" + source["raw_article_id"],
     )
-    dated = "effective_from" in source and source["effective_from"].notna().all()
     approved_source = (
         source["approved"].map(_bool)
         if "approved" in source
@@ -184,10 +191,29 @@ def _processing_stage(
             effective_from = row.get("effective_from")
             effective_to = row.get("effective_to")
             is_approved = bool(approved_source.loc[index])
+            has_effective_from = not pd.isna(effective_from)
             # A current undated export must not rewrite historical recipe truth.
-            active = dated and is_approved and str(effective_from) <= day and (
+            active = has_effective_from and is_approved and str(effective_from) <= day and (
                 pd.isna(effective_to) or str(effective_to) >= day
             )
+            if not has_effective_from:
+                inactive_reason = "PROCESSING_RELATION_EFFECTIVE_DATE_MISSING"
+            elif not is_approved:
+                inactive_reason = "PROCESSING_RELATION_NOT_APPROVED"
+            else:
+                inactive_reason = "PROCESSING_RELATION_OUTSIDE_EFFECTIVE_WINDOW"
+            if str(row["raw_article_id"]) == str(row["finished_article_id"]):
+                quarantine.append({
+                    "store_id": store_id,
+                    "business_date": day,
+                    "article_id": str(row["finished_article_id"]),
+                    "reason_code": (
+                        "PROCESSING_SELF_RELATION_NOOP"
+                        if active else inactive_reason
+                    ),
+                    "detail": str(row["relation_id"]),
+                })
+                continue
             rows.append({
                 "store_id": store_id,
                 "business_date": day,
@@ -202,74 +228,34 @@ def _processing_stage(
                 "effective_from": None if pd.isna(effective_from) else str(effective_from),
                 "effective_to": None if pd.isna(effective_to) else str(effective_to),
                 "approved": active,
+                "relation_source": str(row["relation_source"]),
+                "external_finished_receipt_qty": 0.0,
+                "external_finished_receipt_amt": 0.0,
             })
             if not active:
                 quarantine.append({
                     "store_id": store_id,
                     "business_date": day,
                     "article_id": str(row["finished_article_id"]),
-                    "reason_code": "PROCESSING_RELATION_EFFECTIVE_DATE_MISSING",
+                    "reason_code": inactive_reason,
                     "detail": str(row["relation_id"]),
                 })
-    return pd.DataFrame(rows, columns=columns), pd.DataFrame(quarantine)
-
-
-def _split_processing_and_packaging(
-    processing: pd.DataFrame,
-    goods: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Reclassify procurement-confirmed same-SPU unit changes as packaging.
-
-    The processing platform currently contains both recipes and simple
-    package/unit conversions.  A source and target sharing a nonblank SPU is
-    identity evidence, while the platform's approved dated ratio supplies the
-    missing conversion rule.  Such rows are not recipes and therefore must not
-    require finished-goods counts or enter processing-output inference.
-    """
-    convert_columns = (
-        "store_id", "business_date", "source_article_id", "target_article_id",
-        "effective_from", "effective_to", "actual_event", "fixed_rule",
-        "convert_rate", "cost_rate", "approved",
+    result = pd.DataFrame(rows, columns=columns)
+    active = result.loc[result["approved"].map(_bool)]
+    duplicate_day_pair = active.duplicated(
+        ["store_id", "business_date", "raw_article_id", "finished_article_id"],
+        keep=False,
     )
-    if processing.empty:
-        return processing.copy(), _empty(convert_columns)
-    required_goods = {"article_id", "spu_id"}
-    missing = sorted(required_goods - set(goods.columns))
-    if missing:
-        raise KeyError(f"goods snapshot missing packaging identity columns: {missing}")
-    identity = goods[["article_id", "spu_id"]].copy()
-    identity["article_id"] = identity["article_id"].astype(str)
-    identity["spu_id"] = identity["spu_id"].fillna("").astype(str).str.strip()
-    identity = identity.drop_duplicates("article_id")
-    work = processing.merge(
-        identity.rename(columns={
-            "article_id": "raw_article_id", "spu_id": "raw_spu_id",
-        }),
-        on="raw_article_id", how="left", validate="many_to_one",
-    ).merge(
-        identity.rename(columns={
-            "article_id": "finished_article_id", "spu_id": "finished_spu_id",
-        }),
-        on="finished_article_id", how="left", validate="many_to_one",
-    )
-    is_packaging = (
-        work["raw_spu_id"].fillna("").ne("")
-        & work["raw_spu_id"].eq(work["finished_spu_id"])
-        & work["raw_article_id"].ne(work["finished_article_id"])
-    )
-    recipe = work.loc[~is_packaging, processing.columns].reset_index(drop=True)
-    pack = work.loc[is_packaging].copy()
-    if pack.empty:
-        return recipe, _empty(convert_columns)
-    raw_qty = pd.to_numeric(pack["raw_qty"], errors="raise")
-    yield_qty = pd.to_numeric(pack["yield_qty"], errors="raise")
-    pack["convert_rate"] = yield_qty / raw_qty
-    pack["source_article_id"] = pack["raw_article_id"]
-    pack["target_article_id"] = pack["finished_article_id"]
-    pack["actual_event"] = False
-    pack["fixed_rule"] = True
-    pack["cost_rate"] = 1.0
-    return recipe, pack[list(convert_columns)].reset_index(drop=True)
+    if duplicate_day_pair.any():
+        sample = active.loc[
+            duplicate_day_pair,
+            ["business_date", "raw_article_id", "finished_article_id", "relation_id"],
+        ].head(20).to_dict("records")
+        raise ValueError(
+            "processing relation has overlapping active versions for one raw/finished day: "
+            f"{sample}"
+        )
+    return result, pd.DataFrame(quarantine)
 
 
 def _bom_stage(raw: pd.DataFrame) -> pd.DataFrame:
@@ -430,6 +416,64 @@ def _observed_receipt_relation_pairs(purchase: pd.DataFrame) -> pd.DataFrame:
         purchase["sale_article_purchase_amt"], errors="coerce"
     ).fillna(0.0)
     return purchase.loc[qty.abs().gt(0.000001) | amt.abs().gt(0.01), columns]
+
+
+def _mark_receipt_backed_processing(
+    processing: pd.DataFrame,
+    receipt_postings: pd.DataFrame,
+) -> pd.DataFrame:
+    """Mark processing pairs whose finished receipt is already externally posted.
+
+    A normalized external receipt can allocate an A-code receipt directly onto
+    B. If the same dated A→B pair is also a processing relation, backflushing B
+    consumption would post the conversion a second time. Keep the formal
+    relation for audit but carry the *posted* external evidence into processing
+    inference so the receipt path wins. Amount-only quarantines never reach
+    this function and therefore cannot suppress a valid processing event.
+    """
+    if processing.empty:
+        return processing.copy()
+    keys = ["store_id", "business_date", "raw_article_id", "finished_article_id"]
+    required = {
+        "store_id", "business_date", "article_id", "source_parent_article_id",
+        "receive_qty", "receive_amt",
+    }
+    missing = sorted(required - set(receipt_postings.columns))
+    if missing:
+        raise KeyError(f"receipt postings missing processing evidence columns: {missing}")
+    receipt = receipt_postings.rename(columns={
+        "source_parent_article_id": "raw_article_id",
+        "article_id": "finished_article_id",
+        "receive_qty": "_external_receipt_qty",
+        "receive_amt": "_external_receipt_amt",
+    }).copy()
+    receipt = _as_text(receipt, keys)
+    for column in ("_external_receipt_qty", "_external_receipt_amt"):
+        receipt[column] = pd.to_numeric(receipt[column], errors="coerce").fillna(0.0)
+    receipt = receipt.loc[
+        receipt["raw_article_id"].ne(receipt["finished_article_id"])
+        & receipt["_external_receipt_qty"].gt(0.000001)
+    ]
+    receipt = receipt.groupby(keys, as_index=False).agg(
+        _external_receipt_qty=("_external_receipt_qty", "sum"),
+        _external_receipt_amt=("_external_receipt_amt", "sum"),
+    )
+    output = processing.drop(
+        columns=[
+            "external_finished_receipt_qty",
+            "external_finished_receipt_amt",
+        ],
+        errors="ignore",
+    ).merge(receipt, on=keys, how="left", validate="many_to_one")
+    output["external_finished_receipt_qty"] = output[
+        "_external_receipt_qty"
+    ].fillna(0.0)
+    output["external_finished_receipt_amt"] = output[
+        "_external_receipt_amt"
+    ].fillna(0.0)
+    return output.drop(
+        columns=["_external_receipt_qty", "_external_receipt_amt"]
+    )
 
 
 def _flow_backed_explicit_pairs(explicit: pd.DataFrame) -> pd.DataFrame:
@@ -1018,21 +1062,28 @@ def build_v014_stage_bundle(
     )
     goods = source["goods"].copy()
     goods["article_id"] = goods["article_id"].astype(str)
-    processing, procurement_pack = _split_processing_and_packaging(processing, goods)
-    explicit = pd.concat([
-        _explicit_convert_stage(source["article_convert"], source["stock_convert_detail"]),
-        procurement_pack,
-    ], ignore_index=True)
+    # The procurement processing table is authoritative for processing even
+    # when source and target share an SPU.  SPU identity alone cannot change a
+    # confirmed processing row into a count-gated packaging flow.  Packaging
+    # remains exclusive to the dedicated article-convert evidence below.
+    explicit = _explicit_convert_stage(
+        source["article_convert"], source["stock_convert_detail"]
+    )
     explicit = _exclude_bom_backed_explicit_relations(explicit, bom)
     purchase = source["store_receipt"].copy()
     stock_conversion_evidence = _stock_convert_events(source["stock_convert_detail"])
     stock_conversion_events = _exclude_receipt_backed_conversion_events(
         stock_conversion_evidence, purchase
     )
-    conversion_events = pd.concat([
-        _bom_events(source["receive_sale"], bom),
-        stock_conversion_events,
-    ], ignore_index=True)
+    bom_events = _bom_events(source["receive_sale"], bom)
+    event_frames = [
+        frame for frame in (bom_events, stock_conversion_events)
+        if not frame.empty
+    ]
+    conversion_events = (
+        pd.concat(event_frames, ignore_index=True)
+        if event_frames else bom_events.copy()
+    )
 
     candidate_frames: list[pd.DataFrame] = []
     # ``purchase_di`` is a dense daily SKU snapshot.  Only rows with an
@@ -1075,6 +1126,9 @@ def build_v014_stage_bundle(
     receipt_result = build_store_receipts(
         purchase, source["receive_sale"], parent_reconstruction_keys=parent_keys,
         store_id=store_id,
+    )
+    processing = _mark_receipt_backed_processing(
+        processing, receipt_result.postings
     )
 
     reportable = goods.loc[
@@ -1188,48 +1242,15 @@ def build_v014_stage_bundle(
         "PURCHASE_DI_NEGATIVE_CLAMP": "HIVE_PURCHASE_DI_NEGATIVE_BOOTSTRAP_CLAMP",
     })
 
-    finished_rows: list[dict[str, object]] = []
-    raw_rows: list[dict[str, object]] = []
-    activity_index = activities.set_index(["store_id", "business_date", "article_id"])
-    count_index = count_keep.set_index(["store_id", "business_date", "article_id"])
-    opening_index = openings.set_index(["store_id", "article_id"])
     recipes = processing.loc[processing["approved"].map(_bool)]
-    for finished_id in sorted(set(recipes["finished_article_id"].astype(str))):
-        previous_end: float | None = None
-        for day in days:
-            key = (store_id, day, finished_id)
-            activity = activity_index.loc[key]
-            has_count = key in count_index.index and bool(count_index.loc[key, "is_counted"])
-            end_qty = float(count_index.loc[key, "actual_stock_qty"]) if has_count else 0.0
-            init_qty = (
-                float(opening_index.loc[(store_id, finished_id), "opening_qty"])
-                if previous_end is None else previous_end
-            )
-            finished_rows.append({
-                "store_id": store_id, "business_date": day, "article_id": finished_id,
-                "init_stock_qty": init_qty, "end_stock_qty": end_qty,
-                "external_receive_qty": float(activity.store_receive_qty),
-                "net_sale_qty": float(activity.net_sale_qty),
-                "known_lost_qty": float(activity.known_lost_qty),
-                "other_internal_out_qty": 0.0, "other_internal_in_qty": 0.0,
-                "has_valid_count": has_count,
-            })
-            previous_end = end_qty if has_count else None
-    for raw_id in sorted(set(recipes["raw_article_id"].astype(str))):
-        previous_end = None
-        for day in days:
-            key = (store_id, day, raw_id)
-            activity = activity_index.loc[key]
-            opening_qty = float(opening_index.loc[(store_id, raw_id), "opening_qty"])
-            available = (opening_qty if previous_end is None else previous_end) + float(activity.store_receive_qty)
-            raw_rows.append({
-                "store_id": store_id, "business_date": day, "article_id": raw_id,
-                "available_qty": max(0.0, available),
-            })
-            if key in count_index.index and bool(count_index.loc[key, "is_counted"]):
-                previous_end = float(count_index.loc[key, "actual_stock_qty"])
-            else:
-                previous_end = None
+    finished_ids = set(recipes["finished_article_id"].astype(str))
+    finished_usage = activities.loc[
+        activities["article_id"].astype(str).isin(finished_ids),
+        [
+            "store_id", "business_date", "article_id",
+            "net_sale_qty", "known_lost_qty",
+        ],
+    ].copy()
 
     metrics = _reporting_metrics(
         activities=activities, mirrors=source, goods=goods, processing=processing,
@@ -1251,14 +1272,10 @@ def build_v014_stage_bundle(
         "activities": activities,
         "openings": openings,
         "conversion_events": conversion_events,
-        "finished_processing_daily": pd.DataFrame(finished_rows, columns=(
-            "store_id", "business_date", "article_id", "init_stock_qty", "end_stock_qty",
-            "external_receive_qty", "net_sale_qty", "known_lost_qty", "other_internal_out_qty",
-            "other_internal_in_qty", "has_valid_count",
-        )),
-        "raw_available": pd.DataFrame(raw_rows, columns=(
-            "store_id", "business_date", "article_id", "available_qty",
-        )),
+        # Compatible physical name; v0.17 contains only the two consumed-usage
+        # facts needed by processing backflush.  Counts and opening balances are
+        # deliberately absent because they do not determine consumed output.
+        "finished_processing_daily": finished_usage,
         "reporting_metrics": metrics,
         "customer_events": customer_events,
     }

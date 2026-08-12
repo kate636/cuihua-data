@@ -22,9 +22,12 @@ def normalize_inventory_inputs(
     Negative values are retained in quarantine and normalized to a missing
     count.  A decimal-shift rule is warning-only because a large legitimate
     inventory movement cannot be corrected safely without operator evidence.
-    Decimal-shift suspicions and duplicate receipt/sale-code groups are removed
-    from formal counts and quarantined; the ledger then computes the ending
-    balance from valid flows instead of letting the input error cross days.
+    Decimal-shift suspicions are removed from formal counts.  When a product
+    group contains both receipt-only and sale-code counts, the ledger keeps the
+    sale-code count and ignores only the receipt-only count: external receipts
+    have already been normalized onto the sale SKU, so retaining both would
+    double count inventory while discarding both would throw away the valid
+    ending-balance observation.
     """
     required = {
         "store_id", "business_date", "article_id", "actual_stock_qty",
@@ -64,12 +67,16 @@ def normalize_inventory_inputs(
     for (store, day, group_id), group in grouped:
         roles = set(group["code_role"].astype(str).str.upper())
         if {"RECEIPT", "SALE"}.issubset(roles):
-            work.loc[group.index, "actual_stock_qty"] = np.nan
-            for row in group.itertuples(index=False):
+            receipt_only = group["code_role"].astype(str).str.upper().eq("RECEIPT")
+            receipt_index = group.index[
+                receipt_only & group["actual_stock_qty"].notna()
+            ]
+            work.loc[receipt_index, "actual_stock_qty"] = np.nan
+            for row in group.loc[receipt_index].itertuples(index=False):
                 quarantine.append({
                     "store_id": store, "business_date": day,
                     "article_id": row.article_id,
-                    "reason_code": "RECEIPT_AND_SALE_CODE_DOUBLE_COUNT",
+                    "reason_code": "RECEIPT_CODE_COUNT_IGNORED",
                     "raw_value": row.actual_stock_qty,
                     "count_group_id": group_id,
                 })

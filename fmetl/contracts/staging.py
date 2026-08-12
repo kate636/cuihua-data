@@ -47,7 +47,8 @@ STAGE_CONTRACTS = (
         (
             "store_id", "business_date", "relation_id", "raw_article_id",
             "finished_article_id", "raw_qty", "yield_qty", "effective_from",
-            "effective_to", "approved",
+            "effective_to", "approved", "relation_source",
+            "external_finished_receipt_qty", "external_finished_receipt_amt",
         ),
     ),
     StageTableContract(
@@ -87,15 +88,9 @@ STAGE_CONTRACTS = (
     StageTableContract(
         "v014_stage_finished_processing_daily",
         (
-            "store_id", "business_date", "article_id", "init_stock_qty",
-            "end_stock_qty", "external_receive_qty", "net_sale_qty",
-            "known_lost_qty", "other_internal_out_qty", "other_internal_in_qty",
-            "has_valid_count",
+            "store_id", "business_date", "article_id", "net_sale_qty",
+            "known_lost_qty",
         ),
-    ),
-    StageTableContract(
-        "v014_stage_raw_available",
-        ("store_id", "business_date", "article_id", "available_qty"),
     ),
     StageTableContract(
         "v014_stage_reporting_metrics",
@@ -154,6 +149,5 @@ def validate_stage_database(
                 "v014_stage_bom", "v014_stage_processing",
                 "v014_stage_explicit_convert", "v014_stage_conversion_events",
                 "v014_stage_finished_processing_daily",
-                "v014_stage_raw_available",
             }:
                 raise ValueError(f"{contract.name} has no rows for store {store_id}")

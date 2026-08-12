@@ -4,7 +4,11 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前活跃版本为 **v0.11**，从 QDM BI API 提取数据，经 Python 计算处理后在 DuckDB 中产出 FM 底表。
+**fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前开发主干为
+**v0.17**，源码位于 `fmetl/`，目前只运行 A3XV 本地影子库；服务器生产任务仍是 v0.11，
+没有切换。v0.17 从 Hive→StarRocks 镜像和正式关系证据独立计算库存、成本与毛利，
+v1.5 只作输出合同和只读对比。当前公式与发布边界以 `fmetl/README.md`、DESIGN-008
+和 v0.17 发布审核为准；`v014_*` 是兼容物理名，不代表当前引擎版本。
 
 ## Project Skills
 
@@ -40,7 +44,25 @@ pip install duckdb pandas numpy python-dotenv requests
 cp fmetl/fm_etl_v3/.env.example .env   # 然后填入 QDM_ACCESS_KEY / QDM_SECRET_KEY
 ```
 
-### Run ETL Pipeline
+### Run v0.17 Local Shadow
+
+```bash
+python -m fmetl.cli v014-shadow-week \
+  --store A3XV --start 2026-08-06 --end 2026-08-11 \
+  --source-db data/fm_v017_source.duckdb \
+  --stage-db data/fm_v017_stage.duckdb \
+  --db data/fm_v017_shadow.duckdb
+
+python -m fmetl.cli v014-compare-v15 \
+  --db data/fm_v017_shadow.duckdb \
+  --comparison-db data/fm_v017_comparison.duckdb
+
+python -m unittest discover -s fmetl/tests -p 'test_*.py'
+```
+
+### Production Legacy v0.11 Pipeline
+
+以下 `fmetl.executor` 命令只属于尚未切换的服务器生产链，不能用于解释 v0.17 影子结果。
 ```bash
 # 单日执行
 python -m fmetl.executor 2026-04-23 2026-04-23
@@ -183,7 +205,9 @@ GROUP BY article_id
 
 ---
 
-## Architecture: 3-Layer ETL (v0.11)
+## Production Legacy Reference: 3-Layer ETL (v0.11)
+
+以下内容记录尚未切换的 v0.11 生产链路，仅供兼容和回归参考，不代表 v0.17 当前实现。
 
 ### 设计原则
 - **简单SQL，复杂逻辑Python**: SQL 仅做 SELECT/JOIN/GROUP BY/WHERE。计算、分支、窗口函数在 Python（pandas + NumPy）完成
@@ -705,8 +729,10 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 
 ## Key Documents
 
-- [fmetl/README.md](fmetl/README.md) — v0.11 完整pipeline说明 (13步, 核心公式, 修复对照表)
-- [fmetl/docs/architecture/ETL_v0.11_完整处理逻辑.md](fmetl/docs/architecture/ETL_v0.11_完整处理逻辑.md) — 价格体系 + 13步详解 + 分类重映射
+- [fmetl/README.md](fmetl/README.md) — v0.17 当前架构、公式、运行与验证单一入口
+- [DESIGN-008](fmetl/docs/designs/DESIGN-008-v0.17-processing-evidence-and-profit-correction.md) — 当前加工、A进B出与毛利设计
+- [v0.17 发布审核](fmetl/docs/reviews/V0.17_RELEASE_REVIEW.md) — 2026-08-06～11 完整重跑与阻塞项
+- `fmetl/docs/architecture/ETL_v0.11_完整处理逻辑.md` — 生产遗留 v0.11 参考
 - [fmetl/docs/references/strategy_fm_字段手册_完整版.md](fmetl/docs/references/strategy_fm_字段手册_完整版.md) — 唯一权威源表字段手册
 - [fmetl/docs/references/strategy_fm_字段手册_BOM版.md](fmetl/docs/references/strategy_fm_字段手册_BOM版.md) — BOM专用字段手册
 - [fmetl/docs/reviews/差异问题与待办事项_v0.11.md](fmetl/docs/reviews/差异问题与待办事项_v0.11.md) — QDM对比差异分析 + 行动计划
@@ -716,7 +742,7 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 ## Documentation Conventions
 
 - **AGENTS.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
-- **公式单一信源**: 核心公式（profit / EUC / BOM 分摊 / 库存方程 / 6 分支）的 canonical 定义只在 **AGENTS.md「Core Business Logic」+ `docs/architecture/ETL_v0.11_完整处理逻辑.md`** 两处维护。子目录 README 可展开实现细节，但顶部需声明"以信源为准"，改公式时先改信源、再同步子 README，避免漂移（历史教训：calculated/README 曾把 `bom_alloc_qty_sub` 误写成 `bom_alloc_qty`，险些诱导 euc 暴涨 bug 复现）。
+- **当前公式单一信源**: v0.17 以 `fmetl/README.md` + DESIGN-008 为准；本文件后续 v0.11 公式只约束生产遗留链，不能反向覆盖当前影子逻辑。改公式时同步当前 README、设计、FIX 和发布审核。
 - **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
 - **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
 - **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本

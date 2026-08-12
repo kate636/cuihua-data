@@ -1,4 +1,4 @@
-"""Read-only v0.16 versus current v1.5 comparison for one local shadow window."""
+"""Read-only current-engine versus v1.5 comparison for one local shadow window."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def fetch_v15_reference(
     days: Iterable[str],
     store_name: str = REFERENCE_STORE_NAME,
 ) -> pd.DataFrame:
-    """Fetch current v1.5 result rows for read-only v0.16 diagnostics."""
+    """Fetch current v1.5 result rows for read-only local-engine diagnostics."""
     parts: list[pd.DataFrame] = []
     columns = ",".join(REFERENCE_COLUMNS)
     for day in tuple(map(str, days)):
@@ -80,9 +80,19 @@ def fetch_v15_reference(
                 f"WHERE business_date='{day}' AND store_name='{store_name}' "
                 f"AND day_clear='2' AND {predicate}"
             )
-            parts.append(frame)
-    reference = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-    source_columns = set(reference.columns)
+            if not frame.empty:
+                parts.append(frame)
+    source_columns = set().union(*(set(frame.columns) for frame in parts))
+    # The API can return contract columns that are entirely NULL. Drop them
+    # only during concatenation to avoid pandas' deprecated all-NA dtype
+    # inference, then restore the exact 123-field reference contract below.
+    reference = (
+        pd.concat(
+            [frame.dropna(axis=1, how="all") for frame in parts],
+            ignore_index=True,
+        )
+        if parts else pd.DataFrame()
+    )
     reference = reference.reindex(columns=REFERENCE_COLUMNS)
     reference.attrs["source_columns"] = sorted(source_columns)
     requested = set(map(str, days))
@@ -200,7 +210,7 @@ def _normalized_category_levels(
     *,
     metrics: Iterable[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Reaggregate both versions with the v0.16 output SKU mapping.
+    """Reaggregate both versions with the local output SKU mapping.
 
     This view isolates ledger and relation deltas. It cannot prove that the
     v1.5 output used the same classification source.
@@ -209,7 +219,7 @@ def _normalized_category_levels(
     keys = ["business_date", "sku_id"]
     mapping = new_sku[keys + ["category_level1_description"]].drop_duplicates(keys)
     if mapping.duplicated(keys).any():
-        raise ValueError("v0.16 SKU category mapping must be unique per business day")
+        raise ValueError("local SKU category mapping must be unique per business day")
     mapped_old = old_sku.drop(
         columns=["category_level1_description"], errors="ignore"
     ).merge(mapping, on=keys, how="left", validate="many_to_one")
@@ -380,7 +390,7 @@ def compare_v014_to_v15(
     relation_category_effects: pd.DataFrame | None = None,
 ) -> V014V15Comparison:
     required = set(REFERENCE_COLUMNS)
-    for label, frame in (("v0.16", v014), ("v1.5", v15)):
+    for label, frame in (("local engine", v014), ("v1.5", v15)):
         missing = sorted(required - set(frame.columns))
         if missing:
             raise KeyError(f"{label} comparison input missing columns: {missing}")
@@ -447,7 +457,7 @@ def compare_v014_to_v15(
     daily_profit["comparison_basis"] = np.where(
         daily_profit["level_description"].eq("门店"),
         "STORE_TOTAL",
-        "V016_OUTPUT_CATEGORY_NORMALIZED",
+        "CURRENT_ENGINE_CATEGORY_NORMALIZED",
     )
     daily_profit["is_gate_metric"] = (
         daily_profit["level_description"].eq("门店")
@@ -466,7 +476,7 @@ def compare_v014_to_v15(
     weekly_profit["comparison_basis"] = np.where(
         weekly_profit["level_description"].eq("门店"),
         "STORE_TOTAL",
-        "V016_OUTPUT_CATEGORY_NORMALIZED",
+        "CURRENT_ENGINE_CATEGORY_NORMALIZED",
     )
     weekly_profit["is_gate_metric"] = (
         weekly_profit["level_description"].eq("门店")
@@ -597,7 +607,7 @@ def compare_v014_to_v15(
 
     # Category parity is meaningful only for selling SKUs. Receipt-only source
     # codes are intentionally reallocated to a target sales code by v1.5, while
-    # v0.16 preserves the external receipt on the observed source code and posts
+    # The local engine preserves the external receipt on the observed source code and posts
     # an explicit internal event. Treating inbound-only codes as active creates
     # false category mismatches.
     active_columns = list(SKU_SALES_EXACT_METRICS)

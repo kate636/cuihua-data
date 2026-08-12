@@ -15,7 +15,7 @@ DIMENSION_COLUMNS = {
     "article_group_id", "article_group_name", "is_processing_raw", "is_reportable",
 }
 
-# Every item below is independently produced from v0.14 facts before report
+# Every item below is independently produced from current-engine facts before report
 # aggregation.  Missing inputs are a hard error; the output builder never
 # backfills a v1.5 result or silently invents a zero-valued metric.
 ADDITIVE_INPUTS = {

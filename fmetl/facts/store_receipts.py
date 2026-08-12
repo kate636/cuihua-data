@@ -130,10 +130,12 @@ def _fill_missing_same_code_receipts(
     """Fill a missing direct receipt from the independent receipt bridge.
 
     ``purchase_di`` is a downstream split snapshot and can contain a same-code
-    row whose allocated quantity and amount are both NULL.  ``receive_sale``
-    still carries the actual accepted quantity and amount for that receipt.
-    Only an exact same-code row may use this fallback; cross-code rows continue
-    through the formal relation and parent-reconstruction paths.
+    row whose allocated quantity is NULL even when its amount is present.
+    ``receive_sale`` still carries the actual accepted quantity and amount for
+    that receipt.  Only an exact same-code row may use this fallback.  When the
+    purchase amount is present, the bridge amount must agree before only the
+    missing quantity is filled; cross-code rows continue through the formal
+    relation and parent-reconstruction paths.
     """
     required = {
         "store_id", "inc_day", "article_id", "sale_article_id",
@@ -192,15 +194,19 @@ def _fill_missing_same_code_receipts(
     ).fillna(0.0)
     bridge_qty = pd.to_numeric(output["_bridge_qty"], errors="coerce").fillna(0.0)
     bridge_amt = pd.to_numeric(output["_bridge_amt"], errors="coerce").fillna(0.0)
+    purchase_amount_missing = purchase_amt.abs().le(0.000001)
+    bridge_has_quantity = bridge_qty.abs().gt(0.000001)
+    bridge_amount_agrees = purchase_amount_missing | bridge_amt.sub(purchase_amt).abs().le(0.01)
     fallback = (
         output["article_id"].eq(output["sale_article_id"])
         & purchase_qty.abs().le(0.000001)
-        & purchase_amt.abs().le(0.000001)
-        & bridge_qty.gt(0.000001)
-        & bridge_amt.gt(0.000001)
+        & bridge_has_quantity
+        & bridge_amount_agrees
     )
     output.loc[fallback, "sale_article_qty"] = bridge_qty.loc[fallback]
-    output.loc[fallback, "sale_article_purchase_amt"] = bridge_amt.loc[fallback]
+    output.loc[fallback & purchase_amount_missing, "sale_article_purchase_amt"] = bridge_amt.loc[
+        fallback & purchase_amount_missing
+    ]
     output["_receipt_fallback"] = fallback
     return output.drop(columns=["_bridge_qty", "_bridge_amt"])
 

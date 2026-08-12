@@ -150,6 +150,25 @@ class DailyStateTests(unittest.TestCase):
         self.assertEqual(state.end_qty, 1.5)
         self.assertEqual(state.end_amt, 22.5)
 
+    def test_confirmed_processing_can_overdraw_raw_and_records_clamp_cost(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=1, init_amt=10, compose_out_qty=2,
+        ))
+        self.assertEqual("negative_clamp", state.branch)
+        self.assertEqual(20.0, state.compose_out_amt)
+        self.assertEqual(1.0, state.neg_clamp_qty)
+        self.assertEqual(10.0, state.neg_clamp_cost_amt)
+        self.assertEqual(0.0, state.end_qty)
+
+    def test_non_processing_internal_out_cannot_overdraw_inventory(self) -> None:
+        for field in ("bom_out_qty", "pack_out_qty", "residual_transfer_out_qty"):
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "non-processing internal out"
+            ):
+                transition_day(DailyFlow(
+                    init_qty=1, init_amt=10, **{field: 2},
+                ))
+
     def test_inventory_count_and_explicit_gain_cannot_both_post(self) -> None:
         with self.assertRaises(ValueError):
             transition_day(DailyFlow(

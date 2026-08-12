@@ -162,7 +162,7 @@ class V014V15ComparisonTests(unittest.TestCase):
         ].iloc[0]
         self.assertEqual("DIAGNOSTIC", category["status"])
         self.assertEqual(
-            "V016_OUTPUT_CATEGORY_NORMALIZED", category["comparison_basis"]
+            "CURRENT_ENGINE_CATEGORY_NORMALIZED", category["comparison_basis"]
         )
         bridge = result.v15_parent_category_bridge.loc[
             result.v15_parent_category_bridge["metric"].eq("store_profit_amount")

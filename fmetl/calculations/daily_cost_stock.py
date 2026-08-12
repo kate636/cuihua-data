@@ -140,12 +140,18 @@ def transition_day(flow: DailyFlow) -> DailyState:
     )
     if inflow_qty < -0.001 or inflow_amt < -0.01:
         raise ValueError("signed store receipt return exceeds the available inventory pool")
-    internal_out_qty = (
-        flow.bom_out_qty + flow.pack_out_qty + flow.compose_out_qty
+    strict_out_qty = (
+        flow.bom_out_qty + flow.pack_out_qty
         + flow.residual_transfer_out_qty + flow.store_return_qty
     )
-    if internal_out_qty > inflow_qty + 0.001:
-        raise ValueError("formal internal out quantity exceeds the available pool")
+    if strict_out_qty > inflow_qty + 0.001:
+        raise ValueError(
+            "non-processing internal out quantity exceeds the available pool"
+        )
+    # Processing is a consumption backflush from finished sales/loss, so its
+    # confirmed raw usage may exceed the raw SKU's book balance.  Only this
+    # flow can overdraw; the shortage is priced and exposed as neg_clamp.
+    internal_out_qty = strict_out_qty + flow.compose_out_qty
     if inflow_qty <= 0.001 and abs(inflow_amt) > 0.01:
         raise ValueError("inventory pool has amount without quantity")
     issue_cost = inflow_amt / inflow_qty if inflow_qty > 0 else max(0.0, flow.fallback_cost)

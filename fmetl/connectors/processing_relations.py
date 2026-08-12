@@ -155,11 +155,13 @@ class ProcessingRelationSource:
             "raw_sku": "raw_article_id",
             "raw_name": "raw_article_name",
         })
+        normalized["relation_source"] = "FOODMART_PROCESSING_RELATION_API"
         keep = [
             "relation_id", "finished_article_id", "finished_article_name",
             "raw_article_id", "raw_article_name", "raw_qty", "raw_unit",
             "yield_qty", "yield_unit", "category_type", "effective_from",
             "effective_to", "approved",
+            "relation_source",
         ]
         normalized = normalized[keep].copy()
         normalized[["finished_article_id", "raw_article_id"]] = normalized[

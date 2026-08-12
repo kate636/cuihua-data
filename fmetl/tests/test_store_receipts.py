@@ -79,6 +79,43 @@ class StoreReceiptTests(unittest.TestCase):
         self.assertEqual("RECEIVE_SALE_DIRECT_FALLBACK", posting.cost_source)
         self.assertTrue(posting.external_event_group_id.startswith("RECEIVE_SALE_DIRECT|"))
 
+    def test_missing_same_code_quantity_is_filled_when_amount_agrees(self) -> None:
+        missing_qty = self.purchase.copy()
+        missing_qty.loc[missing_qty["article_id"].eq("S"), "sale_article_qty"] = None
+        bridge = pd.concat([
+            self.bridge,
+            pd.DataFrame([{
+                "store_id": "A3XV", "inc_day": "2026-07-14",
+                "article_id": "S", "sale_article_id": "S",
+                "inbound_qty": 1.0, "inbound_amount": 20.0,
+            }]),
+        ], ignore_index=True)
+
+        result = build_store_receipts(missing_qty, bridge)
+
+        posting = result.postings.loc[result.postings["article_id"].eq("S")].iloc[0]
+        self.assertEqual(1.0, posting.receive_qty)
+        self.assertEqual(20.0, posting.receive_amt)
+        self.assertEqual("RECEIVE_SALE_DIRECT_FALLBACK", posting.cost_source)
+        self.assertTrue(result.quarantined.empty)
+
+    def test_missing_same_code_quantity_is_not_filled_when_amount_disagrees(self) -> None:
+        missing_qty = self.purchase.copy()
+        missing_qty.loc[missing_qty["article_id"].eq("S"), "sale_article_qty"] = None
+        bridge = pd.concat([
+            self.bridge,
+            pd.DataFrame([{
+                "store_id": "A3XV", "inc_day": "2026-07-14",
+                "article_id": "S", "sale_article_id": "S",
+                "inbound_qty": 1.0, "inbound_amount": 19.0,
+            }]),
+        ], ignore_index=True)
+
+        result = build_store_receipts(missing_qty, bridge)
+
+        self.assertNotIn("S", set(result.postings["article_id"]))
+        self.assertEqual("DIRECT_RECEIPT_AMOUNT_WITHOUT_QUANTITY", result.quarantined.loc[0, "reason"])
+
     def test_zero_same_code_purchase_without_receipt_stays_zero(self) -> None:
         zero = self.purchase.copy()
         zero.loc[zero["article_id"].eq("S"), [

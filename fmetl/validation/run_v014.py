@@ -23,7 +23,6 @@ from fmetl.facts.inventory_inputs import normalize_inventory_inputs
 from fmetl.outputs.levels_result import ADDITIVE_INPUTS, DIMENSION_COLUMNS, build_v014_levels_result
 from fmetl.outputs.persistence import persist_v014_shadow
 from fmetl.facts.processing_inference import infer_processing_postings
-from fmetl.facts.pack_inference import infer_fixed_pack_postings
 from fmetl.facts.formal_events import build_formal_event_legs
 from fmetl.relations.registry import (
     build_product_group_candidates,
@@ -145,15 +144,37 @@ def _read_store(conn: duckdb.DuckDBPyConnection, table: str, store_id: str) -> p
     ).df()
 
 
-def _read_product_group(conn: duckdb.DuckDBPyConnection, window: ShadowWindow) -> pd.DataFrame:
+def _read_product_group(
+    conn: duckdb.DuckDBPyConnection,
+    window: ShadowWindow,
+    *,
+    article_ids: pd.Series | set[str] | None = None,
+) -> pd.DataFrame:
     table = "v014_stage_product_group"
     if not _table_exists(conn, table):
         raise KeyError(f"required local stage table does not exist: {table}")
-    return conn.execute(
-        f'SELECT * FROM "{table}" WHERE CAST(inc_day AS VARCHAR) BETWEEN ? AND ? '
-        "AND area_name IS NULL",
-        [window.start, window.end],
-    ).df()
+    filter_sql = ""
+    registered = False
+    if article_ids is not None:
+        article_filter = pd.DataFrame({
+            "article_id": sorted(set(map(str, article_ids)))
+        })
+        conn.register("_product_group_article_filter", article_filter)
+        registered = True
+        filter_sql = (
+            " AND CAST(article_id AS VARCHAR) IN "
+            "(SELECT article_id FROM _product_group_article_filter)"
+        )
+    try:
+        return conn.execute(
+            f'SELECT * FROM "{table}" '
+            "WHERE CAST(inc_day AS VARCHAR) BETWEEN ? AND ? "
+            "AND area_name IS NULL" + filter_sql,
+            [window.start, window.end],
+        ).df()
+    finally:
+        if registered:
+            conn.unregister("_product_group_article_filter")
 
 
 def _combine_quarantine(frames: list[pd.DataFrame]) -> pd.DataFrame:
@@ -336,7 +357,7 @@ def run_v014_shadow_week(
     source_db: Path | str,
     output_db: Path | str,
 ) -> V014RunResult:
-    """Execute v0.16 against program-generated compatible v014 stage tables.
+    """Execute the current engine against compatible v014 physical tables.
 
     The runner performs no network calls and cannot write any server table.
     The stage is built by :mod:`fmetl.mirror.v014_stage` from Hive-backed
@@ -346,9 +367,13 @@ def run_v014_shadow_week(
     source_path = Path(source_db).resolve()
     output_path = Path(output_db).resolve()
     if source_path == output_path:
-        raise ValueError("v0.16 stage DB and output shadow DB must be different files")
+        raise ValueError(
+            f"v{__version__} stage DB and output shadow DB must be different files"
+        )
     if not source_path.exists():
-        raise FileNotFoundError(f"local v0.16 source DB not found: {source_path}")
+        raise FileNotFoundError(
+            f"local v{__version__} source DB not found: {source_path}"
+        )
     relation_audit_path: Path | None = None
     conn = duckdb.connect(str(source_path), read_only=True)
     try:
@@ -361,7 +386,7 @@ def run_v014_shadow_week(
         ].fillna("").eq("")
         if bad_hive_lineage.any():
             raise ValueError(
-                "v0.16 Hive-mirror source missing field-manual lineage: "
+                f"v{__version__} Hive-mirror source missing field-manual lineage: "
                 f"{source_manifest.loc[bad_hive_lineage, 'source_name'].tolist()}"
             )
         if not _table_exists(conn, "v014_stage_source_completeness"):
@@ -376,12 +401,18 @@ def run_v014_shadow_week(
         compute_window = ShadowWindow(
             warmup_day, window.end, (warmup_day, *window.days)
         )
-        product_group = freeze_product_group_snapshot(
-            _read_product_group(conn, compute_window)
-        )
         candidates = _read_window(
             conn, "v014_stage_relation_candidates", compute_window, store_id
         )
+        relation_articles = set(candidates["source_article_id"].astype(str)) | set(
+            candidates["target_article_id"].astype(str)
+        )
+        product_group = freeze_product_group_snapshot(
+            _read_product_group(
+                conn, compute_window, article_ids=relation_articles
+            )
+        )
+        del relation_articles
         bom = _read_window(conn, "v014_stage_bom", compute_window, store_id)
         processing = _read_window(
             conn, "v014_stage_processing", compute_window, store_id
@@ -453,38 +484,11 @@ def run_v014_shadow_week(
         formal_events = build_formal_event_legs(conversion_events, active_registry)
         del conversion_events
         gc.collect()
-        inferred_pack = infer_fixed_pack_postings(activities, active_registry)
-        base_sources = pd.concat([
-            frame for frame in (formal_events.sources, inferred_pack.sources)
-            if not frame.empty
-        ], ignore_index=True) if not (
-            formal_events.sources.empty and inferred_pack.sources.empty
-        ) else formal_events.sources.copy()
-        base_targets = pd.concat([
-            frame for frame in (formal_events.targets, inferred_pack.targets)
-            if not frame.empty
-        ], ignore_index=True) if not (
-            formal_events.targets.empty and inferred_pack.targets.empty
-        ) else formal_events.targets.copy()
-        # Processing must consume the same inventory state that the formal
-        # ledger will use.  A base pass prices/rolls all external, BOM and pack
-        # facts first; using the legacy raw_available shortcut can overstate a
-        # raw pool after prior-day sales or loss.
-        base_ledger = run_weighted_ledger(
-            activities, openings, base_sources, base_targets
-        )
+        base_sources = formal_events.sources.copy()
+        base_targets = formal_events.targets.copy()
         finished_processing = _read_window(
             conn, "v014_stage_finished_processing_daily", compute_window, store_id
         )
-        raw_ids = set(processing["raw_article_id"].astype(str))
-        raw_available = base_ledger.sku_daily.loc[
-            base_ledger.sku_daily["article_id"].astype(str).isin(raw_ids),
-            ["store_id", "business_date", "article_id", "eq_qty"],
-        ].copy()
-        raw_available["available_qty"] = raw_available["eq_qty"].clip(lower=0.0)
-        raw_available = raw_available[
-            ["store_id", "business_date", "article_id", "available_qty"]
-        ]
         reserved_raw_loss = conn.execute(
             'SELECT CAST(store_id AS VARCHAR) AS store_id, '
             'CAST(business_date AS VARCHAR) AS business_date, '
@@ -498,7 +502,6 @@ def run_v014_shadow_week(
         ).df()
         inferred = infer_processing_postings(
             finished_processing,
-            raw_available,
             processing,
             active_registry,
             relation_snapshot_id=relation_version,
@@ -521,12 +524,11 @@ def run_v014_shadow_week(
             stage_quarantine,
             relation_quarantine, normalized_counts.quarantined,
             formal_events.quarantined, inferred.quarantined,
-            inferred_pack.quarantined,
         ])
         del (
-            processing, finished_processing, raw_available, base_ledger,
+            finished_processing,
             base_sources, base_targets, formal_events,
-            inferred, inferred_pack, normalized_counts, relation_quarantine,
+            inferred, normalized_counts, relation_quarantine,
             active_registry,
         )
         gc.collect()
@@ -539,8 +541,9 @@ def run_v014_shadow_week(
             ledger.internal_postings,
             source_activities=activities,
             reserved_raw_loss=reserved_raw_loss,
+            receipt_backed_processing=processing,
         )
-        del reserved_raw_loss
+        del reserved_raw_loss, processing
         assert_hard_gates(validation)
         stage_checksums["activities"] = stable_frame_checksum(activities)
         stage_checksums["openings"] = stable_frame_checksum(openings)
@@ -588,7 +591,9 @@ def run_v014_shadow_week(
         del metrics
         gc.collect()
         product_group = freeze_product_group_snapshot(
-            _read_product_group(conn, window)
+            _read_product_group(
+                conn, window, article_ids=set(report_input["sku_id"].astype(str))
+            )
         )
         report_input = report_input.drop(columns=["article_group_id", "article_group_name"], errors="ignore").merge(
             product_group.rename(columns={"article_id": "sku_id"}),

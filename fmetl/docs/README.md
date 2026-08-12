@@ -1,6 +1,6 @@
-# v0.14～v0.16 文档索引
+# v0.14～v0.17 文档索引
 
-- [2026-08-12 项目全文件、当前架构与精简建议](architecture/PROJECT_FULL_FILE_AUDIT_2026-08-12.md)
+- [2026-08-12 v0.16 项目全文件审计（历史快照）](architecture/PROJECT_FULL_FILE_AUDIT_2026-08-12.md)
 - [strategy_fm v1.5 字段与表结构手册](references/strategy_fm_v1_5_字段手册.md)
 - [strategy_fm v1.5 实时列名快照（2026-07-22）](references/strategy_fm_v1_5_实时列名快照_2026-07-22.md)
 - [DESIGN-003：完整重构执行设计](designs/DESIGN-003-v0.13-clean-rebuild.md)
@@ -8,6 +8,7 @@
 - [DESIGN-005：v0.14 商品集关系与门店毛利 ETL 迭代计划](designs/DESIGN-005-v0.14-product-group-etl-plan.md)
 - [DESIGN-006：v0.15 证据驱动迭代方法](designs/DESIGN-006-v0.15-evidence-led-iteration-method.md)
 - [DESIGN-007：v0.16 守恒驱动修正方法](designs/DESIGN-007-v0.16-invariant-led-correction.md)
+- [DESIGN-008：v0.17 加工证据、A进B出与毛利修正](designs/DESIGN-008-v0.17-processing-evidence-and-profit-correction.md)
 - [v0.14 七日影子验证](reviews/V0.14_SHADOW_VALIDATION.md)
 - [v0.14 大分类—SPU 单价链路审核](reviews/V0.14_CATEGORY_SPU_UNIT_PRICE_CHAIN_REVIEW.md)
 - [v0.13 架构与当前完成度](architecture/V0.13_ARCHITECTURE.md)
@@ -15,9 +16,12 @@
 - [v0.14 相比 v0.13 的实际迭代](fixes/V0.14_FROM_V0.13.md)
 - [FIX-025：v0.16 分类血缘与对比口径](fixes/FIX-025-v016-category-lineage-and-comparison.md)
 - [FIX-026：空成本池出流的证据化成本回退](fixes/FIX-026-empty-pool-issue-cost-fallback.md)
+- [FIX-027：v0.17 加工反冲、关系分流、外部验收优先与数量桥接](fixes/FIX-027-v017-processing-backflush-and-receipt-bridge.md)
 - [v0.16 发布审核](reviews/V0.16_RELEASE_REVIEW.md)
+- [v0.17 发布审核：A3XV 2026-08-06～11](reviews/V0.17_RELEASE_REVIEW.md)
 
 v0.11 及更早版本的架构、修复和审查记录统一保存在
 `_archived/fmetl_v0_11_20260715/docs/`。新目录不复制历史状态报告，避免把旧结论误认为
 v0.14 历史状态记录。v0.13 文档保留为技术主干设计；v0.14 以 DESIGN-005 为发布边界，
-v0.15 以 DESIGN-006 的准入标准推进，v0.16 以 DESIGN-007 的分类证据和双视图对比为当前发布门禁。
+v0.15 以 DESIGN-006 的准入标准推进，v0.16 以 DESIGN-007 建立分类证据和双视图对比；
+当前 v0.17 以 DESIGN-008 的加工证据、事件互斥和透支成本为技术主干。

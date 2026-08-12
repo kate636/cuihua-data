@@ -16,7 +16,6 @@ from fmetl.outputs.levels_result import ADDITIVE_INPUTS, build_v014_levels_resul
 from fmetl.outputs.persistence import persist_v014_shadow
 from fmetl.facts.formal_events import build_formal_event_legs
 from fmetl.facts.processing_inference import infer_processing_postings
-from fmetl.facts.pack_inference import infer_fixed_pack_postings
 from fmetl.relations.registry import (
     V014RelationError,
     build_product_group_candidates,
@@ -40,8 +39,9 @@ from fmetl.mirror.v014_stage import (
     _exclude_receipt_backed_conversion_events,
     _exclude_bom_backed_explicit_relations,
     _flow_backed_explicit_pairs,
+    _mark_receipt_backed_processing,
     _observed_receipt_relation_pairs,
-    _split_processing_and_packaging,
+    _processing_stage,
     build_v014_stage_bundle,
 )
 from fmetl.mirror.registry import EXTRACTION_CONTRACTS
@@ -414,6 +414,30 @@ class V014RelationTests(unittest.TestCase):
         kept = _exclude_receipt_backed_conversion_events(events, purchase)
         self.assertTrue(kept.empty)
 
+    def test_only_posted_cross_code_receipt_marks_processing_priority(self) -> None:
+        processing = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "raw_article_id": "A", "finished_article_id": target,
+                "external_finished_receipt_qty": 0.0,
+                "external_finished_receipt_amt": 0.0,
+            }
+            for target in ("B", "C")
+        ])
+        postings = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "source_parent_article_id": "A", "article_id": "B",
+            "receive_qty": 3.0, "receive_amt": 60.0,
+        }])
+
+        marked = _mark_receipt_backed_processing(processing, postings).set_index(
+            "finished_article_id"
+        )
+
+        self.assertEqual(3.0, marked.loc["B", "external_finished_receipt_qty"])
+        self.assertEqual(60.0, marked.loc["B", "external_finished_receipt_amt"])
+        self.assertEqual(0.0, marked.loc["C", "external_finished_receipt_qty"])
+
     def test_dense_zero_receipt_snapshot_does_not_create_relation_candidate(self) -> None:
         purchase = pd.DataFrame([
             {
@@ -490,26 +514,6 @@ class V014RelationTests(unittest.TestCase):
         with self.assertRaises(V014RelationError):
             freeze_product_group_snapshot(bad)
 
-    def test_same_spu_platform_relation_is_packaging_not_processing(self) -> None:
-        processing = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "relation_id": "PROCESSING|95", "raw_article_id": "P",
-            "finished_article_id": "C", "raw_qty": 1.0, "raw_unit": "提",
-            "yield_qty": 6.0, "yield_unit": "盒", "category_type": "标品类",
-            "effective_from": "2026-06-29", "effective_to": None,
-            "approved": True,
-        }])
-        goods = pd.DataFrame([
-            {"article_id": "P", "spu_id": "SP1"},
-            {"article_id": "C", "spu_id": "SP1"},
-        ])
-        recipes, packaging = _split_processing_and_packaging(processing, goods)
-        self.assertTrue(recipes.empty)
-        self.assertEqual("P", packaging.iloc[0]["source_article_id"])
-        self.assertEqual("C", packaging.iloc[0]["target_article_id"])
-        self.assertAlmostEqual(6.0, packaging.iloc[0]["convert_rate"])
-        self.assertTrue(bool(packaging.iloc[0]["fixed_rule"]))
-
     def test_official_bom_edge_removes_competing_explicit_semantics(self) -> None:
         explicit = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-20",
@@ -560,15 +564,10 @@ class V014RelationTests(unittest.TestCase):
 
 
 class V014ProcessingTests(unittest.TestCase):
-    def _inputs(self, *, valid_count: bool = True, raw_available: float = 10.0):
+    def _inputs(self):
         finished = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-20", "article_id": "F",
-            "init_stock_qty": 1, "end_stock_qty": 2, "external_receive_qty": 0,
-            "net_sale_qty": 3, "known_lost_qty": 1, "other_internal_out_qty": 0,
-            "other_internal_in_qty": 0, "has_valid_count": valid_count,
-        }])
-        raw = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20", "article_id": "R", "available_qty": raw_available,
+            "net_sale_qty": 3, "known_lost_qty": 1,
         }])
         recipes = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-20",
@@ -580,7 +579,74 @@ class V014ProcessingTests(unittest.TestCase):
             "store_id": "A3XV", "business_date": "2026-07-20", "source_article_id": "R",
             "target_article_id": "F", "relation_type": "PROCESSING", "status": "ACTIVE",
         }])
-        return finished, raw, recipes, registry
+        return finished, recipes, registry
+
+    def test_nonoverlapping_recipe_versions_are_allowed(self) -> None:
+        raw = pd.DataFrame([
+            {
+                "relation_id": "OLD", "raw_article_id": "R",
+                "finished_article_id": "F", "raw_qty": 1, "yield_qty": 1,
+                "effective_from": "2026-07-01", "effective_to": "2026-07-19",
+                "approved": True,
+            },
+            {
+                "relation_id": "NEW", "raw_article_id": "R",
+                "finished_article_id": "F", "raw_qty": 2, "yield_qty": 1,
+                "effective_from": "2026-07-20", "effective_to": None,
+                "approved": True,
+            },
+        ])
+
+        staged, _ = _processing_stage(
+            raw, store_id="A3XV", days=("2026-07-19", "2026-07-20")
+        )
+
+        active = staged.loc[staged["approved"]]
+        self.assertEqual(["OLD", "NEW"], active.sort_values("business_date")["relation_id"].tolist())
+
+    def test_one_undated_recipe_does_not_disable_other_dated_recipes(self) -> None:
+        raw = pd.DataFrame([
+            {
+                "relation_id": "DATED", "raw_article_id": "R1",
+                "finished_article_id": "F1", "raw_qty": 1, "yield_qty": 1,
+                "effective_from": "2026-07-01", "effective_to": None,
+                "approved": True,
+            },
+            {
+                "relation_id": "UNDATED", "raw_article_id": "R2",
+                "finished_article_id": "F2", "raw_qty": 1, "yield_qty": 1,
+                "effective_from": None, "effective_to": None,
+                "approved": True,
+            },
+        ])
+
+        staged, quarantined = _processing_stage(
+            raw, store_id="A3XV", days=("2026-07-20",)
+        )
+
+        active = staged.set_index("relation_id")["approved"]
+        self.assertTrue(bool(active["DATED"]))
+        self.assertFalse(bool(active["UNDATED"]))
+        self.assertEqual(
+            "PROCESSING_RELATION_EFFECTIVE_DATE_MISSING",
+            quarantined.loc[
+                quarantined["article_id"].eq("F2"), "reason_code"
+            ].item(),
+        )
+
+    def test_overlapping_recipe_versions_are_blocked(self) -> None:
+        raw = pd.DataFrame([
+            {
+                "relation_id": relation_id, "raw_article_id": "R",
+                "finished_article_id": "F", "raw_qty": raw_qty,
+                "yield_qty": 1, "effective_from": "2026-07-01",
+                "effective_to": None, "approved": True,
+            }
+            for relation_id, raw_qty in (("A", 1), ("B", 2))
+        ])
+
+        with self.assertRaisesRegex(ValueError, "overlapping active versions"):
+            _processing_stage(raw, store_id="A3XV", days=("2026-07-20",))
 
     def test_processing_uses_sales_and_ordinary_loss_backflush(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
@@ -591,29 +657,29 @@ class V014ProcessingTests(unittest.TestCase):
         self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
 
     def test_processing_uses_only_the_current_day_recipe_snapshot(self) -> None:
-        finished, raw, recipes, registry = self._inputs()
+        finished, recipes, registry = self._inputs()
         prior = recipes.copy()
         prior["business_date"] = "2026-07-19"
         recipes = pd.concat([prior, recipes], ignore_index=True)
         plan = infer_processing_postings(
-            finished, raw, recipes, registry, relation_snapshot_id="r1"
+            finished, recipes, registry, relation_snapshot_id="r1"
         )
         self.assertEqual(1, len(plan.sources))
         self.assertEqual(1, len(plan.targets))
         self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
 
     def test_missing_count_uses_sales_and_ordinary_loss_backflush(self) -> None:
-        plan = infer_processing_postings(*self._inputs(valid_count=False), relation_snapshot_id="r1")
+        plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
         self.assertTrue(plan.quarantined.empty)
         self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
         self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
         self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
 
     def test_missing_count_with_no_consumption_creates_no_event(self) -> None:
-        finished, raw, recipes, registry = self._inputs(valid_count=False)
+        finished, recipes, registry = self._inputs()
         finished[["net_sale_qty", "known_lost_qty"]] = 0.0
         plan = infer_processing_postings(
-            finished, raw, recipes, registry, relation_snapshot_id="r1"
+            finished, recipes, registry, relation_snapshot_id="r1"
         )
         self.assertTrue(plan.sources.empty)
         self.assertTrue(plan.targets.empty)
@@ -625,7 +691,7 @@ class V014ProcessingTests(unittest.TestCase):
             "article_id": "R", "reserved_loss_qty": 1.0,
         }])
         plan = infer_processing_postings(
-            *self._inputs(valid_count=False),
+            *self._inputs(),
             relation_snapshot_id="r1",
             reserved_raw_loss=reserved,
         )
@@ -633,6 +699,22 @@ class V014ProcessingTests(unittest.TestCase):
         self.assertTrue(plan.targets.empty)
         self.assertEqual(
             "PROCESSING_RAW_LOSS_PRIORITY",
+            plan.quarantined.iloc[0]["reason_code"],
+        )
+
+    def test_external_receipt_has_priority_over_same_processing_pair(self) -> None:
+        finished, recipes, registry = self._inputs()
+        recipes["external_finished_receipt_qty"] = 4.0
+        recipes["external_finished_receipt_amt"] = 80.0
+
+        plan = infer_processing_postings(
+            finished, recipes, registry, relation_snapshot_id="r1"
+        )
+
+        self.assertTrue(plan.sources.empty)
+        self.assertTrue(plan.targets.empty)
+        self.assertEqual(
+            "PROCESSING_EXTERNAL_RECEIPT_PRIORITY",
             plan.quarantined.iloc[0]["reason_code"],
         )
 
@@ -687,22 +769,52 @@ class V014ProcessingTests(unittest.TestCase):
             validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "failure_count"],
         )
 
-    def test_insufficient_raw_is_quarantined(self) -> None:
-        plan = infer_processing_postings(*self._inputs(raw_available=7), relation_snapshot_id="r1")
-        self.assertTrue(plan.sources.empty)
-        self.assertEqual("PROCESSING_RAW_UNAVAILABLE", plan.quarantined.iloc[0]["reason_code"])
-
-    def test_finished_external_transaction_does_not_change_consumed_quantity(self) -> None:
-        finished, raw, recipes, registry = self._inputs()
-        finished["external_receive_qty"] = -1.0
-
+    def test_processing_usage_is_not_gated_by_raw_book_balance(self) -> None:
         plan = infer_processing_postings(
-            finished, raw, recipes, registry, relation_snapshot_id="r1"
+            *self._inputs(), relation_snapshot_id="r1"
+        )
+        self.assertTrue(plan.quarantined.empty)
+        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
+
+    def test_external_receipt_priority_hard_gate_matches_exact_pair(self) -> None:
+        sku_daily = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": article_id, "end_qty": 0.0, "end_amt": 0.0,
+                "qty_balance_residual": 0.0, "amount_balance_residual": 0.0,
+                "init_stock_qty": 0.0, "init_stock_amt": 0.0,
+            }
+            for article_id in ("R", "F")
+        ])
+        postings = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "event_group_id": "PROCESSING|1", "relation_type": "RECIPE_COMPOSE",
+                "posting_role": role, "article_id": article_id, "amt": 80.0,
+            }
+            for role, article_id in (("OUT", "R"), ("IN", "F"))
+        ])
+        evidence = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "raw_article_id": "R", "finished_article_id": "X",
+            "external_finished_receipt_qty": 4.0,
+            "external_finished_receipt_amt": 80.0,
+        }])
+
+        different_target = validate_v014_ledger(
+            sku_daily, postings, receipt_backed_processing=evidence
+        ).set_index("check_name")
+        self.assertTrue(
+            different_target.loc["PROCESSING_EXTERNAL_RECEIPT_PRIORITY", "passed"]
         )
 
-        self.assertTrue(plan.quarantined.empty)
-        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
-        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
+        evidence["finished_article_id"] = "F"
+        same_pair = validate_v014_ledger(
+            sku_daily, postings, receipt_backed_processing=evidence
+        ).set_index("check_name")
+        self.assertFalse(
+            same_pair.loc["PROCESSING_EXTERNAL_RECEIPT_PRIORITY", "passed"]
+        )
 
     def test_processing_plan_prices_through_main_daily_ledger(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
@@ -742,47 +854,6 @@ class V014ProcessingTests(unittest.TestCase):
         self.assertAlmostEqual(80.0, posted["IN"])
         validation = validate_v014_ledger(ledger.sku_daily, ledger.internal_postings)
         self.assertTrue(validation["passed"].all())
-
-
-class V014PackInferenceTests(unittest.TestCase):
-    def test_two_pack_count_reduction_posts_twelve_sale_units(self) -> None:
-        activities = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-19",
-            "article_id": "20599713", "gross_sale_qty": 0.0,
-            "sale_return_qty": 0.0, "known_lost_qty": 0.0,
-            "store_receive_qty": 0.0, "actual_stock_qty": 8.0,
-            "previous_stock_qty": 10.0, "is_counted": True,
-        }])
-        registry = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-19",
-            "source_article_id": "20599713",
-            "target_article_id": "21355516",
-            "relation_type": "EXPLICIT_CONVERT", "quantity_rate": 6.0,
-            "relation_version": "r1", "status": "ACTIVE",
-            "formal_flow_allowed": True,
-        }])
-        plan = infer_fixed_pack_postings(activities, registry)
-        self.assertAlmostEqual(2.0, plan.sources.iloc[0]["source_out_qty"])
-        self.assertAlmostEqual(12.0, plan.targets.iloc[0]["target_in_qty"])
-        self.assertEqual("SOURCE_INVENTORY_EQUATION", plan.trace.iloc[0]["quantity_source"])
-
-    def test_pack_without_previous_count_does_not_create_flow(self) -> None:
-        activities = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-19",
-            "article_id": "P", "gross_sale_qty": 0.0, "sale_return_qty": 0.0,
-            "known_lost_qty": 0.0, "store_receive_qty": 0.0,
-            "actual_stock_qty": 8.0, "previous_stock_qty": np.nan,
-            "is_counted": True,
-        }])
-        registry = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-19",
-            "source_article_id": "P", "target_article_id": "C",
-            "relation_type": "EXPLICIT_CONVERT", "quantity_rate": 6.0,
-            "relation_version": "r1", "status": "ACTIVE",
-            "formal_flow_allowed": True,
-        }])
-        plan = infer_fixed_pack_postings(activities, registry)
-        self.assertTrue(plan.sources.empty)
 
 
 class V014FormalPostingTests(unittest.TestCase):
@@ -836,15 +907,21 @@ class V014FormalPostingTests(unittest.TestCase):
 class V014InventoryTests(unittest.TestCase):
     def test_negative_and_double_count_are_audited(self) -> None:
         counts = pd.DataFrame([
-            {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "A", "actual_stock_qty": -1, "previous_stock_qty": 1, "count_group_id": "G", "code_role": "RECEIPT"},
+            {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "A", "actual_stock_qty": -1, "previous_stock_qty": 1, "count_group_id": "H", "code_role": "SALE"},
+            {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "R", "actual_stock_qty": 5, "previous_stock_qty": 5, "count_group_id": "G", "code_role": "RECEIPT"},
             {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "B", "actual_stock_qty": 2, "previous_stock_qty": 2, "count_group_id": "G", "code_role": "SALE"},
         ])
         result = normalize_inventory_inputs(counts)
         self.assertTrue(pd.isna(result.normalized.iloc[0]["actual_stock_qty"]))
         self.assertTrue(pd.isna(result.normalized.iloc[1]["actual_stock_qty"]))
+        self.assertEqual(2.0, result.normalized.iloc[2]["actual_stock_qty"])
         reasons = set(result.quarantined["reason_code"])
         self.assertIn("NEGATIVE_COUNT_INPUT", reasons)
-        self.assertIn("RECEIPT_AND_SALE_CODE_DOUBLE_COUNT", reasons)
+        self.assertIn("RECEIPT_CODE_COUNT_IGNORED", reasons)
+        normalized = result.normalized.set_index("article_id")
+        self.assertFalse(bool(normalized.loc["A", "is_counted"]))
+        self.assertFalse(bool(normalized.loc["R", "is_counted"]))
+        self.assertTrue(bool(normalized.loc["B", "is_counted"]))
 
 
 class V014WindowTests(unittest.TestCase):
@@ -1127,7 +1204,9 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     conn, "v014_stage_processing",
                     "store_id VARCHAR, business_date VARCHAR, relation_id VARCHAR, "
                     "raw_article_id VARCHAR, finished_article_id VARCHAR, raw_qty DOUBLE, "
-                    "yield_qty DOUBLE, effective_from VARCHAR, effective_to VARCHAR, approved BOOLEAN",
+                    "yield_qty DOUBLE, effective_from VARCHAR, effective_to VARCHAR, approved BOOLEAN, "
+                    "relation_source VARCHAR, external_finished_receipt_qty DOUBLE, "
+                    "external_finished_receipt_amt DOUBLE",
                 )
                 self._create_empty(
                     conn, "v014_stage_explicit_convert",
@@ -1166,13 +1245,7 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                 self._create_empty(
                     conn, "v014_stage_finished_processing_daily",
                     "store_id VARCHAR, business_date VARCHAR, article_id VARCHAR, "
-                    "init_stock_qty DOUBLE, end_stock_qty DOUBLE, external_receive_qty DOUBLE, "
-                    "net_sale_qty DOUBLE, known_lost_qty DOUBLE, other_internal_out_qty DOUBLE, "
-                    "other_internal_in_qty DOUBLE, has_valid_count BOOLEAN",
-                )
-                self._create_empty(
-                    conn, "v014_stage_raw_available",
-                    "store_id VARCHAR, business_date VARCHAR, article_id VARCHAR, available_qty DOUBLE",
+                    "net_sale_qty DOUBLE, known_lost_qty DOUBLE",
                 )
                 metric_rows = []
                 for index, day in enumerate(days):
@@ -1252,7 +1325,7 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     "SELECT engine_version, publish_eligible, "
                     "category_evidence_status FROM v014_run_manifest"
                 ).fetchone()
-                self.assertEqual(("0.16", False, "LEGACY_STATIC_SNAPSHOT"), manifest)
+                self.assertEqual(("0.17", False, "LEGACY_STATIC_SNAPSHOT"), manifest)
                 for table in (
                     "t_v014_levels_result",
                     "v014_sku_daily",

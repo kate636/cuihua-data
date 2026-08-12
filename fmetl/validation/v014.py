@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from fmetl import __version__
 from fmetl.master_data.category import CategoryMapper
 
 
@@ -11,6 +12,7 @@ def validate_v014_ledger(
     *,
     source_activities: pd.DataFrame | None = None,
     reserved_raw_loss: pd.DataFrame | None = None,
+    receipt_backed_processing: pd.DataFrame | None = None,
     qty_tolerance: float = 0.001,
     amount_tolerance: float = 0.01,
 ) -> pd.DataFrame:
@@ -127,6 +129,60 @@ def validate_v014_ledger(
         raw_loss_priority_failures,
     )
 
+    external_receipt_priority_failures = 0
+    if receipt_backed_processing is not None and not receipt_backed_processing.empty:
+        required_receipt = {
+            "store_id", "business_date", "raw_article_id", "finished_article_id",
+            "external_finished_receipt_qty", "external_finished_receipt_amt",
+        }
+        missing = sorted(required_receipt - set(receipt_backed_processing.columns))
+        if missing:
+            raise KeyError(
+                f"receipt-backed processing missing validation columns: {missing}"
+            )
+        receipt_pairs = receipt_backed_processing.loc[
+            pd.to_numeric(
+                receipt_backed_processing["external_finished_receipt_qty"],
+                errors="raise",
+            ).gt(qty_tolerance),
+            [
+                "store_id", "business_date", "raw_article_id",
+                "finished_article_id",
+            ],
+        ].drop_duplicates()
+        posting_keys = ["store_id", "business_date", "event_group_id"]
+        processing_out = internal_postings.loc[
+            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
+            & internal_postings["posting_role"].eq("OUT"),
+            posting_keys + ["article_id"],
+        ].rename(columns={"article_id": "raw_article_id"})
+        processing_in = internal_postings.loc[
+            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
+            & internal_postings["posting_role"].eq("IN"),
+            posting_keys + ["article_id"],
+        ].rename(columns={"article_id": "finished_article_id"})
+        processing_pairs = processing_out.merge(
+            processing_in, on=posting_keys, how="inner", validate="many_to_one"
+        )[[
+            "store_id", "business_date", "raw_article_id",
+            "finished_article_id",
+        ]].drop_duplicates()
+        if not processing_pairs.empty and not receipt_pairs.empty:
+            external_receipt_priority_failures = len(processing_pairs.merge(
+                receipt_pairs,
+                on=[
+                    "store_id", "business_date", "raw_article_id",
+                    "finished_article_id",
+                ],
+                how="inner",
+            ))
+    record(
+        "PROCESSING_EXTERNAL_RECEIPT_PRIORITY",
+        external_receipt_priority_failures == 0,
+        "an A-to-B external receipt excludes the same processing outflow",
+        external_receipt_priority_failures,
+    )
+
     bom_parent_failures = 0
     if not internal_postings.empty:
         bom_sources = internal_postings.loc[
@@ -221,7 +277,7 @@ def assert_hard_gates(validation: pd.DataFrame) -> None:
     failed = validation.loc[hard & ~validation["passed"]]
     if not failed.empty:
         names = ", ".join(failed["check_name"].astype(str))
-        raise ValueError(f"v0.16 hard validation failed: {names}")
+        raise ValueError(f"v{__version__} hard validation failed: {names}")
 
 
 def is_publishable(validation: pd.DataFrame) -> bool:

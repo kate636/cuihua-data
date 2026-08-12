@@ -78,7 +78,14 @@ def build_product_group_candidates(
     pairs[list(pair_columns)] = pairs[list(pair_columns)].astype(str)
     if pairs.duplicated(list(pair_columns)).any():
         raise V014RelationError("observed pairs must be unique per store/date/pair")
-    mapping = product_groups.copy()
+    relevant_articles = set(pairs["source_article_id"]) | set(
+        pairs["target_article_id"]
+    )
+    relevant_days = set(pairs["business_date"])
+    mapping = product_groups.loc[
+        product_groups["article_id"].astype(str).isin(relevant_articles)
+        & product_groups["business_date"].astype(str).isin(relevant_days)
+    ].copy()
     for side in ("source", "target"):
         pairs = pairs.merge(
             mapping.rename(columns={
@@ -114,27 +121,6 @@ def _active_rows(frame: pd.DataFrame | None, day: str) -> pd.DataFrame:
         until = out["effective_to"]
         out = out.loc[until.isna() | until.astype(str).ge(day)]
     return out
-
-
-def _pair_hit(
-    frame: pd.DataFrame | None,
-    day: str,
-    source: str,
-    target: str,
-    source_col: str,
-    target_col: str,
-) -> pd.DataFrame:
-    active = _active_rows(frame, day)
-    if active.empty:
-        return active
-    required = {source_col, target_col}
-    missing = sorted(required - set(active.columns))
-    if missing:
-        raise V014RelationError(f"relation evidence missing columns: {missing}")
-    return active.loc[
-        active[source_col].astype(str).eq(source)
-        & active[target_col].astype(str).eq(target)
-    ]
 
 
 def _build_pair_lookup(
@@ -270,7 +256,7 @@ def resolve_relation_registry(
     processing_lookup = _build_pair_lookup(
         processing, store_days=store_days,
         source_col="raw_article_id", target_col="finished_article_id",
-        value_columns=("raw_qty", "yield_qty"),
+        value_columns=("raw_qty", "yield_qty", "relation_source"),
     )
     convert_lookup = _build_pair_lookup(
         explicit_convert, store_days=store_days,
@@ -347,6 +333,9 @@ def resolve_relation_registry(
                 yield_qty = _positive_rate(hit, ("yield_qty",))
                 quantity_rate = raw_qty / yield_qty if raw_qty and yield_qty else None
                 cost_rate = 1.0
+                sources = tuple(map(str, hit.get("relation_source", ())))
+                if len(set(sources)) == 1:
+                    evidence = f"{evidence}:{sources[0]}"
             else:
                 quantity_rate = _positive_rate(
                     hit, ("quantity_rate", "convert_rate", "dressing_rate", "yield_rate")
