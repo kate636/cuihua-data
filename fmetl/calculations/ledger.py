@@ -23,6 +23,7 @@ ACTIVITY_COLUMNS = (
     "known_lost_qty", "actual_stock_qty", "is_counted",
     "store_receive_qty", "store_receive_amt",
 )
+OPTIONAL_ACTIVITY_COLUMNS = ("fallback_cost",)
 OPENING_COLUMNS = (
     "store_id", "article_id", "opening_qty", "opening_amt",
     "opening_source", "opening_source_day",
@@ -165,7 +166,12 @@ def run_weighted_ledger(
     """Run a dense SKU/day ledger and price all same-day internal flows along one DAG."""
     _require(activities, ACTIVITY_COLUMNS, "activities")
     _require(openings, OPENING_COLUMNS, "openings")
-    activity = activities[list(ACTIVITY_COLUMNS)].copy()
+    optional = [
+        column for column in OPTIONAL_ACTIVITY_COLUMNS if column in activities.columns
+    ]
+    activity = activities[[*ACTIVITY_COLUMNS, *optional]].copy()
+    for column in set(OPTIONAL_ACTIVITY_COLUMNS) - set(optional):
+        activity[column] = 0.0
     opening = openings[list(OPENING_COLUMNS)].copy()
     source, target = _validate_internal(internal_sources, internal_targets)
 
@@ -190,10 +196,15 @@ def run_weighted_ledger(
     )
     _required_numeric(
         activity,
-        ("net_sale_qty", "net_sale_amt", "store_receive_qty", "store_receive_amt"),
+        (
+            "net_sale_qty", "net_sale_amt", "store_receive_qty",
+            "store_receive_amt", "fallback_cost",
+        ),
         "activities",
         nonnegative=False,
     )
+    if activity["fallback_cost"].lt(-0.000001).any():
+        raise ValueError("activities.fallback_cost cannot be negative")
     def strict_bool(value: object) -> bool:
         if isinstance(value, (bool, np.bool_)):
             return bool(value)
@@ -363,6 +374,17 @@ def run_weighted_ledger(
                     sale_return_amt = 0.0
 
                 actual = None if pd.isna(row.actual_stock_qty) else float(row.actual_stock_qty)
+                prior_cost = float(last_unit_cost[(store, article_id)])
+                reference_cost = float(row.fallback_cost)
+                if np.isfinite(prior_cost) and prior_cost > 0:
+                    fallback_cost = prior_cost
+                    fallback_cost_source = "LAST_POSITIVE_ISSUE_COST"
+                elif reference_cost > 0:
+                    fallback_cost = reference_cost
+                    fallback_cost_source = "INVENTORY_POOL_DAILY_COST_PRICE"
+                else:
+                    fallback_cost = 0.0
+                    fallback_cost_source = "MISSING_COST_EVIDENCE"
                 flow = DailyFlow(
                     init_qty=init_qty,
                     init_amt=init_amt,
@@ -387,6 +409,7 @@ def run_weighted_ledger(
                     actual_stock_qty=actual,
                     is_counted=bool(row.is_counted),
                     day_clear=str(row.day_clear),
+                    fallback_cost=fallback_cost,
                 )
                 try:
                     state = transition_day(flow)
@@ -450,6 +473,16 @@ def run_weighted_ledger(
                     "opening_source_day": source_day if first_day else days[days.index(day) - 1],
                     "sale_return_cost_basis": return_cost_basis,
                     "sale_return_cost_amt": sale_return_amt,
+                    "fallback_cost": fallback_cost,
+                    "fallback_cost_source": fallback_cost_source,
+                    "issue_cost_source": (
+                        "DAILY_WEIGHTED_POOL"
+                        if (
+                            init_qty + float(row.store_receive_qty)
+                            + sum(incoming_qty.values()) + return_qty
+                        ) > 0.001
+                        else fallback_cost_source
+                    ),
                     "bom_in_qty": incoming_qty["bom"], "bom_in_amt": incoming_amt["bom"],
                     "bom_out_qty": outgoing_qty["bom"], "bom_out_amt": out_amounts["bom"],
                     "pack_in_qty": incoming_qty["pack"], "pack_in_amt": incoming_amt["pack"],

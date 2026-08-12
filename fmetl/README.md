@@ -368,6 +368,15 @@ flowchart LR
 
 销售、已知报损和全部内部转出使用同一个当日出库单位成本。
 
+当日成本池为空但发生销售、报损或内部转出时，不允许默认 0 成本。v0.16 按以下证据顺序回退：
+
+1. 该 SKU 最近一次有效的正出库成本；
+2. 同门店、同日、同 SKU 的 `inventory_pool.cost_price` 参考成本；
+3. 两者均不存在时保留 `MISSING_COST_EVIDENCE` 并阻断发布。
+
+回退只补单位成本，不补库存数量，也不覆盖任何正的当日加权成本池。审计列
+`fallback_cost_source` 与 `issue_cost_source` 记录实际取值路径。
+
 ### 9.3 库存方程与分支
 
 ```mermaid

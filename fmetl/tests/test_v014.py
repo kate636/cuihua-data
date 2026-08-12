@@ -582,12 +582,13 @@ class V014ProcessingTests(unittest.TestCase):
         }])
         return finished, raw, recipes, registry
 
-    def test_processing_uses_inventory_equation_not_compose(self) -> None:
+    def test_processing_uses_sales_and_ordinary_loss_backflush(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
-        # output = 2 - 1 + 3 + 1 = 5; raw out = 5 * 2 / 1 = 10
-        self.assertAlmostEqual(5.0, plan.targets.iloc[0]["target_in_qty"])
-        self.assertAlmostEqual(10.0, plan.sources.iloc[0]["source_out_qty"])
-        self.assertEqual("FINISHED_INVENTORY_EQUATION", plan.trace.iloc[0]["quantity_source"])
+        # consumed finished = net sale 3 + ordinary loss 1 = 4;
+        # raw out = 4 * 2 / 1 = 8. Counts do not inflate consumed quantity.
+        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
+        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
+        self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
 
     def test_processing_uses_only_the_current_day_recipe_snapshot(self) -> None:
         finished, raw, recipes, registry = self._inputs()
@@ -599,19 +600,99 @@ class V014ProcessingTests(unittest.TestCase):
         )
         self.assertEqual(1, len(plan.sources))
         self.assertEqual(1, len(plan.targets))
-        self.assertAlmostEqual(10.0, plan.sources.iloc[0]["source_out_qty"])
+        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
 
-    def test_missing_count_is_quarantined(self) -> None:
+    def test_missing_count_uses_sales_and_ordinary_loss_backflush(self) -> None:
         plan = infer_processing_postings(*self._inputs(valid_count=False), relation_snapshot_id="r1")
+        self.assertTrue(plan.quarantined.empty)
+        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
+        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
+        self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
+
+    def test_missing_count_with_no_consumption_creates_no_event(self) -> None:
+        finished, raw, recipes, registry = self._inputs(valid_count=False)
+        finished[["net_sale_qty", "known_lost_qty"]] = 0.0
+        plan = infer_processing_postings(
+            finished, raw, recipes, registry, relation_snapshot_id="r1"
+        )
         self.assertTrue(plan.sources.empty)
-        self.assertEqual("PROCESSING_MISSING_FINISHED_COUNT", plan.quarantined.iloc[0]["reason_code"])
+        self.assertTrue(plan.targets.empty)
+        self.assertTrue(plan.quarantined.empty)
+
+    def test_ssls_raw_loss_has_priority_over_processing_backflush(self) -> None:
+        reserved = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "article_id": "R", "reserved_loss_qty": 1.0,
+        }])
+        plan = infer_processing_postings(
+            *self._inputs(valid_count=False),
+            relation_snapshot_id="r1",
+            reserved_raw_loss=reserved,
+        )
+        self.assertTrue(plan.sources.empty)
+        self.assertTrue(plan.targets.empty)
+        self.assertEqual(
+            "PROCESSING_RAW_LOSS_PRIORITY",
+            plan.quarantined.iloc[0]["reason_code"],
+        )
+
+    def test_raw_loss_priority_hard_gate_rejects_processing_outflow(self) -> None:
+        plan = infer_processing_postings(
+            *self._inputs(), relation_snapshot_id="r1"
+        )
+        activities = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "R", "day_clear": "1", "gross_sale_qty": 0,
+                "sale_return_qty": 0, "net_sale_qty": 0, "net_sale_amt": 0,
+                "known_lost_qty": 0, "actual_stock_qty": float("nan"),
+                "is_counted": False, "store_receive_qty": 10,
+                "store_receive_amt": 100,
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "F", "day_clear": "1", "gross_sale_qty": 3,
+                "sale_return_qty": 0, "net_sale_qty": 3, "net_sale_amt": 60,
+                "known_lost_qty": 1, "actual_stock_qty": 2,
+                "is_counted": True, "store_receive_qty": 0,
+                "store_receive_amt": 0,
+            },
+        ])
+        openings = pd.DataFrame([
+            {
+                "store_id": "A3XV", "article_id": article,
+                "opening_qty": 0, "opening_amt": 0,
+                "opening_source": "OBSERVED_ZERO",
+                "opening_source_day": "2026-07-20",
+            }
+            for article in ("R", "F")
+        ])
+        ledger = run_weighted_ledger(
+            activities, openings, plan.sources, plan.targets
+        )
+        reserved = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "article_id": "R", "reserved_loss_qty": 1.0,
+        }])
+
+        validation = validate_v014_ledger(
+            ledger.sku_daily,
+            ledger.internal_postings,
+            reserved_raw_loss=reserved,
+        ).set_index("check_name")
+
+        self.assertFalse(validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "passed"])
+        self.assertEqual(
+            1,
+            validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "failure_count"],
+        )
 
     def test_insufficient_raw_is_quarantined(self) -> None:
-        plan = infer_processing_postings(*self._inputs(raw_available=9), relation_snapshot_id="r1")
+        plan = infer_processing_postings(*self._inputs(raw_available=7), relation_snapshot_id="r1")
         self.assertTrue(plan.sources.empty)
         self.assertEqual("PROCESSING_RAW_UNAVAILABLE", plan.quarantined.iloc[0]["reason_code"])
 
-    def test_negative_finished_external_transaction_is_also_quarantined(self) -> None:
+    def test_finished_external_transaction_does_not_change_consumed_quantity(self) -> None:
         finished, raw, recipes, registry = self._inputs()
         finished["external_receive_qty"] = -1.0
 
@@ -619,11 +700,9 @@ class V014ProcessingTests(unittest.TestCase):
             finished, raw, recipes, registry, relation_snapshot_id="r1"
         )
 
-        self.assertTrue(plan.sources.empty)
-        self.assertEqual(
-            "PROCESSING_FINISHED_EXTERNAL_RECEIPT",
-            plan.quarantined.iloc[0]["reason_code"],
-        )
+        self.assertTrue(plan.quarantined.empty)
+        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
+        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
 
     def test_processing_plan_prices_through_main_daily_ledger(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
@@ -654,10 +733,13 @@ class V014ProcessingTests(unittest.TestCase):
         ledger = run_weighted_ledger(activities, openings, plan.sources, plan.targets)
         state = ledger.sku_daily.set_index("article_id")
         self.assertAlmostEqual(0.0, state.loc["R", "accounting_profit"])
-        self.assertAlmostEqual(0.0, state.loc["F", "accounting_profit"])
+        # The count remains independent evidence. Usage backflush posts only
+        # the four consumed finished units, so the counted two-unit remainder
+        # is an inventory gain instead of inferred production.
+        self.assertAlmostEqual(20.0, state.loc["F", "accounting_profit"])
         posted = ledger.internal_postings.groupby("posting_role")["amt"].sum()
-        self.assertAlmostEqual(100.0, posted["OUT"])
-        self.assertAlmostEqual(100.0, posted["IN"])
+        self.assertAlmostEqual(80.0, posted["OUT"])
+        self.assertAlmostEqual(80.0, posted["IN"])
         validation = validate_v014_ledger(ledger.sku_daily, ledger.internal_postings)
         self.assertTrue(validation["passed"].all())
 

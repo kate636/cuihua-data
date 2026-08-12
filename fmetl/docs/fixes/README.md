@@ -10,6 +10,7 @@
 | [FIX-023](FIX-023-explicit-window-and-safe-rates.md) | 连续区间重刷与聚合比率安全除法 | ✅已实现 / ✅07-27～08-04 影子运行通过 | `cli.py`、`validation/run_v014.py`、`outputs/levels_result.py` |
 | [FIX-024](FIX-024-v015-evidence-led-release-gates.md) | 证据驱动发布门禁与同口径对比 | ✅代码与测试通过 / ⛔零成本门禁未通过 | 输出层、验证层、v1.5 对比层 |
 | [FIX-025](FIX-025-v016-category-lineage-and-comparison.md) | 分类血缘、双视图对比和发布门禁 | ✅代码与定向测试通过 / ⛔历史生效方式待确认 | 主数据、运行清单、v1.5 对比层 |
+| [FIX-026](FIX-026-empty-pool-issue-cost-fallback.md) | 空成本池出流的证据化成本回退 | ✅完整重跑 / ✅9项硬门禁 / ⛔236行仍缺成本 | 标准层、成本账本、发布门禁 |
 
 ## 版本迭代说明
 
@@ -19,4 +20,4 @@
 
 FIX-021 与 FIX-022 独立；FIX-023 在 FIX-022 盘点口径上完成连续区间重刷；FIX-024
 使用两日固定样本审核层级展示、成本证据和对比口径；FIX-025 在分类来源未闭合时
-保留诊断能力并阻止发布。
+保留诊断能力并阻止发布；FIX-026 只给空成本池出流补已有成本证据，不生成库存数量。

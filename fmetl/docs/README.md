@@ -1,5 +1,6 @@
 # v0.14～v0.16 文档索引
 
+- [2026-08-12 项目全文件、当前架构与精简建议](architecture/PROJECT_FULL_FILE_AUDIT_2026-08-12.md)
 - [strategy_fm v1.5 字段与表结构手册](references/strategy_fm_v1_5_字段手册.md)
 - [strategy_fm v1.5 实时列名快照（2026-07-22）](references/strategy_fm_v1_5_实时列名快照_2026-07-22.md)
 - [DESIGN-003：完整重构执行设计](designs/DESIGN-003-v0.13-clean-rebuild.md)
@@ -13,6 +14,7 @@
 - [v0.14 已实现架构与全链路处理流程](architecture/V0.14_IMPLEMENTED_ARCHITECTURE.md)
 - [v0.14 相比 v0.13 的实际迭代](fixes/V0.14_FROM_V0.13.md)
 - [FIX-025：v0.16 分类血缘与对比口径](fixes/FIX-025-v016-category-lineage-and-comparison.md)
+- [FIX-026：空成本池出流的证据化成本回退](fixes/FIX-026-empty-pool-issue-cost-fallback.md)
 - [v0.16 发布审核](reviews/V0.16_RELEASE_REVIEW.md)
 
 v0.11 及更早版本的架构、修复和审查记录统一保存在

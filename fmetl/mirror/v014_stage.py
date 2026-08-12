@@ -1116,6 +1116,43 @@ def build_v014_stage_bundle(
         store_id=store_id,
     )
 
+    # ``inventory_pool.cost_price`` is reference-only evidence: it must never
+    # replace a positive weighted inventory pool.  Carry the same-day value to
+    # the serial ledger solely for the empty-pool overdraft branch, where the
+    # alternative is an explicitly invalid zero-cost sale/loss.  The source
+    # mirror contract is unique at store x inventory_date x SKU; keep an
+    # independent assertion here because this value can affect reported cost.
+    fallback_cost = source["inventory_pool"].rename(columns={
+        "shop_id": "store_id",
+        "inventory_date": "business_date",
+        "sku_code": "article_id",
+        "cost_price": "fallback_cost",
+    })[["store_id", "business_date", "article_id", "fallback_cost"]].copy()
+    fallback_cost = _as_text(fallback_cost, ["store_id", "business_date", "article_id"])
+    fallback_cost = fallback_cost.loc[
+        fallback_cost["store_id"].eq(store_id)
+        & fallback_cost["business_date"].isin(days)
+        & fallback_cost["article_id"].isin(universe)
+    ]
+    if fallback_cost.duplicated(["store_id", "business_date", "article_id"]).any():
+        raise ValueError("inventory-pool fallback cost must be unique per SKU-day")
+    fallback_cost["fallback_cost"] = pd.to_numeric(
+        fallback_cost["fallback_cost"], errors="raise"
+    )
+    if (
+        fallback_cost["fallback_cost"].isna().any()
+        or ~np.isfinite(fallback_cost["fallback_cost"].to_numpy(dtype=float)).all()
+        or fallback_cost["fallback_cost"].lt(0).any()
+    ):
+        raise ValueError("inventory-pool fallback cost must be finite and nonnegative")
+    activities = activities.merge(
+        fallback_cost,
+        on=["store_id", "business_date", "article_id"],
+        how="left",
+        validate="one_to_one",
+    )
+    activities["fallback_cost"] = activities["fallback_cost"].fillna(0.0)
+
     count_aux = count_keep[["store_id", "business_date", "article_id", "actual_stock_qty"]].copy()
     count_aux = count_aux.sort_values(["article_id", "business_date"], kind="stable")
     count_aux["previous_stock_qty"] = count_aux.groupby("article_id")["actual_stock_qty"].shift(1)

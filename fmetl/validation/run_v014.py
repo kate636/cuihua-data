@@ -453,26 +453,65 @@ def run_v014_shadow_week(
         formal_events = build_formal_event_legs(conversion_events, active_registry)
         del conversion_events
         gc.collect()
+        inferred_pack = infer_fixed_pack_postings(activities, active_registry)
+        base_sources = pd.concat([
+            frame for frame in (formal_events.sources, inferred_pack.sources)
+            if not frame.empty
+        ], ignore_index=True) if not (
+            formal_events.sources.empty and inferred_pack.sources.empty
+        ) else formal_events.sources.copy()
+        base_targets = pd.concat([
+            frame for frame in (formal_events.targets, inferred_pack.targets)
+            if not frame.empty
+        ], ignore_index=True) if not (
+            formal_events.targets.empty and inferred_pack.targets.empty
+        ) else formal_events.targets.copy()
+        # Processing must consume the same inventory state that the formal
+        # ledger will use.  A base pass prices/rolls all external, BOM and pack
+        # facts first; using the legacy raw_available shortcut can overstate a
+        # raw pool after prior-day sales or loss.
+        base_ledger = run_weighted_ledger(
+            activities, openings, base_sources, base_targets
+        )
         finished_processing = _read_window(
             conn, "v014_stage_finished_processing_daily", compute_window, store_id
         )
-        raw_available = _read_window(
-            conn, "v014_stage_raw_available", compute_window, store_id
-        )
+        raw_ids = set(processing["raw_article_id"].astype(str))
+        raw_available = base_ledger.sku_daily.loc[
+            base_ledger.sku_daily["article_id"].astype(str).isin(raw_ids),
+            ["store_id", "business_date", "article_id", "eq_qty"],
+        ].copy()
+        raw_available["available_qty"] = raw_available["eq_qty"].clip(lower=0.0)
+        raw_available = raw_available[
+            ["store_id", "business_date", "article_id", "available_qty"]
+        ]
+        reserved_raw_loss = conn.execute(
+            'SELECT CAST(store_id AS VARCHAR) AS store_id, '
+            'CAST(business_date AS VARCHAR) AS business_date, '
+            'CAST(article_id AS VARCHAR) AS article_id, '
+            'SUM(COALESCE(ssls_qty, 0)) AS reserved_loss_qty '
+            'FROM v014_stage_reporting_metrics '
+            'WHERE CAST(store_id AS VARCHAR)=? '
+            'AND CAST(business_date AS VARCHAR) BETWEEN ? AND ? '
+            'GROUP BY 1, 2, 3 HAVING SUM(COALESCE(ssls_qty, 0)) > 0.001',
+            [store_id, compute_window.start, compute_window.end],
+        ).df()
         inferred = infer_processing_postings(
             finished_processing,
             raw_available,
             processing,
             active_registry,
             relation_snapshot_id=relation_version,
+            reserved_raw_loss=reserved_raw_loss,
         )
-        inferred_pack = infer_fixed_pack_postings(activities, active_registry)
-        sources = pd.concat([
-            formal_events.sources, inferred.sources, inferred_pack.sources,
-        ], ignore_index=True)
-        targets = pd.concat([
-            formal_events.targets, inferred.targets, inferred_pack.targets,
-        ], ignore_index=True)
+        sources = (
+            pd.concat([base_sources, inferred.sources], ignore_index=True)
+            if not inferred.sources.empty else base_sources.copy()
+        )
+        targets = (
+            pd.concat([base_targets, inferred.targets], ignore_index=True)
+            if not inferred.targets.empty else base_targets.copy()
+        )
         stage_quarantine = (
             _read_window(conn, "v014_stage_quarantine", compute_window, store_id)
             if _table_exists(conn, "v014_stage_quarantine")
@@ -485,7 +524,8 @@ def run_v014_shadow_week(
             inferred_pack.quarantined,
         ])
         del (
-            processing, finished_processing, raw_available, formal_events,
+            processing, finished_processing, raw_available, base_ledger,
+            base_sources, base_targets, formal_events,
             inferred, inferred_pack, normalized_counts, relation_quarantine,
             active_registry,
         )
@@ -498,7 +538,9 @@ def run_v014_shadow_week(
             ledger.sku_daily,
             ledger.internal_postings,
             source_activities=activities,
+            reserved_raw_loss=reserved_raw_loss,
         )
+        del reserved_raw_loss
         assert_hard_gates(validation)
         stage_checksums["activities"] = stable_frame_checksum(activities)
         stage_checksums["openings"] = stable_frame_checksum(openings)

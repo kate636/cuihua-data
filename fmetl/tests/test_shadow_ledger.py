@@ -96,6 +96,65 @@ class ShadowLedgerTests(unittest.TestCase):
             ),
         )
 
+    def test_empty_pool_uses_reference_fallback_without_creating_inventory(self) -> None:
+        activity = _activity(["A"])
+        activity["fallback_cost"] = 6.5
+        activity.loc[0, ["gross_sale_qty", "net_sale_qty", "net_sale_amt"]] = [
+            2.0, 2.0, 20.0,
+        ]
+        empty_source = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_target = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+
+        row = run_weighted_ledger(
+            activity, _openings(["A"]), empty_source, empty_target
+        ).sku_daily.iloc[0]
+
+        self.assertEqual(6.5, row.issue_unit_cost)
+        self.assertEqual("INVENTORY_POOL_DAILY_COST_PRICE", row.issue_cost_source)
+        self.assertEqual(0.0, row.end_qty)
+        self.assertEqual(0.0, row.end_amt)
+        self.assertEqual(13.0, row.neg_clamp_cost_amt)
+        self.assertEqual(7.0, row.accounting_profit)
+
+    def test_last_positive_issue_cost_precedes_later_reference_fallback(self) -> None:
+        activity = pd.concat([_activity(["A"]), _activity(["A"])], ignore_index=True)
+        activity.loc[0, [
+            "store_receive_qty", "store_receive_amt", "gross_sale_qty",
+            "net_sale_qty", "net_sale_amt",
+        ]] = [1.0, 5.0, 1.0, 1.0, 10.0]
+        activity.loc[1, "business_date"] = "2026-07-15"
+        activity.loc[1, ["gross_sale_qty", "net_sale_qty", "net_sale_amt"]] = [
+            1.0, 1.0, 10.0,
+        ]
+        activity["fallback_cost"] = [9.0, 9.0]
+        empty_source = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_target = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+
+        rows = run_weighted_ledger(
+            activity, _openings(["A"]), empty_source, empty_target
+        ).sku_daily.set_index("business_date")
+
+        self.assertEqual(5.0, rows.loc["2026-07-14", "issue_unit_cost"])
+        self.assertEqual(5.0, rows.loc["2026-07-15", "issue_unit_cost"])
+        self.assertEqual(
+            "LAST_POSITIVE_ISSUE_COST",
+            rows.loc["2026-07-15", "issue_cost_source"],
+        )
+
     def test_signed_purchase_return_rolls_through_profit_and_ending_inventory(self) -> None:
         activity = _activity(["A"])
         activity.loc[0, [

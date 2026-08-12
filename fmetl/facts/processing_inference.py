@@ -36,14 +36,23 @@ def infer_processing_postings(
     relation_registry: pd.DataFrame,
     *,
     relation_snapshot_id: str,
+    reserved_raw_loss: pd.DataFrame | None = None,
     tolerance: float = 0.001,
 ) -> InferredProcessingPlan:
-    """Infer finished output from the finished-SKU inventory equation.
+    """Infer processing postings from inventory balance or consumed usage.
 
     `compose_di` is deliberately not an input.  A formal posting requires a
-    nonnegative count for the finished SKU, an active dated recipe, no external
-    finished receipt, and enough raw material.  Failure is quarantined before
-    it can be absorbed by unknown loss.
+    dated active recipe and enough raw material.
+    Net sales plus ordinary known loss backflush only the finished quantity
+    known to have been consumed.  Counts and external finished receipts remain
+    ledger facts, but they do not gate or inflate this consumed-quantity event;
+    the inference does not claim to reconstruct total production, unconsumed
+    production, or ending inventory.
+
+    SSLS raw-loss facts and inferred processing are mutually exclusive, with
+    SSLS taking priority.  When any recipe raw SKU/day has SSLS loss, the whole
+    processing group is quarantined: no quantity offset or partial processing
+    is attempted, so the same raw quantity cannot enter both paths.
     """
     finished_required = {
         "store_id", "business_date", "article_id", "init_stock_qty",
@@ -76,6 +85,33 @@ def infer_processing_postings(
     if raw_available.duplicated(["store_id", "business_date", "article_id"]).any():
         raise ValueError("raw_available must be unique per SKU day")
 
+    reserved_columns = ("store_id", "business_date", "article_id", "reserved_loss_qty")
+    if reserved_raw_loss is None:
+        reserved = _empty(reserved_columns)
+    else:
+        missing = sorted(set(reserved_columns) - set(reserved_raw_loss.columns))
+        if missing:
+            raise KeyError(f"reserved_raw_loss missing columns: {missing}")
+        reserved = reserved_raw_loss[list(reserved_columns)].copy()
+        if reserved.duplicated(["store_id", "business_date", "article_id"]).any():
+            raise ValueError("reserved_raw_loss must be unique per SKU day")
+        reserved["reserved_loss_qty"] = pd.to_numeric(
+            reserved["reserved_loss_qty"], errors="raise"
+        )
+        if (
+            reserved["reserved_loss_qty"].isna().any()
+            or not np.isfinite(reserved["reserved_loss_qty"].to_numpy(dtype=float)).all()
+            or reserved["reserved_loss_qty"].lt(-tolerance).any()
+        ):
+            raise ValueError("reserved_raw_loss.reserved_loss_qty must be finite and nonnegative")
+    if not reserved.empty:
+        reserved[["store_id", "business_date", "article_id"]] = reserved[
+            ["store_id", "business_date", "article_id"]
+        ].astype(str)
+    reserved_index = reserved.set_index(
+        ["store_id", "business_date", "article_id"]
+    )["reserved_loss_qty"]
+
     finished = finished_daily.copy()
     raw = raw_available.copy()
     numeric_finished = [
@@ -91,6 +127,7 @@ def infer_processing_postings(
     if ((recipe["raw_qty"] <= 0) | (recipe["yield_qty"] <= 0)).any():
         raise ValueError("recipe raw_qty and yield_qty must be positive")
     raw_index = raw.set_index(["store_id", "business_date", "article_id"])["available_qty"]
+    committed_raw_qty: dict[tuple[str, str, str], float] = {}
     formal = relation_registry.loc[
         relation_registry["relation_type"].eq("PROCESSING")
         & relation_registry["status"].eq("ACTIVE")
@@ -127,27 +164,30 @@ def infer_processing_postings(
                 "detail": ",".join(sorted(relation_ids)),
             })
             continue
-        if not bool(item.has_valid_count):
+        raw_loss_priority = []
+        for edge in active.itertuples(index=False):
+            raw_id = str(edge.raw_article_id)
+            reserved_qty = float(reserved_index.get((store, day, raw_id), 0.0))
+            if reserved_qty > tolerance:
+                raw_loss_priority.append(f"{raw_id}:reserved_loss={reserved_qty}")
+        if raw_loss_priority:
             quarantine_rows.append({
                 "store_id": store, "business_date": day, "article_id": finished_id,
-                "reason_code": "PROCESSING_MISSING_FINISHED_COUNT", "detail": "",
+                "reason_code": "PROCESSING_RAW_LOSS_PRIORITY",
+                "detail": ";".join(raw_loss_priority),
             })
             continue
-        if abs(float(item.external_receive_qty)) > tolerance:
-            quarantine_rows.append({
-                "store_id": store, "business_date": day, "article_id": finished_id,
-                "reason_code": "PROCESSING_FINISHED_EXTERNAL_RECEIPT", "detail": str(item.external_receive_qty),
-            })
-            continue
-        output_qty = (
-            float(item.end_stock_qty)
-            - float(item.init_stock_qty)
-            - float(item.external_receive_qty)
-            + float(item.net_sale_qty)
-            + float(item.known_lost_qty)
-            + float(item.other_internal_out_qty)
-            - float(item.other_internal_in_qty)
+
+        finished_reserved_loss = float(
+            reserved_index.get((store, day, finished_id), 0.0)
         )
+        ordinary_loss_qty = max(
+            0.0, float(item.known_lost_qty) - finished_reserved_loss
+        )
+        output_qty = max(
+            0.0, float(item.net_sale_qty) + ordinary_loss_qty
+        )
+        quantity_source = "FINISHED_USAGE_BACKFLUSH"
         if output_qty < -tolerance:
             quarantine_rows.append({
                 "store_id": store, "business_date": day, "article_id": finished_id,
@@ -168,7 +208,7 @@ def infer_processing_postings(
                 continue
             required_qty = output_qty * float(edge.raw_qty) / float(edge.yield_qty)
             key = (store, day, raw_id)
-            available_qty = float(raw_index.get(key, np.nan))
+            available_qty = float(raw_index.get(key, np.nan)) - committed_raw_qty.get(key, 0.0)
             if not np.isfinite(available_qty) or available_qty + tolerance < required_qty:
                 insufficient.append(f"{raw_id}:need={required_qty}:available={available_qty}")
             relation_edges.append((edge, required_qty, available_qty))
@@ -186,16 +226,18 @@ def infer_processing_postings(
             "store_id": store, "business_date": day, "event_group_id": event_id,
             "relation_type": "RECIPE_COMPOSE", "target_article_id": finished_id,
             "target_in_qty": output_qty, "amount_allocation_ratio": 1.0,
-            "quantity_source": "FINISHED_INVENTORY_EQUATION",
+            "quantity_source": quantity_source,
             "relation_snapshot_id": relation_snapshot_id,
         })
         for edge, required_qty, available_qty in relation_edges:
             raw_id = str(edge.raw_article_id)
+            key = (store, day, raw_id)
+            committed_raw_qty[key] = committed_raw_qty.get(key, 0.0) + required_qty
             source_rows.append({
                 "store_id": store, "business_date": day, "event_group_id": event_id,
                 "relation_type": "RECIPE_COMPOSE", "source_article_id": raw_id,
                 "source_out_qty": required_qty,
-                "quantity_source": "FINISHED_INVENTORY_EQUATION",
+                "quantity_source": quantity_source,
                 "relation_snapshot_id": relation_snapshot_id,
             })
             trace_rows.append({
@@ -205,7 +247,7 @@ def infer_processing_postings(
                 "finished_in_qty": output_qty, "raw_available_qty": available_qty,
                 "raw_qty": float(edge.raw_qty), "yield_qty": float(edge.yield_qty),
                 "amount_allocation_ratio": allocation,
-                "quantity_source": "FINISHED_INVENTORY_EQUATION",
+                "quantity_source": quantity_source,
             })
     return InferredProcessingPlan(
         sources=pd.DataFrame(source_rows, columns=SOURCE_COLUMNS),

@@ -10,6 +10,7 @@ def validate_v014_ledger(
     internal_postings: pd.DataFrame,
     *,
     source_activities: pd.DataFrame | None = None,
+    reserved_raw_loss: pd.DataFrame | None = None,
     qty_tolerance: float = 0.001,
     amount_tolerance: float = 0.01,
 ) -> pd.DataFrame:
@@ -93,6 +94,38 @@ def validate_v014_ledger(
         )
         posting_failures = int(pivot.get("OUT", 0.0).sub(pivot.get("IN", 0.0)).abs().gt(amount_tolerance).sum())
     record("INTERNAL_AMOUNT_CONSERVATION", posting_failures == 0, "OUT amount equals IN amount", posting_failures)
+
+    raw_loss_priority_failures = 0
+    if reserved_raw_loss is not None and not reserved_raw_loss.empty:
+        required_reserved = {
+            "store_id", "business_date", "article_id", "reserved_loss_qty",
+        }
+        missing = sorted(required_reserved - set(reserved_raw_loss.columns))
+        if missing:
+            raise KeyError(f"reserved raw loss missing validation columns: {missing}")
+        processing_out = internal_postings.loc[
+            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
+            & internal_postings["posting_role"].eq("OUT"),
+            ["store_id", "business_date", "article_id"],
+        ].drop_duplicates()
+        reserved = reserved_raw_loss.loc[
+            pd.to_numeric(
+                reserved_raw_loss["reserved_loss_qty"], errors="raise"
+            ).gt(qty_tolerance),
+            ["store_id", "business_date", "article_id"],
+        ].drop_duplicates()
+        if not processing_out.empty and not reserved.empty:
+            raw_loss_priority_failures = len(processing_out.merge(
+                reserved,
+                on=["store_id", "business_date", "article_id"],
+                how="inner",
+            ))
+    record(
+        "PROCESSING_RAW_LOSS_PRIORITY",
+        raw_loss_priority_failures == 0,
+        "SSLS raw loss excludes the same raw SKU/day from inferred processing",
+        raw_loss_priority_failures,
+    )
 
     bom_parent_failures = 0
     if not internal_postings.empty:
