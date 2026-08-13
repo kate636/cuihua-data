@@ -88,7 +88,6 @@ HIVE_SOURCE_BY_MIRROR: dict[str, tuple[str, ...]] = {
 AUXILIARY_STARROCKS_TABLES: tuple[str, ...] = (
     "cuihua_t_purchase_wastage",
     "article_group_id_Key",
-    "strategy_fm_sku_shop_stock_convert_detail",
 )
 
 
@@ -111,29 +110,6 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         note=(
             "Daily product identity snapshot. area_name IS NULL is allowed only for the "
             "A3XV local shadow and does not prove a conversion event or rate."
-        ),
-    ),
-    "stock_convert_detail": MirrorContract(
-        name="strategy_fm_sku_shop_stock_convert_detail",
-        authority=MirrorAuthority.OBSERVATION,
-        partition_column="inc_day",
-        store_column="shop_id",
-        projection=(
-            "id", "inc_day", "shop_id", "convert_type", "purchase_sku_code",
-            "receive_sku_code", "sale_sku_code", "receive_qty", "stock_qty",
-            "convert_rate", "bom_convert_rate", "amount_convert_rate", "chain_sku",
-            "receive_no", "receive_item_id", "receive_sku_status", "sale_sku_status",
-            "delete_flag", "created_at", "updated_at",
-        ),
-        expected_grain=("id",),
-        shard_key="id",
-        shards=16,
-        managed_by_sync_script=False,
-        allow_empty=True,
-        base_predicates=("IFNULL(delete_flag, 0) = 0",),
-        note=(
-            "Observed dated cross-code evidence. It can provide event quantities, but "
-            "relation type and ratios still require the v0.14 dated registry."
         ),
     ),
     "sales": MirrorContract(

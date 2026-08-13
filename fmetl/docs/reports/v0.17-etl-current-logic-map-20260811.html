@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fmetl v0.17 当前真实 ETL 逻辑图｜2026-08-06 至 08-11</title>
+  <style>
+    :root {
+      --bg: #f5f8fc;
+      --paper: #ffffff;
+      --ink: #26364a;
+      --muted: #69778b;
+      --line: #cfdae7;
+      --blue: #e8f3ff;
+      --blue-line: #75a8d5;
+      --green: #e9f8f1;
+      --green-line: #66a98a;
+      --amber: #fff6dc;
+      --amber-line: #c69b40;
+      --red: #fff0f0;
+      --red-line: #cf7373;
+      --violet: #f1efff;
+      --violet-line: #9181c7;
+      --gray: #f1f4f8;
+      --gray-line: #97a5b4;
+      --teal: #e7f8f7;
+      --teal-line: #65aaa6;
+      --shadow: 0 12px 34px rgba(51, 71, 96, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 4% 0%, rgba(205, 231, 255, .56), transparent 29rem),
+        radial-gradient(circle at 96% 2%, rgba(224, 243, 235, .52), transparent 27rem),
+        var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.58;
+    }
+    a { color: #2e6f9f; text-decoration: none; }
+    .page { max-width: 1510px; margin: 0 auto; padding: 30px 26px 70px; }
+    .hero {
+      padding: 30px 34px;
+      border: 1px solid #d8e3ee;
+      border-radius: 24px;
+      background: rgba(255,255,255,.9);
+      box-shadow: var(--shadow);
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 4vw, 46px); line-height: 1.18; letter-spacing: -.5px; }
+    h2 { margin: 0; font-size: 24px; line-height: 1.3; }
+    h3 { margin: 0 0 8px; font-size: 17px; }
+    p { margin: 7px 0; }
+    .subtitle { max-width: 1100px; color: var(--muted); font-size: 16px; }
+    .meta { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 18px; }
+    .pill {
+      padding: 6px 11px;
+      border-radius: 999px;
+      border: 1px solid #d6e1ec;
+      background: #f8fbfe;
+      color: #536379;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pill.bad { color: #a44646; background: var(--red); border-color: #efcaca; }
+    .pill.good { color: #337559; background: var(--green); border-color: #c8e8d7; }
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 10px 0;
+      margin: 12px 0;
+      background: rgba(245,248,252,.9);
+      backdrop-filter: blur(12px);
+    }
+    .nav a {
+      padding: 7px 11px;
+      border: 1px solid #d4dfeb;
+      border-radius: 10px;
+      background: rgba(255,255,255,.92);
+      color: #526276;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    section {
+      margin-top: 18px;
+      padding: 23px;
+      border: 1px solid #d9e3ed;
+      border-radius: 20px;
+      background: rgba(255,255,255,.94);
+      box-shadow: var(--shadow);
+    }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    .section-head p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
+    .legend { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 3px; vertical-align: -1px; }
+    .legend .src::before { background: var(--blue); border: 1px solid var(--blue-line); }
+    .legend .calc::before { background: var(--green); border: 1px solid var(--green-line); }
+    .legend .judge::before { background: var(--amber); border: 1px solid var(--amber-line); }
+    .legend .risk::before { background: var(--red); border: 1px solid var(--red-line); }
+    .diagram-wrap {
+      overflow-x: auto;
+      border: 1px solid #e0e7ef;
+      border-radius: 16px;
+      background:
+        linear-gradient(#edf2f7 1px, transparent 1px),
+        linear-gradient(90deg, #edf2f7 1px, transparent 1px),
+        #fbfdff;
+      background-size: 24px 24px;
+      padding: 13px;
+    }
+    svg.diagram { display: block; min-width: 1060px; width: 100%; height: auto; }
+    svg .node { stroke-width: 1.7; filter: url(#softShadow); }
+    svg .blue { fill: var(--blue); stroke: var(--blue-line); }
+    svg .green { fill: var(--green); stroke: var(--green-line); }
+    svg .amber { fill: var(--amber); stroke: var(--amber-line); }
+    svg .red { fill: var(--red); stroke: var(--red-line); }
+    svg .violet { fill: var(--violet); stroke: var(--violet-line); }
+    svg .gray { fill: var(--gray); stroke: var(--gray-line); }
+    svg .teal { fill: var(--teal); stroke: var(--teal-line); }
+    svg .edge { fill: none; stroke: #8497aa; stroke-width: 2; marker-end: url(#arrow); }
+    svg .edge-dashed { fill: none; stroke: #a99052; stroke-width: 2; stroke-dasharray: 7 6; marker-end: url(#arrowAmber); }
+    svg .edge-risk { fill: none; stroke: #cb6767; stroke-width: 2.3; marker-end: url(#arrowRed); }
+    svg .edge-loop { fill: none; stroke: #6c9884; stroke-width: 2.2; stroke-dasharray: 8 5; marker-end: url(#arrowGreen); }
+    svg .title { font-size: 16px; font-weight: 800; fill: #293b50; text-anchor: middle; }
+    svg .body { font-size: 12.5px; fill: #53647a; text-anchor: middle; }
+    svg .small { font-size: 11.5px; fill: #67778a; text-anchor: middle; }
+    svg .edge-label { font-size: 11.5px; fill: #65778c; text-anchor: middle; paint-order: stroke; stroke: #fbfdff; stroke-width: 5px; stroke-linejoin: round; }
+    svg .lane { fill: rgba(255,255,255,.45); stroke: #d9e3ec; stroke-width: 1; stroke-dasharray: 5 5; }
+    svg .lane-label { font-size: 12px; font-weight: 800; fill: #738297; letter-spacing: 1px; }
+    svg .risk-badge { fill: #ce6666; stroke: #fff; stroke-width: 3; }
+    svg .risk-text { fill: white; font-size: 11px; font-weight: 900; text-anchor: middle; dominant-baseline: middle; }
+    svg .ok-badge { fill: #55a17e; stroke: #fff; stroke-width: 3; }
+    .callout-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; margin-top: 12px; }
+    .callout { padding: 12px 14px; border: 1px solid #dbe4ed; border-radius: 13px; background: #f9fbfd; font-size: 13px; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.risk { background: #fff7f7; border-color: #eccaca; }
+    .callout.warn { background: #fffbf0; border-color: #ebdbad; }
+    .callout.ok { background: #f2fbf6; border-color: #cfe8dc; }
+    .two-col { display: grid; grid-template-columns: 1.12fr .88fr; gap: 14px; margin-top: 13px; }
+    .panel { padding: 15px; border: 1px solid #dce5ee; border-radius: 14px; background: #fbfdff; }
+    .panel p, .panel li { font-size: 13px; color: #536479; }
+    code { padding: 2px 5px; border-radius: 6px; background: #edf2f7; color: #3f536b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+    .formula { padding: 10px 12px; margin: 8px 0; border-left: 3px solid #83a9cc; background: #f2f7fc; color: #40536a; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 9px; border-bottom: 1px solid #e2e8ef; text-align: right; white-space: nowrap; }
+    th { background: #f4f7fa; color: #526276; font-weight: 800; }
+    th:first-child, td:first-child { text-align: left; }
+    td.bad { color: #b54d4d; font-weight: 800; }
+    td.good { color: #337a59; font-weight: 800; }
+    details { margin-top: 10px; border: 1px solid #dbe4ed; border-radius: 13px; background: #fbfdff; }
+    summary { cursor: pointer; padding: 12px 14px; font-weight: 800; color: #43566d; }
+    details > div { padding: 0 14px 14px; }
+    .truth { border-left: 5px solid #c96b6b; background: linear-gradient(90deg,#fff2f2,#fff); }
+    .truth p { max-width: 1200px; color: #4f6074; }
+    .legacy-diagram { display: block; }
+  .mega-shell { position: relative; }
+    #mega { scroll-margin-top: 64px; }
+    .mega-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+      margin: 0 0 10px;
+    }
+    .mega-toolbar button, .mega-toolbar input {
+      height: 34px;
+      border: 1px solid #d2deea;
+      border-radius: 9px;
+      background: #fff;
+      color: #475a71;
+      font: inherit;
+      font-size: 12px;
+    }
+    .mega-toolbar button { padding: 0 11px; cursor: pointer; font-weight: 750; }
+    .mega-toolbar button:hover { border-color: #8cb1d0; background: #f3f8fd; }
+    .mega-toolbar input { width: 210px; padding: 0 10px; }
+    .mega-toolbar .zoom-value { min-width: 48px; color: var(--muted); font-size: 12px; text-align: center; }
+    .mega-viewport {
+      position: relative;
+      height: min(86vh, 1040px);
+      min-height: 720px;
+      overflow: hidden;
+      border: 1px solid #dbe5ef;
+      border-radius: 16px;
+      background:
+        linear-gradient(#edf2f7 1px, transparent 1px),
+        linear-gradient(90deg, #edf2f7 1px, transparent 1px),
+        #fbfdff;
+      background-size: 24px 24px;
+      user-select: none;
+    }
+    #megaSvg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+    #megaSvg.dragging { cursor: grabbing; }
+    #megaSvg .mega-edge { fill: none; stroke: #8296aa; stroke-width: 2.7; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#megaArrow); }
+    #megaSvg .mega-edge.source { stroke: #7899b8; }
+    #megaSvg .mega-edge.relation { stroke: #8c7caf; }
+    #megaSvg .mega-edge.bom { stroke: #5c9b82; }
+    #megaSvg .mega-edge.process { stroke: #897bb3; }
+    #megaSvg .mega-edge.pack { stroke: #6f99b9; }
+    #megaSvg .mega-edge.stock { stroke: #67947c; }
+    #megaSvg .mega-edge.output { stroke: #8d78aa; }
+    #megaSvg .mega-edge.dashed { stroke: #a58d4d; stroke-dasharray: 11 8; marker-end: url(#megaArrowAmber); }
+    #megaSvg .mega-edge.risk { stroke: #ca6969; marker-end: url(#megaArrowRed); }
+    #megaSvg .mega-edge.loss { stroke: #b27c5e; marker-end: url(#megaArrowLoss); }
+    #megaSvg .mega-edge.loop { stroke: #5e987c; stroke-dasharray: 12 8; marker-end: url(#megaArrowGreen); }
+    #megaSvg .mega-edge-label { font-size: 15px; fill: #65778b; text-anchor: middle; paint-order: stroke; stroke: #fbfdff; stroke-width: 7px; stroke-linejoin: round; }
+    #megaSvg .mega-node { cursor: pointer; }
+    #megaSvg .mega-node rect, #megaSvg .mega-node polygon { stroke-width: 2.2; filter: url(#megaShadow); }
+    #megaSvg .mega-node.selected rect, #megaSvg .mega-node.selected polygon { stroke: #2b6f9f; stroke-width: 5; }
+    #megaSvg .mega-title { font-size: 20px; font-weight: 850; fill: #293b50; text-anchor: middle; }
+    #megaSvg .mega-body { font-size: 15px; fill: #52647a; text-anchor: middle; }
+    #megaSvg .mega-lane { fill: rgba(255,255,255,.38); stroke: #d6e1eb; stroke-width: 2; stroke-dasharray: 10 8; }
+    #megaSvg .mega-lane-label { font-size: 21px; font-weight: 850; fill: #718195; letter-spacing: 2px; }
+    #megaSvg .mega-risk-badge { fill: #cc6666; stroke: #fff; stroke-width: 4; }
+    #megaSvg .mega-risk-label { fill: #fff; font-size: 14px; font-weight: 900; text-anchor: middle; dominant-baseline: middle; }
+    #megaMini {
+      position: absolute;
+      right: 14px;
+      bottom: 14px;
+      width: 175px;
+      height: 205px;
+      border: 1px solid #cdd9e5;
+      border-radius: 10px;
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 8px 24px rgba(47,67,90,.13);
+      cursor: crosshair;
+    }
+    .mega-help {
+      position: absolute;
+      left: 14px;
+      bottom: 12px;
+      padding: 5px 8px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.86);
+      color: #708096;
+      font-size: 11px;
+      pointer-events: none;
+    }
+    .mega-detail {
+      min-height: 40px;
+      margin-top: 9px;
+      padding: 9px 12px;
+      border-left: 3px solid #86aaca;
+      background: #f6f9fc;
+      color: #4c5f76;
+      font-size: 12px;
+    }
+    .mega-phasebar {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 7px;
+      margin: 0 0 9px;
+    }
+    .mega-phasebar button {
+      padding: 7px 8px;
+      border: 1px solid #d2deea;
+      border-radius: 9px;
+      background: #f8fbfe;
+      color: #53657a;
+      font: inherit;
+      font-size: 11px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .mega-phasebar button:hover { background: #eef6fd; border-color: #8eb2d1; }
+    .footer { margin-top: 20px; color: var(--muted); font-size: 12px; text-align: center; }
+    @media (max-width: 900px) {
+      .page { padding: 16px 10px 42px; }
+      .hero, section { padding: 17px; border-radius: 16px; }
+      .callout-grid, .two-col { grid-template-columns: 1fr; }
+      .nav { position: static; }
+      .mega-viewport { min-height: 620px; }
+      #megaMini { width: 125px; height: 150px; }
+    }
+    @media print {
+      .nav { display: none; }
+      body { background: #fff; }
+      section, .hero { box-shadow: none; break-inside: avoid; }
+      .diagram-wrap { overflow: visible; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <h1>fmetl v0.17 当前真实 ETL 逻辑图</h1>
+    <p class="subtitle">发布窗口 2026-08-06 至 08-11，08-05 仅作 D-1 预热。本文保留原有分图与可缩放巨树；换码口径已修正为“固定 A→B 关系 + purchase_di 的 B 数量/金额直接入账”，不存在也不依赖当日换码明细表。</p>
+    <div class="meta">
+      <span class="pill">代码：本地工作树 / USAGE_BACKFLUSH + SSLS 优先</span>
+      <span class="pill">本地计算：2026-08-06 → 2026-08-11</span>
+      <span class="pill">D-1：2026-08-05</span>
+      <span class="pill">分类：监控平台最新 2026-08-12</span>
+      <span class="pill good">10 项会计 hard gate 全通过</span>
+      <span class="pill bad">publish gate 未通过</span>
+      <span class="pill bad">本地试跑，不代表生产发布</span>
+    </div>
+  </header>
+
+  <nav class="nav">
+    <a href="#abstract">抽象总图</a>
+    <a href="#mega">超大详细树</a>
+    <a href="#full">详细全链路</a>
+    <a href="#relation">关系判定树</a>
+    <a href="#events">内部事件树</a>
+    <a href="#ledger">库存状态机</a>
+    <a href="#profit">毛利与输出树</a>
+    <a href="#loss-detail">报损毛利链</a>
+    <a href="#risk">问题因果树</a>
+    <a href="#run">近一周实跑</a>
+    <a href="#appendix">证据附录</a>
+  </nav>
+
+  <section id="abstract">
+    <div class="section-head">
+      <div><h2>1. 相对抽象的大致逻辑图</h2><p>只看这一张，可理解系统从哪里来、在哪里算、在哪里拦截、最后产出什么。</p></div>
+      <div class="legend"><span class="src">输入</span><span class="calc">计算</span><span class="judge">判定/闸门</span><span class="risk">风险</span></div>
+    </div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1420 500" role="img" aria-label="fmetl v0.17 抽象流程图">
+        <defs>
+          <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#7690a8" flood-opacity=".14"/></filter>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#8497aa"/></marker>
+          <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#a99052"/></marker>
+          <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#cb6767"/></marker>
+          <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6c9884"/></marker>
+        </defs>
+        <path class="edge" d="M218 190H270"/><path class="edge" d="M452 190H504"/><path class="edge" d="M686 190H738"/>
+        <path class="edge" d="M920 190H972"/><path class="edge" d="M1154 190H1206"/>
+        <path class="edge-loop" d="M1063 262 C1063 390 930 390 930 240 C930 220 950 220 972 220"/>
+        <text class="edge-label" x="1000" y="410">D+1：今日期末 → 明日期初（回到同一日账本继续计算）</text>
+
+        <rect class="node blue" x="36" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="127" y="154">QDM / StarRocks</text>
+        <text class="body" x="127" y="181"><tspan x="127">25 个必需源</tspan><tspan x="127" dy="21">计数 → 分片 → 拉取</tspan><tspan x="127" dy="21">本地 source cache</tspan></text>
+
+        <rect class="node blue" x="270" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="361" y="154">统一 Stage</text>
+        <text class="body" x="361" y="181"><tspan x="361">7 日 × 3,231 SKU</tspan><tspan x="361" dy="21">22,617 活动行</tspan><tspan x="361" dy="21">外部事实标准化</tspan></text>
+
+        <rect class="node violet" x="504" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="595" y="154">关系注册表</text>
+        <text class="body" x="595" y="181"><tspan x="595">同码 / BOM / 加工</tspan><tspan x="595" dy="21">A→B 固定比例 / 商品重量</tspan><tspan x="595" dy="21">冲突先隔离</tspan></text>
+
+        <rect class="node green" x="738" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="829" y="154">内部事件账本</text>
+        <text class="body" x="829" y="181"><tspan x="829">BOM / PROCESSING</tspan><tspan x="829" dy="21">RESIDUAL / RETURN</tspan><tspan x="829" dy="21">数量与金额双腿</tspan></text>
+
+        <rect class="node green" x="972" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="1063" y="154">日级库存账本</text>
+        <text class="body" x="1063" y="181"><tspan x="1063">入流 → 单位成本</tspan><tspan x="1063" dy="21">流出 → 期末分支</tspan><tspan x="1063" dy="21">毛利与守恒</tspan></text>
+
+        <rect class="node amber" x="1206" y="116" width="182" height="146" rx="18"/>
+        <text class="title" x="1297" y="154">FM 7 层输出</text>
+        <text class="body" x="1297" y="181"><tspan x="1297">88,972 行 / 125 字段</tspan><tspan x="1297" dy="21">hard gate → publish gate</tspan><tspan x="1297" dy="21">再与 v1.5 对照</tspan></text>
+
+        <circle class="risk-badge" cx="413" cy="112" r="18"/><text class="risk-text" x="413" y="112">S1</text>
+        <circle class="risk-badge" cx="664" cy="112" r="18"/><text class="risk-text" x="664" y="112">S2</text>
+        <circle class="risk-badge" cx="900" cy="112" r="18"/><text class="risk-text" x="900" y="112">S3</text>
+        <circle class="risk-badge" cx="1133" cy="112" r="18"/><text class="risk-text" x="1133" y="112">S4</text>
+        <circle class="risk-badge" cx="1365" cy="112" r="18"/><text class="risk-text" x="1365" y="112">S5</text>
+
+        <rect class="node red" x="220" y="330" width="982" height="102" rx="16"/>
+        <text class="title" x="711" y="361">当前诚实结论</text>
+        <text class="body" x="711" y="388"><tspan x="711">库存与金额守恒已经成立，分类使用监控平台最新快照并通过证据门禁。</tspan><tspan x="711" dy="22">仍有 193 个 SKU 日缺成本证据，因此 publish gate 未通过；不能把诊断结果冒充可发布结果。</tspan></text>
+      </svg>
+    </div>
+    <div class="callout-grid">
+      <div class="callout warn"><strong>S1 分类时间形态</strong>按业务确认统一使用监控平台 2026-08-12 最新快照；1,449 SKU 命中，11 SKU 回退最新 dim_goods。</div>
+      <div class="callout warn"><strong>S2 关系证据</strong>商品重量只校验比例；跨码当天数量以 purchase_di 已明确落到 B 的数量/金额为准。</div>
+      <div class="callout risk"><strong>S3 内部事件</strong>生熟联动与加工二选一：17 个成品日优先走生熟联动；加工实际过账 188 个事件。</div>
+      <div class="callout risk"><strong>S4/S5 账本与发布</strong>193 个缺成本 SKU 日仍阻止发布；会计硬门禁 10/10 通过。</div>
+    </div>
+  </section>
+
+  <section id="mega">
+    <div class="section-head">
+      <div><h2>2. 可缩放移动的全链路巨树</h2><p>原第 2–6 图已合并到这一张。可滚轮缩放、拖拽移动、搜索节点；加工节点展示已实现的销售＋普通报损反冲与生熟联动优先规则。</p></div>
+      <div class="legend"><span class="src">源/事实</span><span class="calc">计算/过账</span><span class="judge">判定</span><span class="risk">问题/隔离</span></div>
+    </div>
+    <div class="mega-shell">
+      <div class="mega-toolbar">
+        <button type="button" data-mega-action="fit">适应全图</button>
+        <button type="button" data-mega-action="in">放大</button>
+        <button type="button" data-mega-action="out">缩小</button>
+        <button type="button" data-mega-action="loss">定位报损链</button>
+        <button type="button" data-mega-action="risk">逐个风险</button>
+        <input id="megaSearch" type="search" placeholder="搜索：报损 / BOM / 毛利…" aria-label="搜索流程节点">
+        <span class="zoom-value" id="megaZoomValue">100%</span>
+      </div>
+      <div class="mega-phasebar" aria-label="巨树分区快捷定位">
+        <button type="button" data-mega-phase="source">A 数据与 Stage</button>
+        <button type="button" data-mega-phase="relation">B 关系与门禁</button>
+        <button type="button" data-mega-phase="event">C 内部事件</button>
+        <button type="button" data-mega-phase="ledger">D 库存账本</button>
+        <button type="button" data-mega-phase="profit">E 报损与毛利</button>
+      </div>
+      <div class="mega-viewport" id="megaViewport">
+        <svg id="megaSvg" viewBox="0 0 3600 2880" role="img" aria-label="fmetl v0.17 全链路可缩放详细树">
+          <defs>
+            <filter id="megaShadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#7189a1" flood-opacity=".15"/></filter>
+            <marker id="megaArrow" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#8296aa"/></marker>
+            <marker id="megaArrowAmber" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#a58d4d"/></marker>
+            <marker id="megaArrowRed" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#ca6969"/></marker>
+            <marker id="megaArrowLoss" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#b27c5e"/></marker>
+            <marker id="megaArrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#5e987c"/></marker>
+          </defs>
+          <g id="megaCanvas">
+            <rect class="mega-lane" x="28" y="28" width="3544" height="330" rx="24"/><text class="mega-lane-label" x="58" y="66">A　数据镜像与外部事实</text>
+            <rect class="mega-lane" x="28" y="382" width="3544" height="455" rx="24"/><text class="mega-lane-label" x="58" y="420">B　关系判定与证据门禁</text>
+            <rect class="mega-lane" x="28" y="862" width="3544" height="455" rx="24"/><text class="mega-lane-label" x="58" y="900">C　内部事件双腿过账</text>
+            <rect class="mega-lane" x="28" y="1342" width="3544" height="610" rx="24"/><text class="mega-lane-label" x="58" y="1380">D　单 SKU 日级加权库存账本</text>
+            <rect class="mega-lane" x="28" y="1977" width="3544" height="875" rx="24"/><text class="mega-lane-label" x="58" y="2015">E　报损、毛利与输出</text>
+
+            <!-- A -->
+            <g class="mega-node" data-key="source" data-title="QDM StarRocks 25 个源" data-detail="生产源只读。逐源逐日 COUNT 后分片拉取；本次服务器写入为 0。"><rect class="node blue" x="80" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="235" y="145">QDM StarRocks</text><text class="mega-body" x="235" y="177"><tspan x="235">25 个 required source</tspan><tspan x="235" dy="24">生产数据只读</tspan><tspan x="235" dy="24">按日/快照取数</tspan></text></g>
+            <g class="mega-node" data-key="extract" data-title="提取完整性" data-detail="先 COUNT；expected 大于等于分页上限直接失败；拉取后核行数；仅 exact duplicate 可去重。"><rect class="node amber" x="490" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="645" y="145">提取完整性</text><text class="mega-body" x="645" y="177"><tspan x="645">COUNT → chunk → fetch</tspan><tspan x="645" dy="24">核对 expected / actual</tspan><tspan x="645" dy="24">键粒度 / 缺日 / 断档</tspan></text></g>
+            <g class="mega-node" data-key="cache" data-title="本地 source cache" data-detail="源/日期级即时提交，支持断点续跑。本次输入为生产只读镜像，本地计算结果不是生产事实表。"><rect class="node blue" x="900" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="1055" y="145">本地 source cache</text><text class="mega-body" x="1055" y="177"><tspan x="1055">源 × 日期即时提交</tspan><tspan x="1055" dy="24">审计 manifest / checksum</tspan><tspan x="1055" dy="24">失败可断点续跑</tspan></text></g>
+            <g class="mega-node" data-key="facts" data-title="SKU 日外部事实" data-detail="统一粒度为 store × business_date × article。销售、收货、盘点、报损在这里各自标准化。"><rect class="node green" x="1310" y="105" width="350" height="150" rx="18"/><text class="mega-title" x="1485" y="145">SKU 日外部事实</text><text class="mega-body" x="1485" y="177"><tspan x="1485">销售 / 收货 / 盘点 / 报损</tspan><tspan x="1485" dy="24">退货 / SCM / 补贴 / 价格</tspan><tspan x="1485" dy="24">3,231 SKU/日</tspan></text></g>
+            <g class="mega-node" data-key="loss-source" data-title="报损源 normalize_known_loss" data-detail="仅 know_lost_qty 是正式库存流；源 know_lost_amt、上游 unknow_lost_qty/amt 只保留审计，不直接决定账本金额。"><rect class="node red" x="1760" y="92" width="390" height="176" rx="18"/><text class="mega-title" x="1955" y="132">报损源表</text><text class="mega-body" x="1955" y="164"><tspan x="1955">know_lost_qty → 正式流</tspan><tspan x="1955" dy="24">know_lost_amt → audit only</tspan><tspan x="1955" dy="24">upstream unknow_lost → audit only</tspan><tspan x="1955" dy="24">负 known qty 直接拒绝</tspan></text></g>
+            <g class="mega-node" data-key="relations-source" data-title="关系证据源" data-detail="receive_sale、官方 BOM、加工关系、article_convert、product_group 分开保留；不存在 stock_convert 明细表。"><rect class="node violet" x="2250" y="105" width="360" height="150" rx="18"/><text class="mega-title" x="2430" y="145">关系证据源</text><text class="mega-body" x="2430" y="177"><tspan x="2430">BOM / 加工 / A→B 比例</tspan><tspan x="2430" dy="24">receive_sale / product_group</tspan><tspan x="2430" dy="24">purchase_di 给当天 B 数量</tspan></text></g>
+            <g class="mega-node" data-key="dimensions" data-title="商品与门店维度" data-detail="goods、day_clear、门店、分类。部分为最新快照，历史回刷可能发生时间穿越。"><rect class="node blue" x="2710" y="105" width="330" height="150" rx="18"/><text class="mega-title" x="2875" y="145">维度与分类</text><text class="mega-body" x="2875" y="177"><tspan x="2875">goods / day_clear / store</tspan><tspan x="2875" dy="24">分类规则与覆盖</tspan><tspan x="2875" dy="24">部分仅最新快照</tspan></text><circle class="mega-risk-badge" cx="3015" cy="108" r="22"/><text class="mega-risk-label" x="3015" y="108">R1</text></g>
+            <g class="mega-node" data-key="stage" data-title="统一活动 Stage" data-detail="统一 22,617 个 SKU 日活动行。外部事实只算一次，下游只消费。"><rect class="node green" x="3140" y="105" width="380" height="150" rx="18"/><text class="mega-title" x="3330" y="145">统一活动 Stage</text><text class="mega-body" x="3330" y="177"><tspan x="3330">store × date × article</tspan><tspan x="3330" dy="24">day_clear 只验证 0 / 1</tspan><tspan x="3330" dy="24">7 天 22,617 行</tspan></text></g>
+            <path class="mega-edge source" d="M390 180H490"/><path class="mega-edge source" d="M800 180H900"/>
+            <path class="mega-edge source" d="M1210 180H1310"/><path class="mega-edge loss" d="M1660 180H1760"/>
+            <path class="mega-edge dashed" d="M1005 255V286H2390V255"/><path class="mega-edge dashed" d="M1105 255V306H2825V255"/>
+            <path class="mega-edge source" d="M1435 255V328H3280V255"/><path class="mega-edge loss" d="M1955 268V348H3330V255"/><path class="mega-edge source" d="M2925 255V318H3380V255"/>
+
+            <!-- B -->
+            <g class="mega-node" data-key="relation-start" data-title="关系候选对" data-detail="所有 source_article → target_article 从候选对开始，绝不先假定 BOM 或加工。"><rect class="node violet" x="120" y="495" width="330" height="115" rx="16"/><text class="mega-title" x="285" y="534">source → target 候选</text><text class="mega-body" x="285" y="566"><tspan x="285">保留门店 / 日期 / 证据</tspan><tspan x="285" dy="23">进入类型判定</tspan></text></g>
+            <g class="mega-node" data-key="same-judge" data-title="是否同 SKU" data-detail="同码关系只用于说明事实对齐，不产生内部 IN/OUT。"><polygon class="node amber" points="700,465 850,552 700,639 550,552"/><text class="mega-title" x="700" y="540">source = target？</text><text class="mega-body" x="700" y="571">先判同码</text></g>
+            <g class="mega-node" data-key="same" data-title="SAME_SKU" data-detail="active 2,186 条；不形成内部流，避免同一商品自进自出。"><rect class="node gray" x="565" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="700" y="730">SAME_SKU</text><text class="mega-body" x="700" y="762">2,186；不生成账腿</text></g>
+            <g class="mega-node" data-key="formal-count" data-title="正式关系类型计数" data-detail="BOM 与 PROCESSING 会生成内部事件；跨码验收若 purchase_di 已给 B 数量/金额，则直接落 B。"><polygon class="node amber" points="1170,465 1340,552 1170,639 1000,552"/><text class="mega-title" x="1170" y="540">正式类型数？</text><text class="mega-body" x="1170" y="571">BOM / 加工 / 已分配验收</text></g>
+            <g class="mega-node" data-key="formal-conflict" data-title="正式类型冲突" data-detail="同时命中两个及以上正式类型，进入隔离，不选择任意优先级。"><rect class="node red" x="1035" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1170" y="730">类型冲突</text><text class="mega-body" x="1170" y="762">≥2 类 → quarantine</text></g>
+            <g class="mega-node" data-key="evidence-judge" data-title="正式关系证据完整" data-detail="恰好一种正式类型后，还要检查日级数量、比率、盘点或转换事件是否足以计算。"><polygon class="node amber" points="1640,465 1810,552 1640,639 1470,552"/><text class="mega-title" x="1640" y="540">日级证据完整？</text><text class="mega-body" x="1640" y="571">恰好 1 类才继续</text></g>
+            <g class="mega-node" data-key="formal-active" data-title="ACTIVE FORMAL" data-detail="BOM 476 关系日、PROCESSING 414 关系日、ALLOCATED_RECEIPT 59 关系日。"><rect class="node green" x="1505" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1640" y="730">ACTIVE FORMAL</text><text class="mega-body" x="1640" y="762">476 / 414 / 59</text></g>
+            <g class="mega-node" data-key="evidence-missing" data-title="加工二选一隔离" data-detail="已取消成品人工盘点门禁。当任一原料 SKU/日有 SSLS 生熟联动报损时，整个加工关系不生成账腿，不做数量抵扣或部分加工。本周 17 个成品日命中。"><rect class="node red" x="1855" y="690" width="310" height="104" rx="15"/><text class="mega-title" x="2010" y="730">SSLS PRIORITY</text><text class="mega-body" x="2010" y="762">17 成品日整组隔离</text><circle class="mega-risk-badge" cx="2140" cy="692" r="22"/><text class="mega-risk-label" x="2140" y="692">R2</text></g>
+            <g class="mega-node" data-key="group-judge" data-title="产品组候选判定" data-detail="没有正式类型但同产品组，只能成为待补证候选，不能自动过账。"><polygon class="node amber" points="2360,465 2520,552 2360,639 2200,552"/><text class="mega-title" x="2360" y="540">0 类且同组？</text><text class="mega-body" x="2360" y="571">仅候选证据</text></g>
+            <g class="mega-node" data-key="group-candidate" data-title="ALLOCATED_RECEIPT" data-detail="59 个关系日、15 对：purchase_di 已给 B 数量/金额，直接作为外部验收入账；article_convert/重量只校验比例。"><rect class="node violet" x="2220" y="690" width="280" height="104" rx="15"/><text class="mega-title" x="2360" y="730">ALLOCATED RECEIPT</text><text class="mega-body" x="2360" y="762">59 日；B 直接入账</text></g>
+            <g class="mega-node" data-key="unresolved" data-title="无关系证据" data-detail="既无正式类型又无产品组证据，标记 unresolved/quarantine。"><rect class="node red" x="2600" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="2735" y="730">UNRESOLVED</text><text class="mega-body" x="2735" y="762">无证据 → 隔离</text></g>
+            <g class="mega-node" data-key="double-count" data-title="跨码直接验收防双算" data-detail="purchase_di 已给 B 数量/金额时，B 只作为外部验收入账一次；同 A→B 的加工关系保留审计但不过账，本周 6 个成品日。"><rect class="node red" x="3005" y="483" width="450" height="138" rx="17"/><text class="mega-title" x="3230" y="523">外部验收 × 加工防双算</text><text class="mega-body" x="3230" y="555"><tspan x="3230">同 A→B 二选一</tspan><tspan x="3230" dy="24">外部验收优先 6 成品日</tspan><tspan x="3230" dy="24">PROCESSING 只保留审计</tspan></text></g>
+            <path class="mega-edge relation" d="M2430 255V424H285V495"/><path class="mega-edge relation" d="M450 552H550"/><path class="mega-edge relation" d="M700 639V690"/><text class="mega-edge-label" x="735" y="671">是</text><path class="mega-edge relation" d="M850 552H1000"/><text class="mega-edge-label" x="925" y="541">否</text><path class="mega-edge risk" d="M1170 639V690"/><text class="mega-edge-label" x="1210" y="671">≥2</text><path class="mega-edge relation" d="M1340 552H1470"/><text class="mega-edge-label" x="1405" y="541">1</text><path class="mega-edge relation" d="M1640 639V690"/><text class="mega-edge-label" x="1676" y="671">是</text><path class="mega-edge risk" d="M1810 552H2010V690"/><text class="mega-edge-label" x="1910" y="541">否</text><path class="mega-edge dashed" d="M1170 465V448H2360V465"/><text class="mega-edge-label" x="2050" y="438">0 类</text><path class="mega-edge dashed" d="M2360 639V690"/><text class="mega-edge-label" x="2394" y="671">是</text><path class="mega-edge risk" d="M2520 552H2735V690"/><text class="mega-edge-label" x="2640" y="541">否</text><path class="mega-edge risk" d="M3330 255V483"/>
+
+            <!-- C -->
+            <g class="mega-node" data-key="bom" data-title="BOM 拆分" data-detail="父品 source_qty 转子品 target_qty。公共/共享数量比例优先；金额按有效比例分配。"><rect class="node green" x="90" y="955" width="390" height="168" rx="18"/><text class="mega-title" x="285" y="995">DISASSEMBLY_BOM</text><text class="mega-body" x="285" y="1027"><tspan x="285">父品 source_qty → 子品 target_qty</tspan><tspan x="285" dy="24">数量比例 / sale_recev_rate</tspan><tspan x="285" dy="24">金额按有效比例分配</tspan><tspan x="285" dy="24">本次真实过账</tspan></text></g>
+            <g class="mega-node" data-key="processing" data-title="加工：USAGE_BACKFLUSH 已实现" data-detail="consumed_finished = net_sale + ordinary_known_loss，再按 raw_qty / yield_qty 反冲原料。不要求盘点，也不因原料账面余额不足停算。本周 188 个事件，OUT/IN 金额均为 6,519.06459。"><rect class="node green" x="610" y="935" width="430" height="208" rx="18"/><text class="mega-title" x="825" y="975">PROCESSING</text><text class="mega-body" x="825" y="1007"><tspan x="825">成品消耗 = 净销售 + 普通报损</tspan><tspan x="825" dy="24">raw_out = 成品消耗 × raw / yield</tspan><tspan x="825" dy="24">SSLS 原料命中 → 整组不加工</tspan><tspan x="825" dy="24">188 个事件 / 成品 IN 1,017</tspan><tspan x="825" dy="24">原料 OUT 195.758 / ¥6,519.06</tspan></text></g>
+            <g class="mega-node" data-key="pack" data-title="跨码直接验收" data-detail="不存在转换明细表。article_convert 给 A→B 比例，purchase_di 给当天 B 数量/金额；B 外部验收直接入账，不生成内部 PACK 腿。"><rect class="node gray" x="1170" y="955" width="390" height="168" rx="18"/><text class="mega-title" x="1365" y="995">A→B 直接验收</text><text class="mega-body" x="1365" y="1027"><tspan x="1365">purchase_di 给 B 数量/金额</tspan><tspan x="1365" dy="24">article_convert 校验比例</tspan><tspan x="1365" dy="24">不需要转换明细表</tspan><tspan x="1365" dy="24">不生成第二套内部流</tspan></text></g>
+            <g class="mega-node" data-key="residual" data-title="其他内部流" data-detail="residual transfer 与 store return 独立保留，不混入 BOM 或加工字段。"><rect class="node gray" x="1690" y="955" width="350" height="168" rx="18"/><text class="mega-title" x="1865" y="995">RESIDUAL / RETURN</text><text class="mega-body" x="1865" y="1027"><tspan x="1865">残余转移 / 门店退回</tspan><tspan x="1865" dy="24">独立数量与金额列</tspan><tspan x="1865" dy="24">不塞回 BOM</tspan></text></g>
+            <g class="mega-node" data-key="posting-judge" data-title="两腿完整性" data-detail="同一 event_group 必须同时有 source OUT 与 target IN；金额总和严格相等，否则整体隔离。"><polygon class="node amber" points="2320,945 2505,1039 2320,1133 2135,1039"/><text class="mega-title" x="2320" y="1026">能否生成完整两腿？</text><text class="mega-body" x="2320" y="1058">OUT + IN；金额守恒</text></g>
+            <g class="mega-node" data-key="posting" data-title="内部事件账本" data-detail="BOM 与 PROCESSING 都生成 OUT/IN 双腿。PROCESSING 本周 188 个事件、376 条账腿，原料 OUT 195.758，成品 IN 1,017，两侧金额均 6,519.06459。"><rect class="node green" x="2690" y="945" width="440" height="188" rx="18"/><text class="mega-title" x="2910" y="985">v014_internal_posting</text><text class="mega-body" x="2910" y="1017"><tspan x="2910">BOM IN：476 行 / 918.798</tspan><tspan x="2910" dy="24">BOM OUT：31 行 / 881.200</tspan><tspan x="2910" dy="24">PROCESSING：188 事件 / 376 腿</tspan><tspan x="2910" dy="24">加工金额 OUT = IN = ¥6,519.06</tspan></text></g>
+            <g class="mega-node" data-key="event-quarantine" data-title="内部事件隔离" data-detail="任何一腿或分配证据不完整，不允许生成半条账腿。"><rect class="node red" x="3210" y="975" width="300" height="128" rx="17"/><text class="mega-title" x="3360" y="1015">事件隔离</text><text class="mega-body" x="3360" y="1047"><tspan x="3360">不生成半条腿</tspan><tspan x="3360" dy="24">保留 reason + evidence</tspan></text></g>
+            <path class="mega-edge bom" d="M1560 794V884H285V955"/>
+            <path class="mega-edge process" d="M1610 794V900H825V955"/>
+            <path class="mega-edge pack" d="M1665 794V916H1365V955"/>
+            <path class="mega-edge stock" d="M1720 794V932H1865V955"/>
+            <path class="mega-edge bom" d="M285 1123V1150H2070V980H2138"/>
+            <path class="mega-edge process" d="M825 1123V1168H2090V1008H2138"/>
+            <path class="mega-edge pack" d="M1365 1123V1186H2110V1039H2135"/>
+            <path class="mega-edge stock" d="M1865 1123V1204H2130V1070H2148"/>
+            <path class="mega-edge bom" d="M2505 1039H2690"/><text class="mega-edge-label" x="2600" y="1028">是</text><path class="mega-edge risk" d="M2320 1133V1200H3360V1103"/><text class="mega-edge-label" x="2850" y="1188">否</text>
+
+            <!-- D -->
+            <g class="mega-node" data-key="opening" data-title="期初库存" data-detail="D-1 期末优先；首日回退盘点/快照/零。8 行期初有数量无金额，是成本证据风险。"><rect class="node blue" x="65" y="1435" width="310" height="150" rx="18"/><text class="mega-title" x="220" y="1475">期初库存</text><text class="mega-body" x="220" y="1507"><tspan x="220">D-1 end 精确继承</tspan><tspan x="220" dy="24">首日 bootstrap / snapshot / 0</tspan><tspan x="220" dy="24">qty + amount + source</tspan></text></g>
+            <g class="mega-node" data-key="inflows" data-title="外部与内部入流池" data-detail="init + receipt + BOM/PACK/COMPOSE/RESIDUAL_IN + sale_return + inventory_gain；数量金额同构汇总。"><rect class="node green" x="455" y="1435" width="390" height="150" rx="18"/><text class="mega-title" x="650" y="1475">总入流池</text><text class="mega-body" x="650" y="1507"><tspan x="650">init + external receive</tspan><tspan x="650" dy="24">+ all internal IN</tspan><tspan x="650" dy="24">+ return + inventory gain</tspan></text></g>
+            <g class="mega-node" data-key="issue-cost" data-title="日加权发出成本" data-detail="inflow_qty 大于 0 时 issue_cost = inflow_amt / inflow_qty；否则使用 fallback，主流程通常为 0。"><polygon class="node amber" points="1095,1415 1280,1510 1095,1605 910,1510"/><text class="mega-title" x="1095" y="1488">inflow_qty &gt; 0？</text><text class="mega-body" x="1095" y="1522"><tspan x="1095">是：amt / qty</tspan><tspan x="1095" dy="24">否：fallback cost</tspan></text></g>
+            <g class="mega-node" data-key="zero-cost" data-title="零成本出流" data-detail="本次 193 SKU 日存在销售、已知报损或内部出流，但 issue_cost 为 0，总出流数量 691.425；publish gate 失败。"><rect class="node red" x="930" y="1690" width="330" height="148" rx="18"/><text class="mega-title" x="1095" y="1730">零成本出流</text><text class="mega-body" x="1095" y="1762"><tspan x="1095">193 SKU 日 / 52 SKU</tspan><tspan x="1095" dy="24">outflow qty 691.425</tspan><tspan x="1095" dy="24">ISSUE_COST_EVIDENCE fail</tspan></text><circle class="mega-risk-badge" cx="1235" cy="1692" r="22"/><text class="mega-risk-label" x="1235" y="1692">R3</text></g>
+            <g class="mega-node" data-key="priced-outs" data-title="全部出流统一估值" data-detail="sale_cost、known_lost_amt 及每类 internal_out_amt 均按同一 issue_cost 计算，传入金额若不等于数量乘成本则报错。"><rect class="node green" x="1410" y="1435" width="420" height="150" rx="18"/><text class="mega-title" x="1620" y="1475">统一估值全部出流</text><text class="mega-body" x="1620" y="1507"><tspan x="1620">sale_cost = gross_sale × cost</tspan><tspan x="1620" dy="24">known_loss_amt = loss_qty × cost</tspan><tspan x="1620" dy="24">每类 internal OUT × cost</tspan></text></g>
+            <g class="mega-node" data-key="equation" data-title="库存数量与金额方程" data-detail="eq_qty = inflow - internal_out - gross_sale - known_loss；eq_amt 同样扣除各项成本金额。"><rect class="node amber" x="1960" y="1435" width="420" height="150" rx="18"/><text class="mega-title" x="2170" y="1475">理论期末 eq</text><text class="mega-body" x="2170" y="1507"><tspan x="2170">qty：inflow − internal_out</tspan><tspan x="2170" dy="24">− gross_sale − known_loss</tspan><tspan x="2170" dy="24">amount 方程同构</tspan></text></g>
+            <g class="mega-node" data-key="branch" data-title="期末状态分支" data-detail="优先级 counted → negative_clamp → known_loss → normal。day_clear 未形成单独库存分支。"><polygon class="node amber" points="2670,1405 2870,1510 2670,1615 2470,1510"/><text class="mega-title" x="2670" y="1477">期末状态分支</text><text class="mega-body" x="2670" y="1510"><tspan x="2670">counted → eq&lt;0</tspan><tspan x="2670" dy="24">→ known_loss → normal</tspan><tspan x="2670" dy="24">day_clear 无独立分支</tspan></text><circle class="mega-risk-badge" cx="2835" cy="1417" r="22"/><text class="mega-risk-label" x="2835" y="1417">R4</text></g>
+            <g class="mega-node" data-key="counted" data-title="盘点分支" data-detail="end = actual count；unknown = eq - actual。未知损耗只来自实际盘点差；可为负，表示盘盈。"><rect class="node blue" x="2450" y="1700" width="270" height="128" rx="16"/><text class="mega-title" x="2585" y="1740">COUNTED</text><text class="mega-body" x="2585" y="1772"><tspan x="2585">end = actual</tspan><tspan x="2585" dy="24">unknown = eq − actual</tspan></text></g>
+            <g class="mega-node" data-key="clamp" data-title="负库存钉零" data-detail="eq 小于 0 时 end=0，neg_clamp=-eq；不把透支重命名为 unknown loss，利润另扣 neg_clamp_cost。"><rect class="node red" x="2780" y="1700" width="310" height="128" rx="16"/><text class="mega-title" x="2935" y="1740">NEGATIVE_CLAMP</text><text class="mega-body" x="2935" y="1772"><tspan x="2935">end = 0；neg_clamp = −eq</tspan><tspan x="2935" dy="24">770 行 / ¥10,827.43</tspan></text></g>
+            <g class="mega-node" data-key="known-branch" data-title="已知报损分支" data-detail="有 known_lost_qty 且理论库存非负时，end=eq，unknown=0。报损已经在 eq 中扣除。"><rect class="node green" x="3150" y="1700" width="300" height="128" rx="16"/><text class="mega-title" x="3300" y="1740">KNOWN_LOSS</text><text class="mega-body" x="3300" y="1772"><tspan x="3300">end = eq；unknown = 0</tspan><tspan x="3300" dy="24">分支 611 行</tspan></text></g>
+            <path class="mega-edge stock" d="M375 1510H455"/><path class="mega-edge stock" d="M845 1510H910"/><path class="mega-edge risk" d="M1095 1605V1690"/><text class="mega-edge-label" x="1140" y="1650">否且有出流</text><path class="mega-edge stock" d="M1280 1510H1410"/><path class="mega-edge stock" d="M1830 1510H1960"/><path class="mega-edge stock" d="M2380 1510H2470"/>
+            <path class="mega-edge stock" d="M2585 1615V1700"/>
+            <path class="mega-edge risk" d="M2670 1615V1650H2935V1700"/>
+            <path class="mega-edge stock" d="M2755 1608V1632H3300V1700"/>
+            <path class="mega-edge loop" d="M3300 1828V1918H220V1585"/><text class="mega-edge-label" x="1770" y="1907">D+1：所有分支的 end_qty / end_amt 精确滚入次日期初</text>
+
+            <!-- E: loss and profit -->
+            <g class="mega-node" data-key="loss-input-qty" data-title="正式报损数量输入" data-detail="来自 normalize_known_loss 的 known_lost_qty；是唯一直接进入日账库存方程的上游报损字段。"><rect class="node blue" x="75" y="2050" width="360" height="110" rx="16"/><text class="mega-title" x="255" y="2085">① 正式报损数量</text><text class="mega-body" x="255" y="2117"><tspan x="255">known_lost_qty</tspan><tspan x="255" dy="24">进入库存方程</tspan></text></g>
+            <g class="mega-node" data-key="loss-input-cost" data-title="日加权成本输入" data-detail="issue_unit_cost 由总入流池加权得到；正式报损金额不复用源 loss_amt，而是 known_lost_qty × issue_cost。"><rect class="node green" x="500" y="2050" width="360" height="110" rx="16"/><text class="mega-title" x="680" y="2085">② 当日单位成本</text><text class="mega-body" x="680" y="2117"><tspan x="680">issue_unit_cost</tspan><tspan x="680" dy="24">用于重算损耗金额</tspan></text></g>
+            <g class="mega-node" data-key="loss-input-count" data-title="盘点差输入" data-detail="只有 is_counted 且存在 actual_stock_qty 时，unknown_lost 才由 eq - actual 推导；上游 source_unknown 只审计。"><rect class="node blue" x="925" y="2050" width="360" height="110" rx="16"/><text class="mega-title" x="1105" y="2085">③ 人工盘点差</text><text class="mega-body" x="1105" y="2117"><tspan x="1105">eq − actual_count</tspan><tspan x="1105" dy="24">仅盘点生成 unknown loss</tspan></text></g>
+            <g class="mega-node" data-key="loss-accounting" data-title="账本报损金额" data-detail="正式已知报损金额由 known_lost_qty × issue_cost 重算；未知损耗金额只由盘点差计算。源表损耗金额只用于审计。"><rect class="node red" x="395" y="2230" width="580" height="180" rx="18"/><text class="mega-title" x="685" y="2270">账本报损汇总</text><text class="mega-body" x="685" y="2302"><tspan x="685">known = qty × issue_cost = ¥18,822.62</tspan><tspan x="685" dy="24">unknown = eq − actual = ¥817.47</tspan><tspan x="685" dy="24">accounting_loss = ¥19,640.09</tspan><tspan x="685" dy="24">源 loss amt / upstream unknown 仅审计</tspan></text></g>
+            <g class="mega-node" data-key="loss-impact" data-title="报损如何影响基础毛利" data-detail="毛利公式不显式再减损耗。报损先从 eq/end 库存扣掉价值，end_stock_amt 下降，因此通过 +end - init 间接降低毛利；若再减一次会双扣。"><rect class="node amber" x="1080" y="2230" width="500" height="180" rx="18"/><text class="mega-title" x="1330" y="2270">报损对基础毛利的作用</text><text class="mega-body" x="1330" y="2302"><tspan x="1330">known_loss 先减少 eq_amt / end_amt</tspan><tspan x="1330" dy="24">基础毛利包含 + end_amt − init_amt</tspan><tspan x="1330" dy="24">所以已自动降低毛利</tspan><tspan x="1330" dy="24">公式不再 − loss_amt，避免双扣</tspan></text></g>
+            <g class="mega-node" data-key="base-profit" data-title="基础会计毛利公式" data-detail="profit = sale - receipt - internal_in + internal_out + end - init - neg_clamp_cost。函数只消费已定价金额，不重新算成本。"><rect class="node green" x="1700" y="2215" width="620" height="210" rx="18"/><text class="mega-title" x="2010" y="2255">accounting_profit 基础会计底</text><text class="mega-body" x="2010" y="2289"><tspan x="2010">net_sale − store_receive</tspan><tspan x="2010" dy="24">− BOM/PACK/COMPOSE/RESIDUAL_IN</tspan><tspan x="2010" dy="24">+ BOM/PACK/COMPOSE/RESIDUAL_OUT</tspan><tspan x="2010" dy="24">+ end_stock_amt − init_stock_amt</tspan><tspan x="2010" dy="24">− neg_clamp_cost_amt；不额外减 loss</tspan></text></g>
+            <g class="mega-node" data-key="special-source" data-title="CCJ 与 SSLS 特殊报损源" data-detail="purchase_wastage 是最新快照表，但每条记录的 created_at 保留业务发生时间；build_wastage_trace 用 created_at 的日期作为 business_date，并为记录构造 source_record_id。CCJ/SSLS 只改变展示损耗和展示毛利，不改变库存、成本、内部 posting。"><rect class="node violet" x="75" y="2535" width="430" height="190" rx="18"/><text class="mega-title" x="290" y="2575">特殊报损 CCJ / SSLS</text><text class="mega-body" x="290" y="2607"><tspan x="290">最新快照承载；created_at 定业务日</tspan><tspan x="290" dy="24">CCJ：炒菜机 / SSLS：生熟联动</tspan><tspan x="290" dy="24">生成 source_record_id 供审计</tspan><tspan x="290" dy="24">只调展示，不改物理账本</tspan></text></g>
+            <g class="mega-node" data-key="display-loss" data-title="展示损耗调整" data-detail="loss_amount、loss_qty、store_know_lost_amt 均减去 CCJ+SSLS；store_unknow_lost_amt 不改。可能得到负展示损耗。"><rect class="node amber" x="595" y="2535" width="500" height="190" rx="18"/><text class="mega-title" x="845" y="2575">展示损耗口径</text><text class="mega-body" x="845" y="2607"><tspan x="845">¥19,640.09 − CCJ − SSLS</tspan><tspan x="845" dy="24">display loss = ¥8,699.92</tspan><tspan x="845" dy="24">display known = ¥7,882.45</tspan><tspan x="845" dy="24">unknown ¥817.47 保持账本值</tspan></text></g>
+            <g class="mega-node" data-key="ccj-profit" data-title="CCJ 毛利加回" data-detail="CCJ 在每一个聚合层级都给 store_profit 和 full_link_profit 加回同额，兼容 v1.5 展示口径。"><rect class="node green" x="1185" y="2535" width="390" height="190" rx="18"/><text class="mega-title" x="1380" y="2575">CCJ 毛利加回</text><text class="mega-body" x="1380" y="2607"><tspan x="1380">所有层级 profit += ccj_amt</tspan><tspan x="1380" dy="24">只调展示毛利</tspan><tspan x="1380" dy="24">不改库存和内部流</tspan><tspan x="1380" dy="24">门店最终 ¥25,621.15</tspan></text></g>
+            <g class="mega-node" data-key="ssls-profit" data-title="SSLS 大类转移" data-detail="SSLS 只在大分类执行：来源大类加回自身 ssls_amt，熟食类扣除当日门店全部 ssls_amt；SKU/SPU/门店不做转移以保持可加。"><rect class="node green" x="1645" y="2535" width="500" height="190" rx="18"/><text class="mega-title" x="1895" y="2575">SSLS 大分类转移</text><text class="mega-body" x="1895" y="2607"><tspan x="1895">来源大类 profit += own ssls_amt</tspan><tspan x="1895" dy="24">熟食类 profit -= 当日 total_ssls</tspan><tspan x="1895" dy="24">SKU/SPU/门店不转移</tspan><tspan x="1895" dy="24">本周 SSLS ¥2,749.33</tspan></text></g>
+            <g class="mega-node" data-key="loss-double-risk" data-title="生熟联动与加工二选一" data-detail="当任一配方原料 SKU/日存在 SSLS 报损，整组 PROCESSING 不生成；没有抵扣、剩余量加工或双路径共存。新增 hard gate 再次检查最终账本不存在交集。"><rect class="node green" x="2225" y="2535" width="440" height="190" rx="18"/><text class="mega-title" x="2445" y="2575">生熟联动优先</text><text class="mega-body" x="2445" y="2607"><tspan x="2445">SSLS 原料命中 → 整组加工取消</tspan><tspan x="2445" dy="24">17 成品日 / 12 成品</tspan><tspan x="2445" dy="24">最终账本重叠：0</tspan><tspan x="2445" dy="24">PROCESSING_RAW_LOSS_PRIORITY PASS</tspan></text><circle class="ok-badge" cx="2638" cy="2539" r="22"/><text class="mega-risk-label" x="2638" y="2539">OK</text></g>
+            <g class="mega-node" data-key="levels" data-title="七层 125 字段输出" data-detail="门店、大类、中类、小类、SPU、SKU、商品组；day_clear 0/1/2。前 123 字段兼容 v1.5，新增商品组字段。"><rect class="node violet" x="2750" y="2055" width="400" height="210" rx="18"/><text class="mega-title" x="2950" y="2095">7 层输出 / 125 字段</text><text class="mega-body" x="2950" y="2129"><tspan x="2950">门店 → 大 / 中 / 小分类</tspan><tspan x="2950" dy="24">→ SPU → SKU → 商品组</tspan><tspan x="2950" dy="24">day_clear 0 / 1 / 2</tspan><tspan x="2950" dy="24">88,972 行</tspan></text></g>
+            <g class="mega-node" data-key="gates" data-title="验证与发布门禁" data-detail="10 项会计 hard gate 与最新分类证据通过；publish gate 仅因 193 个缺成本 SKU 日失败。"><rect class="node red" x="3215" y="2055" width="330" height="210" rx="18"/><text class="mega-title" x="3380" y="2095">Hard / Publish Gates</text><text class="mega-body" x="3380" y="2129"><tspan x="3380">10 hard checks：PASS</tspan><tspan x="3380" dy="24">CATEGORY：PASS 08-12</tspan><tspan x="3380" dy="24">ISSUE COST：FAIL 193</tspan><tspan x="3380" dy="24">禁止正式发布</tspan></text><circle class="mega-risk-badge" cx="3515" cy="2057" r="22"/><text class="mega-risk-label" x="3515" y="2057">R6</text></g>
+            <g class="mega-node" data-key="processing-state-risk" data-title="加工跨日状态风险" data-detail="finished_processing_daily.previous_end 主要从盘点更新，raw_available 也未完整承接总账销售/损耗/内部流。当前因加工 0 过账未暴露。"><rect class="node red" x="2750" y="2535" width="400" height="190" rx="18"/><text class="mega-title" x="2950" y="2575">加工跨日状态风险</text><text class="mega-body" x="2950" y="2607"><tspan x="2950">previous_end 未完整承接 ledger end</tspan><tspan x="2950" dy="24">raw_available 缺销售/损耗/内部流</tspan><tspan x="2950" dy="24">当前被盘点门禁遮蔽</tspan><tspan x="2950" dy="24">启用加工前必须验证</tspan></text><circle class="mega-risk-badge" cx="3123" cy="2539" r="22"/><text class="mega-risk-label" x="3123" y="2539">R7</text></g>
+
+            <!-- 三类报损事实分别进入，不在分区标题上汇成一束 -->
+            <path class="mega-edge loss" d="M1955 268V360H15V2105H75"/>
+            <path class="mega-edge stock" d="M1280 1510H1340V1960H680V2050"/>
+            <path class="mega-edge loss" d="M2585 1828V1970H1105V2050"/>
+
+            <!-- 三个输入以独立端口汇入账本报损；数量和金额语义不混线 -->
+            <path class="mega-edge loss" d="M255 2160V2190H520V2230"/>
+            <path class="mega-edge stock" d="M680 2160V2230"/>
+            <path class="mega-edge loss" d="M1105 2160V2190H850V2230"/>
+            <path class="mega-edge loss" d="M975 2320H1080"/>
+            <path class="mega-edge output" d="M1580 2320H1700"/>
+            <path class="mega-edge output" d="M2320 2320H2650V2160H2750"/>
+            <path class="mega-edge output" d="M3150 2160H3215"/>
+
+            <!-- CCJ / SSLS 是独立展示口径：一源多去向，不串成先后计算 -->
+            <path class="mega-edge loss" d="M505 2630H595"/>
+            <path class="mega-edge output" d="M210 2725V2760H1380V2725"/>
+            <path class="mega-edge output" d="M290 2725V2790H1895V2725"/>
+            <path class="mega-edge risk" d="M370 2725V2820H2445V2725"/>
+            <text class="mega-edge-label" x="1830" y="2515">特殊展示规则（不改库存账本）</text>
+
+            <!-- 加工相关风险从上游加工节点独立绕行，不穿过毛利节点 -->
+            <path class="mega-edge risk" d="M780 1123V1250H45V2480H2445V2535"/>
+            <path class="mega-edge risk" d="M870 1123V1295H3570V2480H2950V2535"/>
+          </g>
+        </svg>
+        <canvas id="megaMini" width="350" height="410" aria-label="全图导航缩略图"></canvas>
+        <div class="mega-help">拖拽移动 · 滚轮缩放 · 双击节点聚焦 · Esc 适应全图</div>
+      </div>
+      <div class="mega-detail" id="megaDetail">点击任意节点查看该节点的当前代码语义；图中的红色 R1–R7 可用“逐个风险”定位。</div>
+    </div>
+  </section>
+
+  <section id="full" class="legacy-diagram">
+    <div class="section-head">
+      <div><h2>2A. 独立图：端到端流程</h2><p>与巨树并存，便于不缩放时快速逐段审查。虚线表示依赖/候选，红线表示失败去向。</p></div>
+    </div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1460 1570" role="img" aria-label="v0.17 端到端详细流程图">
+        <defs>
+          <filter id="softShadow2" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#7690a8" flood-opacity=".14"/></filter>
+        </defs>
+        <rect class="lane" x="20" y="30" width="1420" height="218" rx="18"/><text class="lane-label" x="42" y="58">A. 远端源 → 本地不可变缓存</text>
+        <rect class="lane" x="20" y="270" width="1420" height="284" rx="18"/><text class="lane-label" x="42" y="298">B. STAGE：按业务域标准化</text>
+        <rect class="lane" x="20" y="576" width="1420" height="315" rx="18"/><text class="lane-label" x="42" y="604">C. 关系证据 → 注册表 / 隔离区</text>
+        <rect class="lane" x="20" y="913" width="1420" height="257" rx="18"/><text class="lane-label" x="42" y="941">D. 内部事件 → 日级加权 DAG 账本</text>
+        <rect class="lane" x="20" y="1192" width="1420" height="348" rx="18"/><text class="lane-label" x="42" y="1220">E. 输出 → 闸门 → 对比</text>
+
+        <!-- A -->
+        <rect class="node blue" x="70" y="86" width="250" height="116" rx="15"/>
+        <text class="title" x="195" y="119">QDM StarRocks 镜像</text>
+        <text class="body" x="195" y="145"><tspan x="195">25 个 required source</tspan><tspan x="195" dy="20">只读查询；服务器写入 0</tspan><tspan x="195" dy="20">按 business_date / snapshot</tspan></text>
+        <rect class="node amber" x="415" y="86" width="250" height="116" rx="15"/>
+        <text class="title" x="540" y="119">提取前完整性检查</text>
+        <text class="body" x="540" y="145"><tspan x="540">先 COUNT 每个日期分片</tspan><tspan x="540" dy="20">expected ≥ page_size 直接失败</tspan><tspan x="540" dy="20">拉取后逐片核对行数</tspan></text>
+        <rect class="node green" x="760" y="86" width="250" height="116" rx="15"/>
+        <text class="title" x="885" y="119">精确去重与粒度检查</text>
+        <text class="body" x="885" y="145"><tspan x="885">仅 exact duplicate 可删除</tspan><tspan x="885" dy="20">键重复 / 缺日 / 断档即失败</tspan><tspan x="885" dy="20">写 source audit</tspan></text>
+        <rect class="node blue" x="1105" y="86" width="250" height="116" rx="15"/>
+        <text class="title" x="1230" y="119">本地 source cache</text>
+        <text class="body" x="1230" y="145"><tspan x="1230">源/日期级即时提交</tspan><tspan x="1230" dy="20">失败可断点续跑</tspan><tspan x="1230" dy="20">本次基于生产只读数据</tspan></text>
+        <path class="edge" d="M320 144H415"/><path class="edge" d="M665 144H760"/><path class="edge" d="M1010 144H1105"/>
+        <circle class="risk-badge" cx="1335" cy="82" r="17"/><text class="risk-text" x="1335" y="82">R1</text>
+
+        <!-- B sources -->
+        <rect class="node blue" x="58" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="159" y="362">销售事实</text><text class="body" x="159" y="386"><tspan x="159">gross/net sale</tspan><tspan x="159" dy="18">退货 / 客数</tspan></text>
+        <rect class="node blue" x="286" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="387" y="362">外部入流</text><text class="body" x="387" y="386"><tspan x="387">门店收货 / SCM</tspan><tspan x="387" dy="18">补贴 / 促销 / 价格</tspan></text>
+        <rect class="node blue" x="514" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="615" y="362">盘点与损耗</text><text class="body" x="615" y="386"><tspan x="615">inventory detail</tspan><tspan x="615" dy="18">known loss / count</tspan></text>
+        <rect class="node violet" x="742" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="843" y="362">关系证据</text><text class="body" x="843" y="386"><tspan x="843">receive_sale / BOM</tspan><tspan x="843" dy="18">compose / convert / group</tspan></text>
+        <rect class="node blue" x="970" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="1071" y="362">商品与门店维度</text><text class="body" x="1071" y="386"><tspan x="1071">goods / day_clear</tspan><tspan x="1071" dy="18">store / category</tspan></text>
+        <rect class="node amber" x="1198" y="332" width="202" height="92" rx="14"/>
+        <text class="title" x="1299" y="362">业务特殊规则</text><text class="body" x="1299" y="386"><tspan x="1299">CCJ / SSLS</tspan><tspan x="1299" dy="18">分类规则快照</tspan></text>
+        <path class="edge" d="M1230 202V280H159V332"/><path class="edge" d="M1230 280H387V332"/><path class="edge" d="M1230 280H615V332"/><path class="edge" d="M1230 280H843V332"/><path class="edge" d="M1230 280H1071V332"/><path class="edge" d="M1230 280H1299V332"/>
+        <rect class="node green" x="372" y="462" width="716" height="64" rx="14"/>
+        <text class="title" x="730" y="488">统一活动 Stage：store × business_date × article × day_clear</text>
+        <text class="body" x="730" y="511">本次 3,231 SKU/日 × 7 天 = 22,617 行；外部事实只在这里标准化，不在下游重算</text>
+        <path class="edge" d="M159 424V446H730V462"/><path class="edge" d="M387 424V446"/><path class="edge" d="M615 424V446"/><path class="edge" d="M843 424V446"/><path class="edge" d="M1071 424V446"/><path class="edge" d="M1299 424V446H730"/>
+        <circle class="risk-badge" cx="1058" cy="459" r="17"/><text class="risk-text" x="1058" y="459">R2</text>
+
+        <!-- C -->
+        <path class="edge" d="M730 526V625"/>
+        <polygon class="node amber" points="730,625 865,687 730,749 595,687"/>
+        <text class="title" x="730" y="674">源码 = 目标码？</text><text class="body" x="730" y="699">先判同 SKU</text>
+        <rect class="node gray" x="170" y="635" width="250" height="103" rx="14"/>
+        <text class="title" x="295" y="668">SAME_SKU</text><text class="body" x="295" y="694"><tspan x="295">active 2,186</tspan><tspan x="295" dy="20">不生成内部流</tspan></text>
+        <path class="edge" d="M595 687H420"/><text class="edge-label" x="500" y="678">是</text>
+        <polygon class="node amber" points="1040,625 1182,687 1040,749 898,687"/>
+        <text class="title" x="1040" y="674">正式关系类型数</text><text class="body" x="1040" y="699">BOM / PROCESSING / 已分配验收</text>
+        <path class="edge" d="M865 687H898"/><text class="edge-label" x="881" y="678">否</text>
+        <rect class="node green" x="914" y="786" width="252" height="76" rx="14"/>
+        <text class="title" x="1040" y="816">恰好 1 类且证据完整</text><text class="body" x="1040" y="841">进入 active relation</text>
+        <path class="edge" d="M1040 749V786"/><text class="edge-label" x="1087" y="774">1 类</text>
+        <rect class="node red" x="1190" y="786" width="210" height="76" rx="14"/>
+        <text class="title" x="1295" y="816">冲突 / 证据缺失</text><text class="body" x="1295" y="841">进入 quarantine</text>
+        <path class="edge-risk" d="M1182 687H1295V786"/><text class="edge-label" x="1270" y="674">多类或不完整</text>
+        <rect class="node violet" x="550" y="786" width="310" height="76" rx="14"/>
+        <text class="title" x="705" y="816">跨码验收已给 B 数量/金额</text><text class="body" x="705" y="841">ALLOCATED_RECEIPT 59；B 直接入账</text>
+        <path class="edge-dashed" d="M1040 749V766H705V786"/><text class="edge-label" x="872" y="759">0 类</text>
+        <rect class="node red" x="238" y="786" width="260" height="76" rx="14"/>
+        <text class="title" x="368" y="816">0 类且无同组证据</text><text class="body" x="368" y="841">unresolved / quarantine</text>
+        <path class="edge-risk" d="M550 824H498"/>
+        <circle class="risk-badge" cx="1378" cy="782" r="17"/><text class="risk-text" x="1378" y="782">R3</text>
+
+        <!-- D -->
+        <path class="edge" d="M1040 862V972"/>
+        <rect class="node green" x="110" y="972" width="260" height="112" rx="15"/>
+        <text class="title" x="240" y="1004">BOM 两腿事件</text><text class="body" x="240" y="1030"><tspan x="240">父品 OUT / 子品 IN</tspan><tspan x="240" dy="20">本次唯一真实内部过账</tspan><tspan x="240" dy="20">金额 20,523.54 守恒</tspan></text>
+        <rect class="node amber" x="400" y="960" width="300" height="136" rx="15"/>
+        <text class="title" x="550" y="992">PROCESSING：已实现</text><text class="body" x="550" y="1018"><tspan x="550">销售 + 普通报损反冲消耗</tspan><tspan x="550" dy="20">SSLS 原料命中 → 整组不加工</tspan><tspan x="550" dy="20">188 个事件 / 376 条账腿</tspan><tspan x="550" dy="20">两侧加工金额均 ¥6,519.06</tspan></text>
+        <rect class="node gray" x="730" y="972" width="260" height="112" rx="15"/>
+        <text class="title" x="860" y="1004">A→B 直接验收</text><text class="body" x="860" y="1030"><tspan x="860">article_convert 给固定比例</tspan><tspan x="860" dy="20">purchase_di 给 B 数量/金额</tspan><tspan x="860" dy="20">59 关系日，不造内部流</tspan></text>
+        <rect class="node gray" x="1040" y="972" width="260" height="112" rx="15"/>
+        <text class="title" x="1170" y="1004">RESIDUAL / 其他内部流</text><text class="body" x="1170" y="1030"><tspan x="1170">独立账腿保留</tspan><tspan x="1170" dy="20">本次无主要过账</tspan><tspan x="1170" dy="20">不与 BOM 混算</tspan></text>
+        <path class="edge" d="M1040 925V942H240V972"/><path class="edge" d="M1040 942H550V960"/><path class="edge" d="M1040 942H860V972"/><path class="edge" d="M1040 942H1170V972"/>
+        <rect class="node green" x="430" y="1108" width="600" height="44" rx="12"/>
+        <text class="title" x="730" y="1136">加权有向无环图日账本：先内部入流定价，再计算流出与期末</text>
+        <path class="edge" d="M240 1084V1100H730V1108"/><path class="edge-dashed" d="M550 1096V1100"/><path class="edge" d="M860 1084V1100"/><path class="edge" d="M1170 1084V1100H730"/>
+        <circle class="risk-badge" cx="662" cy="968" r="17"/><text class="risk-text" x="662" y="968">R4</text>
+
+        <!-- E -->
+        <path class="edge" d="M730 1152V1244"/>
+        <rect class="node green" x="88" y="1244" width="250" height="104" rx="15"/>
+        <text class="title" x="213" y="1276">SKU 日账</text><text class="body" x="213" y="1302"><tspan x="213">期初 / 入流 / 出流 / 期末</tspan><tspan x="213" dy="20">分支 / 成本 / 毛利</tspan></text>
+        <rect class="node violet" x="396" y="1244" width="250" height="104" rx="15"/>
+        <text class="title" x="521" y="1276">7 层聚合</text><text class="body" x="521" y="1302"><tspan x="521">store → 大中小类</tspan><tspan x="521" dy="20">SPU → SKU → 商品组</tspan></text>
+        <rect class="node violet" x="704" y="1244" width="250" height="104" rx="15"/>
+        <text class="title" x="829" y="1276">兼容层输出</text><text class="body" x="829" y="1302"><tspan x="829">88,972 行 / 125 字段</tspan><tspan x="829" dy="20">前 123 字段兼容 v1.5</tspan></text>
+        <polygon class="node amber" points="1134,1232 1280,1296 1134,1360 988,1296"/>
+        <text class="title" x="1134" y="1283">Hard gates</text><text class="body" x="1134" y="1308"><tspan x="1134">10 项会计结构/守恒检查</tspan><tspan x="1134" dy="19">含 SSLS / 加工互斥</tspan></text>
+        <path class="edge" d="M730 1218H213V1244"/><path class="edge" d="M338 1296H396"/><path class="edge" d="M646 1296H704"/><path class="edge" d="M954 1296H988"/>
+        <polygon class="node amber" points="829,1383 975,1447 829,1511 683,1447"/>
+        <text class="title" x="829" y="1435">Publish gates</text><text class="body" x="829" y="1460"><tspan x="829">分类证据通过</tspan><tspan x="829" dy="19">成本证据 193 条失败</tspan></text>
+        <rect class="node red" x="1030" y="1400" width="338" height="96" rx="15"/>
+        <text class="title" x="1199" y="1431">拒绝发布 / 保留本地诊断</text><text class="body" x="1199" y="1457"><tspan x="1199">193 个缺成本 SKU 日；分类证据已通过</tspan><tspan x="1199" dy="20">不写生产，不冒充可发布</tspan></text>
+        <rect class="node blue" x="285" y="1400" width="338" height="96" rx="15"/>
+        <text class="title" x="454" y="1431">只读对比 v1.5</text><text class="body" x="454" y="1457"><tspan x="454">销售、验收、SCM 完全一致</tspan><tspan x="454" dy="20">门店毛利 -6.309%</tspan></text>
+        <path class="edge" d="M1134 1360V1375H829V1383"/><path class="edge" d="M683 1447H623"/>
+        <path class="edge-risk" d="M975 1447H1030"/>
+        <circle class="ok-badge" cx="1263" cy="1237" r="17"/><text class="risk-text" x="1263" y="1237">OK</text>
+        <circle class="risk-badge" cx="952" cy="1398" r="17"/><text class="risk-text" x="952" y="1398">R5</text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="relation" class="legacy-diagram">
+    <div class="section-head"><div><h2>2B. 独立图：关系判定树</h2><p>系统不会因为“看起来有关联”就自动过账；正式类型冲突、证据不全、只有商品组同组，都走不同出口。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1420 950" role="img" aria-label="关系判定树">
+        <rect class="node violet" x="535" y="42" width="350" height="76" rx="16"/>
+        <text class="title" x="710" y="73">任意 source_article → target_article 候选</text><text class="body" x="710" y="98">先保留来源、日期、门店与证据字段</text>
+        <path class="edge" d="M710 118V164"/>
+        <polygon class="node amber" points="710,164 852,226 710,288 568,226"/>
+        <text class="title" x="710" y="216">source = target？</text><text class="body" x="710" y="241">同一个 SKU 代码</text>
+
+        <rect class="node gray" x="100" y="178" width="300" height="96" rx="14"/>
+        <text class="title" x="250" y="209">SAME_SKU → active</text><text class="body" x="250" y="235"><tspan x="250">2,186 条</tspan><tspan x="250" dy="20">不形成内部 IN / OUT</tspan></text>
+        <path class="edge" d="M568 226H400"/><text class="edge-label" x="484" y="216">是</text>
+
+        <polygon class="node amber" points="1035,164 1195,226 1035,288 875,226"/>
+        <text class="title" x="1035" y="216">命中几个正式类型？</text><text class="body" x="1035" y="241">BOM / PROCESSING / 已分配验收</text>
+        <path class="edge" d="M852 226H875"/><text class="edge-label" x="864" y="216">否</text>
+
+        <polygon class="node amber" points="520,360 662,422 520,484 378,422"/>
+        <text class="title" x="520" y="412">0 类：同产品组？</text><text class="body" x="520" y="437">group evidence 仅供候选</text>
+        <path class="edge-dashed" d="M1035 288V323H520V360"/><text class="edge-label" x="778" y="314">0 类</text>
+        <rect class="node violet" x="138" y="538" width="310" height="96" rx="14"/>
+        <text class="title" x="293" y="569">ALLOCATED_RECEIPT</text><text class="body" x="293" y="595"><tspan x="293">59 关系日 / 15 对</tspan><tspan x="293" dy="20">B 作为外部验收直接入账</tspan></text>
+        <rect class="node red" x="480" y="538" width="270" height="96" rx="14"/>
+        <text class="title" x="615" y="569">UNRESOLVED</text><text class="body" x="615" y="595"><tspan x="615">无关系证据</tspan><tspan x="615" dy="20">进入隔离/待人工确认</tspan></text>
+        <path class="edge-dashed" d="M448 452L328 538"/><text class="edge-label" x="382" y="494">是</text>
+        <path class="edge-risk" d="M592 452L615 538"/><text class="edge-label" x="621" y="492">否</text>
+
+        <polygon class="node amber" points="1035,360 1195,422 1035,484 875,422"/>
+        <text class="title" x="1035" y="412">1 类：证据完整？</text><text class="body" x="1035" y="437">数量、日期、盘点等必需条件</text>
+        <path class="edge" d="M1035 288V360"/><text class="edge-label" x="1078" y="326">1 类</text>
+        <rect class="node green" x="823" y="538" width="310" height="96" rx="14"/>
+        <text class="title" x="978" y="569">ACTIVE FORMAL RELATION</text><text class="body" x="978" y="595"><tspan x="978">BOM 476 / PROCESSING 414</tspan><tspan x="978" dy="20">ALLOCATED_RECEIPT 59</tspan></text>
+        <rect class="node red" x="1160" y="538" width="228" height="96" rx="14"/>
+        <text class="title" x="1274" y="569">EVIDENCE MISSING</text><text class="body" x="1274" y="595"><tspan x="1274">关系存在但不可过账</tspan><tspan x="1274" dy="20">写 quarantine reason</tspan></text>
+        <path class="edge" d="M970 456L978 538"/><text class="edge-label" x="950" y="493">是</text>
+        <path class="edge-risk" d="M1100 456L1274 538"/><text class="edge-label" x="1191" y="493">否</text>
+
+        <rect class="node red" x="1120" y="48" width="265" height="96" rx="14"/>
+        <text class="title" x="1253" y="79">FORMAL TYPE CONFLICT</text><text class="body" x="1253" y="105"><tspan x="1253">同时命中多种正式类型</tspan><tspan x="1253" dy="20">禁止猜测优先级</tspan></text>
+        <path class="edge-risk" d="M1195 226H1360V144"/><text class="edge-label" x="1322" y="216">≥2 类</text>
+
+        <rect class="node green" x="165" y="720" width="1090" height="146" rx="18"/>
+        <text class="title" x="710" y="753">真正可生成内部事件，还需再过“日级可计算证据”</text>
+        <text class="body" x="710" y="780"><tspan x="710">BOM：source_qty + target_qty / sale_recev_rate + inbound amount 可分配</tspan><tspan x="710" dy="22">PROCESSING：销售 + 普通报损反冲；SSLS 原料命中则整组优先走生熟联动</tspan><tspan x="710" dy="22">A→B：article_convert/重量校验比例，purchase_di 已给 B 数量/金额则直接验收入账</tspan><tspan x="710" dy="22">没有 purchase_di 的当日 B 数量事实时，不把 A 全部验收凭关系强制转成 B</tspan></text>
+        <path class="edge" d="M978 634V720"/>
+      </svg>
+    </div>
+  </section>
+
+  <section id="events" class="legacy-diagram">
+    <div class="section-head"><div><h2>2C. 独立图：内部事件计算树</h2><p>实线是本次已执行的代码与结果；加工先判生熟联动互斥，再按成品消耗反冲。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1420 1190" role="img" aria-label="内部事件计算树">
+        <rect class="node green" x="535" y="38" width="350" height="78" rx="16"/>
+        <text class="title" x="710" y="69">ACTIVE 关系 + 当日 Stage 事实</text><text class="body" x="710" y="95">每一条关系必须生成成对账腿或整体不生成</text>
+
+        <path class="edge" d="M710 116V163H180V200"/><path class="edge" d="M710 163H530V200"/><path class="edge" d="M710 163H890V200"/><path class="edge" d="M710 163H1240V200"/>
+        <rect class="node green" x="45" y="200" width="270" height="128" rx="15"/>
+        <text class="title" x="180" y="233">DISASSEMBLY_BOM</text><text class="body" x="180" y="259"><tspan x="180">父品 source_qty</tspan><tspan x="180" dy="20">子品 target_qty / 公共比例</tspan><tspan x="180" dy="20">入库金额按有效比例分摊</tspan><tspan x="180" dy="20">本次：有过账</tspan></text>
+        <rect class="node green" x="395" y="200" width="270" height="128" rx="15"/>
+        <text class="title" x="530" y="233">PROCESSING</text><text class="body" x="530" y="259"><tspan x="530">FINISHED_USAGE_BACKFLUSH</tspan><tspan x="530" dy="20">不要求成品盘点</tspan><tspan x="530" dy="20">本次 188 个事件</tspan><tspan x="530" dy="20">生熟联动优先</tspan></text>
+        <rect class="node gray" x="755" y="200" width="270" height="128" rx="15"/>
+        <text class="title" x="890" y="233">A→B 直接验收</text><text class="body" x="890" y="259"><tspan x="890">固定关系确认方向/比例</tspan><tspan x="890" dy="20">purchase_di 给 B 数量/金额</tspan><tspan x="890" dy="20">不需要转换明细表</tspan><tspan x="890" dy="20">59 关系日直接落 B</tspan></text>
+        <rect class="node gray" x="1105" y="200" width="270" height="128" rx="15"/>
+        <text class="title" x="1240" y="233">RESIDUAL / STORE RETURN</text><text class="body" x="1240" y="259"><tspan x="1240">残余物 / 门店退货</tspan><tspan x="1240" dy="20">独立字段与账腿</tspan><tspan x="1240" dy="20">不塞回 BOM</tspan><tspan x="1240" dy="20">本次无主要过账</tspan></text>
+
+        <polygon class="node amber" points="180,385 315,445 180,505 45,445"/>
+        <text class="title" x="180" y="436">分配比例有效？</text><text class="body" x="180" y="461">数量比例优先</text>
+        <path class="edge" d="M180 328V385"/>
+        <rect class="node green" x="45" y="555" width="270" height="116" rx="14"/>
+        <text class="title" x="180" y="586">生成两腿</text><text class="body" x="180" y="612"><tspan x="180">父品 BOM_OUT</tspan><tspan x="180" dy="20">子品 BOM_IN</tspan><tspan x="180" dy="20">金额严格相等</tspan></text>
+        <rect class="node red" x="346" y="555" width="246" height="116" rx="14"/>
+        <text class="title" x="469" y="586">隔离</text><text class="body" x="469" y="612"><tspan x="469">不可分配金额或数量</tspan><tspan x="469" dy="20">不生成半条腿</tspan></text>
+        <path class="edge" d="M180 505V555"/><text class="edge-label" x="205" y="536">是</text><path class="edge-risk" d="M315 445H469V555"/><text class="edge-label" x="394" y="435">否</text>
+
+        <polygon class="node amber" points="710,385 868,445 710,505 552,445"/>
+        <text class="title" x="710" y="436">原料命中 SSLS 报损？</text><text class="body" x="710" y="461">生熟联动与加工二选一</text>
+        <path class="edge" d="M530 328V352H710V385"/>
+        <rect class="node red" x="630" y="555" width="322" height="116" rx="14"/>
+        <text class="title" x="791" y="586">是：生熟联动优先</text><text class="body" x="791" y="612"><tspan x="791">整组加工不生成</tspan><tspan x="791" dy="20">不抵扣 / 不做剩余加工</tspan><tspan x="791" dy="20">本周隔离 17 成品日</tspan></text>
+        <rect class="node red" x="1010" y="555" width="322" height="116" rx="14"/>
+        <text class="title" x="1171" y="586">原料账面余额不足</text><text class="body" x="1171" y="612"><tspan x="1171">不再作为停算条件</tspan><tspan x="1171" dy="20">已发生的成品消耗照常反冲</tspan><tspan x="1171" dy="20">透支成本单列并扣回毛利</tspan></text>
+        <path class="edge-risk" d="M710 505V535H791V555"/><text class="edge-label" x="738" y="531">是</text>
+        <path class="edge" d="M868 445H1015V710"/><text class="edge-label" x="930" y="435">否</text>
+
+        <polygon class="node amber" points="1015,710 1173,770 1015,830 857,770"/>
+        <text class="title" x="1015" y="757">成品有已知消耗？</text><text class="body" x="1015" y="782">净销售 + 普通报损 &gt; 0</text>
+        <rect class="node green" x="550" y="850" width="430" height="126" rx="15"/>
+        <text class="title" x="765" y="882">USAGE_BACKFLUSH</text><text class="body" x="765" y="908"><tspan x="765">consumed_finished = net_sale + ordinary_loss</tspan><tspan x="765" dy="20">finished_in = consumed_finished</tspan><tspan x="765" dy="20">raw_out = consumed_finished × raw_qty / yield_qty</tspan><tspan x="765" dy="20">实跑：188 事件 / 成品 1,017 / 原料 195.758</tspan></text>
+        <rect class="node red" x="1015" y="850" width="330" height="126" rx="15"/>
+        <text class="title" x="1180" y="882">不造加工流</text><text class="body" x="1180" y="908"><tspan x="1180">消耗量 = 0：不生成</tspan><tspan x="1180" dy="20">多配方语义未决：隔离 24</tspan><tspan x="1180" dy="20">外部验收优先：隔离 6</tspan><tspan x="1180" dy="20">SSLS 命中：已在上游整组截断</tspan></text>
+        <path class="edge" d="M857 770H765V850"/><text class="edge-label" x="804" y="761">是</text>
+        <path class="edge-risk" d="M1015 830V850"/><text class="edge-label" x="1042" y="842">否/失败</text>
+
+        <rect class="node green" x="358" y="1015" width="704" height="122" rx="17"/>
+        <text class="title" x="710" y="1047">统一 event ledger</text>
+        <text class="body" x="710" y="1073"><tspan x="710">字段：store / date / source_article / target_article / event_type / direction / qty / amount / evidence</tspan><tspan x="710" dy="21">数量与金额分别守恒；入腿进入目标商品 inflow，出腿进入原料 internal_out</tspan><tspan x="710" dy="21">本次 BOM + PROCESSING 都已入账；加工 188 事件，OUT/IN 金额均 ¥6,519.06459</tspan></text>
+        <path class="edge" d="M180 671V990H670V1015"/><path class="edge" d="M765 976V1015"/><path class="edge" d="M1240 328V990H750V1015"/>
+        <circle class="risk-badge" cx="934" cy="1009" r="17"/><text class="risk-text" x="934" y="1009">R6</text>
+
+        <rect class="node red" x="286" y="1150" width="848" height="32" rx="13"/>
+        <text class="body" x="710" y="1171">二选一硬规则：任一配方原料 SKU/日命中 SSLS，整组加工不生成；最终 hard gate 重叠数必须为 0。</text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="ledger" class="legacy-diagram">
+    <div class="section-head"><div><h2>2D. 独立图：单 SKU × 门店 × 日期库存状态机</h2><p>这是数值计算核心。先汇总入流并定价，再估值所有出流，最后以盘点/方程结果决定期末，并精确滚到下一天。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1440 1450" role="img" aria-label="库存状态机流程图">
+        <rect class="node blue" x="35" y="45" width="215" height="116" rx="14"/>
+        <text class="title" x="143" y="78">期初库存</text><text class="body" x="143" y="104"><tspan x="143">D-1 期末优先</tspan><tspan x="143" dy="20">否则盘点/快照 bootstrap</tspan><tspan x="143" dy="20">再否则 0</tspan></text>
+        <rect class="node blue" x="278" y="45" width="215" height="116" rx="14"/>
+        <text class="title" x="386" y="78">外部收货</text><text class="body" x="386" y="104"><tspan x="386">receipt qty / amount</tspan><tspan x="386" dy="20">SCM 金融字段另保留</tspan><tspan x="386" dy="20">无数量金额会隔离</tspan></text>
+        <rect class="node green" x="521" y="45" width="215" height="116" rx="14"/>
+        <text class="title" x="629" y="78">内部流入</text><text class="body" x="629" y="104"><tspan x="629">BOM / PACK / COMPOSE</tspan><tspan x="629" dy="20">RESIDUAL / sale_return</tspan><tspan x="629" dy="20">inventory_gain</tspan></text>
+        <rect class="node blue" x="764" y="45" width="215" height="116" rx="14"/>
+        <text class="title" x="872" y="78">销售与已知损耗</text><text class="body" x="872" y="104"><tspan x="872">gross sale qty</tspan><tspan x="872" dy="20">net sale amount</tspan><tspan x="872" dy="20">known loss qty</tspan></text>
+        <rect class="node green" x="1007" y="45" width="215" height="116" rx="14"/>
+        <text class="title" x="1115" y="78">内部流出</text><text class="body" x="1115" y="104"><tspan x="1115">BOM / PACK / COMPOSE</tspan><tspan x="1115" dy="20">RESIDUAL / store return</tspan><tspan x="1115" dy="20">独立数量列</tspan></text>
+        <rect class="node amber" x="1250" y="45" width="155" height="116" rx="14"/>
+        <text class="title" x="1328" y="78">盘点信号</text><text class="body" x="1328" y="104"><tspan x="1328">实际期末</tspan><tspan x="1328" dy="20">counted?</tspan><tspan x="1328" dy="20">day_clear</tspan></text>
+
+        <path class="edge" d="M143 161V237H480"/><path class="edge" d="M386 161V215H480V237"/><path class="edge" d="M629 161V215H480"/>
+        <rect class="node green" x="315" y="237" width="330" height="122" rx="16"/>
+        <text class="title" x="480" y="270">总入流数量 / 金额</text><text class="body" x="480" y="296"><tspan x="480">qty = init + receive + all internal_in</tspan><tspan x="480" dy="20">+ sale_return + inventory_gain</tspan><tspan x="480" dy="20">amount 同构汇总</tspan></text>
+        <path class="edge" d="M480 359V418"/>
+        <polygon class="node amber" points="480,418 630,482 480,546 330,482"/>
+        <text class="title" x="480" y="471">inflow_qty &gt; 0？</text><text class="body" x="480" y="497">是否有可计算成本分母</text>
+        <rect class="node green" x="170" y="610" width="330" height="92" rx="14"/>
+        <text class="title" x="335" y="641">issue_cost = inflow_amt / inflow_qty</text><text class="body" x="335" y="667"><tspan x="335">作为当日全部出流的单位成本</tspan><tspan x="335" dy="20">每个数字只算一次</tspan></text>
+        <rect class="node red" x="590" y="610" width="330" height="92" rx="14"/>
+        <text class="title" x="755" y="641">fallback cost（主流程常为 0）</text><text class="body" x="755" y="667"><tspan x="755">仍有销售/损耗/内部出流时</tspan><tspan x="755" dy="20">记录 MISSING_COST_EVIDENCE</tspan></text>
+        <path class="edge" d="M390 535L335 610"/><text class="edge-label" x="341" y="566">是</text>
+        <path class="edge-risk" d="M570 535L755 610"/><text class="edge-label" x="662" y="566">否</text>
+        <circle class="risk-badge" cx="900" cy="605" r="17"/><text class="risk-text" x="900" y="605">R7</text>
+
+        <rect class="node green" x="470" y="758" width="500" height="96" rx="15"/>
+        <text class="title" x="720" y="790">用同一个 issue_cost 估值所有流出</text><text class="body" x="720" y="816"><tspan x="720">sale_cost = gross_sale_qty × issue_cost；known_loss_amt 同理</tspan><tspan x="720" dy="20">internal_out 每一类独立保留，不相互覆盖</tspan></text>
+        <path class="edge" d="M335 702V730H720V758"/><path class="edge-risk" d="M755 702V730"/><path class="edge" d="M872 161V730H720"/><path class="edge" d="M1115 161V730H720"/>
+
+        <rect class="node amber" x="430" y="903" width="580" height="86" rx="15"/>
+        <text class="title" x="720" y="935">方程期末 eq_qty</text><text class="body" x="720" y="961">总入流 − 内部流出 − gross_sale − known_loss</text>
+        <path class="edge" d="M720 854V903"/>
+        <path class="edge" d="M1328 161V946H1010"/>
+
+        <polygon class="node amber" points="720,1040 890,1110 720,1180 550,1110"/>
+        <text class="title" x="720" y="1083">期末分支优先级</text>
+        <text class="body" x="720" y="1109"><tspan x="720">① counted → ② eq&lt;0</tspan><tspan x="720" dy="20">③ known_loss → ④ normal</tspan><tspan x="720" dy="20">day_clear 不单独分支</tspan></text>
+        <path class="edge" d="M720 989V1040"/>
+
+        <rect class="node blue" x="30" y="1240" width="270" height="126" rx="15"/>
+        <text class="title" x="165" y="1272">① COUNTED</text><text class="body" x="165" y="1298"><tspan x="165">end = actual_count</tspan><tspan x="165" dy="20">unknown = eq - actual</tspan><tspan x="165" dy="20">本次 1,924 行</tspan><tspan x="165" dy="20">允许盘盈为负损耗</tspan></text>
+        <rect class="node red" x="388" y="1240" width="270" height="126" rx="15"/>
+        <text class="title" x="523" y="1272">② NEGATIVE_CLAMP</text><text class="body" x="523" y="1298"><tspan x="523">end = 0</tspan><tspan x="523" dy="20">neg_clamp_cost = -eq × cost</tspan><tspan x="523" dy="20">本次 770 行 / ¥10,827.43</tspan><tspan x="523" dy="20">profit 单独扣回</tspan></text>
+        <rect class="node green" x="746" y="1240" width="270" height="126" rx="15"/>
+        <text class="title" x="881" y="1272">③ KNOWN_LOSS</text><text class="body" x="881" y="1298"><tspan x="881">end = eq</tspan><tspan x="881" dy="20">unknown = 0</tspan><tspan x="881" dy="20">本次 611 行</tspan><tspan x="881" dy="20">损耗已经进入方程</tspan></text>
+        <rect class="node green" x="1104" y="1240" width="270" height="126" rx="15"/>
+        <text class="title" x="1239" y="1272">④ NORMAL</text><text class="body" x="1239" y="1298"><tspan x="1239">end = eq</tspan><tspan x="1239" dy="20">unknown = 0</tspan><tspan x="1239" dy="20">本次 16,081 行</tspan><tspan x="1239" dy="20">无额外库存调整</tspan></text>
+        <path class="edge" d="M550 1110H165V1240"/><path class="edge-risk" d="M624 1160L523 1240"/><path class="edge" d="M816 1160L881 1240"/><path class="edge" d="M890 1110H1239V1240"/>
+        <text class="edge-label" x="360" y="1099">counted</text><text class="edge-label" x="540" y="1202">eq&lt;0</text><text class="edge-label" x="878" y="1202">known loss</text><text class="edge-label" x="1055" y="1099">otherwise</text>
+
+        <path class="edge-loop" d="M1239 1366V1415H143V161"/>
+        <text class="edge-label" x="720" y="1407">D+1：end_qty/end_amt 原值继承为下一日期初；hard gate 要求逐行完全相等</text>
+        <circle class="risk-badge" cx="866" cy="1038" r="17"/><text class="risk-text" x="866" y="1038">R8</text>
+      </svg>
+    </div>
+    <div class="callout-grid">
+      <div class="callout risk"><strong>R7 已证实</strong>193 个 SKU 日发生有出流但成本为 0，共 691.425 数量；发布门禁因此失败。</div>
+      <div class="callout risk"><strong>R8 高风险</strong><code>day_clear</code> 只作为维度保留，库存状态机没有旧版“软日清”分支；约 3,160/3,231 SKU 日被标为 0。</div>
+      <div class="callout warn"><strong>期初来源不一</strong>1,277 行 null bootstrap 为 0，253 行无源记录为 0，另有 8 行有数量但金额为 0。</div>
+      <div class="callout ok"><strong>结构守恒通过</strong>负期末、数量方程、金额方程、外部观测、D+1、内部金额、BOM 父品转出均通过。</div>
+    </div>
+  </section>
+
+  <section id="profit" class="legacy-diagram">
+    <div class="section-head"><div><h2>2E. 独立图：毛利与 7 层输出树</h2><p>毛利由同一份库存账本直接取值；下游只聚合，不再次推导成本。CCJ 与 SSLS 是报表层的特殊重分类。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1420 1000" role="img" aria-label="毛利与输出树">
+        <rect class="node green" x="480" y="42" width="460" height="110" rx="16"/>
+        <text class="title" x="710" y="74">SKU 日级基础毛利</text>
+        <text class="body" x="710" y="100"><tspan x="710">net_sale − external_receipt − internal_in + internal_out</tspan><tspan x="710" dy="21">+ end_stock_amt − init_stock_amt − neg_clamp_cost_amt</tspan><tspan x="710" dy="21">损耗已通过期末库存反映，不再重复扣一次</tspan></text>
+
+        <path class="edge" d="M710 152V210H270V250"/><path class="edge" d="M710 210V250"/><path class="edge" d="M710 210H1150V250"/>
+        <rect class="node green" x="100" y="250" width="340" height="118" rx="15"/>
+        <text class="title" x="270" y="281">普通商品</text><text class="body" x="270" y="307"><tspan x="270">基础毛利原样进入聚合</tspan><tspan x="270" dy="20">各层仅 SUM / ratio</tspan><tspan x="270" dy="20">不重新计算 EUC</tspan></text>
+        <rect class="node amber" x="540" y="250" width="340" height="118" rx="15"/>
+        <text class="title" x="710" y="281">CCJ 特殊损耗调整</text><text class="body" x="710" y="307"><tspan x="710">展示损耗金额减去 CCJ</tspan><tspan x="710" dy="20">展示毛利加回 CCJ</tspan><tspan x="710" dy="20">全部层级同步调整</tspan></text>
+        <rect class="node amber" x="980" y="250" width="340" height="118" rx="15"/>
+        <text class="title" x="1150" y="281">SSLS 类间转移</text><text class="body" x="1150" y="307"><tspan x="1150">损耗展示减去 SSLS</tspan><tspan x="1150" dy="20">大类层：来源贷方 / 熟食借方</tspan><tspan x="1150" dy="20">SKU/SPU/store 不转移以保可加</tspan></text>
+
+        <rect class="node violet" x="452" y="455" width="516" height="80" rx="16"/>
+        <text class="title" x="710" y="486">统一 125 字段宽表</text><text class="body" x="710" y="512">前 123 字段与 v1.5 兼容；新增商品组 ID / 名称</text>
+        <path class="edge" d="M270 368V416H710V455"/><path class="edge" d="M710 368V455"/><path class="edge" d="M1150 368V416H710"/>
+
+        <path class="edge" d="M710 535V600H114V640"/><path class="edge" d="M710 600H312V640"/><path class="edge" d="M710 600H510V640"/><path class="edge" d="M710 600H708V640"/><path class="edge" d="M710 600H906V640"/><path class="edge" d="M710 600H1104V640"/><path class="edge" d="M710 600H1302V640"/>
+        <rect class="node blue" x="35" y="640" width="158" height="92" rx="13"/><text class="title" x="114" y="674">门店</text><text class="body" x="114" y="700"><tspan x="114">store</tspan><tspan x="114" dy="19">day_clear 0/1/2</tspan></text>
+        <rect class="node blue" x="233" y="640" width="158" height="92" rx="13"/><text class="title" x="312" y="674">大分类</text><text class="body" x="312" y="700"><tspan x="312">large</tspan><tspan x="312" dy="19">特殊类间转移</tspan></text>
+        <rect class="node blue" x="431" y="640" width="158" height="92" rx="13"/><text class="title" x="510" y="674">中分类</text><text class="body" x="510" y="700">middle</text>
+        <rect class="node blue" x="629" y="640" width="158" height="92" rx="13"/><text class="title" x="708" y="674">小分类</text><text class="body" x="708" y="700">small</text>
+        <rect class="node blue" x="827" y="640" width="158" height="92" rx="13"/><text class="title" x="906" y="674">SPU</text><text class="body" x="906" y="700">spu</text>
+        <rect class="node blue" x="1025" y="640" width="158" height="92" rx="13"/><text class="title" x="1104" y="674">SKU</text><text class="body" x="1104" y="700">sku</text>
+        <rect class="node blue" x="1223" y="640" width="158" height="92" rx="13"/><text class="title" x="1302" y="674">商品组</text><text class="body" x="1302" y="700">product_group</text>
+
+        <polygon class="node amber" points="485,802 625,862 485,922 345,862"/>
+        <text class="title" x="485" y="852">Hard gates</text><text class="body" x="485" y="877">结构与守恒</text>
+        <polygon class="node amber" points="935,802 1075,862 935,922 795,862"/>
+        <text class="title" x="935" y="852">Publish gates</text><text class="body" x="935" y="877">业务证据完整性</text>
+        <path class="edge" d="M710 732V770H485V802"/><path class="edge" d="M710 770H935V802"/>
+        <rect class="node green" x="153" y="940" width="332" height="45" rx="12"/><text class="body" x="319" y="968">本次：全通过，可用于诊断</text>
+        <rect class="node red" x="935" y="940" width="332" height="45" rx="12"/><text class="body" x="1101" y="968">本次：失败，禁止当作正式发布</text>
+        <path class="edge" d="M485 922V940"/><path class="edge-risk" d="M935 922V940"/>
+      </svg>
+    </div>
+  </section>
+
+  <section id="loss-detail">
+    <div class="section-head"><div><h2>2F. 独立图：报损 → 库存 → 毛利 → 展示口径</h2><p>这一张专门拆开基础账本和 v1.5 兼容展示，避免把“报损已经影响毛利”和“CCJ/SSLS 又如何改展示”混为一件事。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1440 1080" role="img" aria-label="报损对库存和毛利的完整处理流程">
+        <rect class="lane" x="24" y="28" width="1392" height="242" rx="18"/><text class="lane-label" x="48" y="58">A. 上游报损字段标准化</text>
+        <rect class="lane" x="24" y="292" width="1392" height="358" rx="18"/><text class="lane-label" x="48" y="322">B. 物理库存账本与基础会计毛利</text>
+        <rect class="lane" x="24" y="672" width="1392" height="380" rx="18"/><text class="lane-label" x="48" y="702">C. CCJ / SSLS 兼容展示调整</text>
+
+        <rect class="node blue" x="62" y="92" width="280" height="126" rx="15"/>
+        <text class="title" x="202" y="125">strategy_fm_loss_di</text><text class="body" x="202" y="151"><tspan x="202">know_lost_qty / amt</tspan><tspan x="202" dy="20">unknow_lost_qty / amt</tspan><tspan x="202" dy="20">store × date × article</tspan></text>
+        <polygon class="node amber" points="505,80 655,155 505,230 355,155"/>
+        <text class="title" x="505" y="145">normalize_known_loss</text><text class="body" x="505" y="171"><tspan x="505">known qty ≥ 0？</tspan><tspan x="505" dy="20">键唯一？</tspan></text>
+        <rect class="node green" x="700" y="92" width="300" height="126" rx="15"/>
+        <text class="title" x="850" y="125">正式报损数量流</text><text class="body" x="850" y="151"><tspan x="850">known_lost_qty</tspan><tspan x="850" dy="20">唯一进入库存方程</tspan><tspan x="850" dy="20">本周 qty 2,359.922</tspan></text>
+        <rect class="node gray" x="1045" y="92" width="310" height="126" rx="15"/>
+        <text class="title" x="1200" y="125">审计字段</text><text class="body" x="1200" y="151"><tspan x="1200">source_known_lost_amt</tspan><tspan x="1200" dy="20">source_unknown_lost_qty / amt</tspan><tspan x="1200" dy="20">保留但不决定账本金额</tspan></text>
+        <path class="edge" d="M342 155H355"/><path class="edge" d="M655 155H700"/><path class="edge-dashed" d="M505 80V70H1200V92"/>
+
+        <rect class="node green" x="55" y="368" width="300" height="144" rx="15"/>
+        <text class="title" x="205" y="401">日加权成本</text><text class="body" x="205" y="427"><tspan x="205">issue_cost = inflow_amt / qty</tspan><tspan x="205" dy="20">known_lost_amt</tspan><tspan x="205" dy="20">= known_lost_qty × issue_cost</tspan><tspan x="205" dy="20">本周 ¥18,822.62</tspan></text>
+        <rect class="node amber" x="405" y="368" width="300" height="144" rx="15"/>
+        <text class="title" x="555" y="401">理论期末 eq</text><text class="body" x="555" y="427"><tspan x="555">eq_qty = inflow − internal_out</tspan><tspan x="555" dy="20">− gross_sale − known_loss</tspan><tspan x="555" dy="20">eq_amt 同时扣 known_lost_amt</tspan><tspan x="555" dy="20">损耗先降低期末价值</tspan></text>
+        <rect class="node blue" x="755" y="350" width="300" height="180" rx="15"/>
+        <text class="title" x="905" y="383">期末与未知损耗</text><text class="body" x="905" y="409"><tspan x="905">盘点：end = actual</tspan><tspan x="905" dy="20">unknown = eq − actual</tspan><tspan x="905" dy="20">未盘点：unknown = 0</tspan><tspan x="905" dy="20">负理论库存：balance_unknown</tspan><tspan x="905" dy="20">不冒充 physical unknown loss</tspan><tspan x="905" dy="20">本周 unknown ¥817.47</tspan></text>
+        <rect class="node green" x="1105" y="350" width="260" height="180" rx="15"/>
+        <text class="title" x="1235" y="383">基础会计毛利</text><text class="body" x="1235" y="409"><tspan x="1235">sale − receipt</tspan><tspan x="1235" dy="20">− internal_in + out</tspan><tspan x="1235" dy="20">+ end − init</tspan><tspan x="1235" dy="20">− neg_clamp_cost</tspan><tspan x="1235" dy="20">不再额外 − loss</tspan><tspan x="1235" dy="20">本周 ¥25,465.87</tspan></text>
+        <path class="edge" d="M850 218V310H205V368"/><path class="edge" d="M355 440H405"/><path class="edge" d="M705 440H755"/><path class="edge" d="M1055 440H1105"/>
+        <rect class="node red" x="412" y="566" width="616" height="54" rx="13"/>
+        <text class="body" x="720" y="589"><tspan x="720">关键：报损价值已经通过 end_stock_amt 下降进入 +end−init；毛利若再减 loss_amt，会发生二次扣减。</tspan><tspan x="720" dy="19">源表 unknow_lost 不是正式流；账本 unknown 只能由人工盘点差推导。</tspan></text>
+
+        <rect class="node violet" x="60" y="750" width="280" height="144" rx="15"/>
+        <text class="title" x="200" y="783">purchase_wastage</text><text class="body" x="200" y="809"><tspan x="200">最新快照；created_at 定业务日</tspan><tspan x="200" dy="20">source_record_id 可审计</tspan><tspan x="200" dy="20">不改库存与 internal posting</tspan><tspan x="200" dy="20">本周 8,190.84 / 2,749.33</tspan></text>
+        <rect class="node amber" x="395" y="750" width="300" height="144" rx="15"/>
+        <text class="title" x="545" y="783">展示损耗</text><text class="body" x="545" y="809"><tspan x="545">loss -= CCJ + SSLS</tspan><tspan x="545" dy="20">known_loss 同步减</tspan><tspan x="545" dy="20">unknown_loss 不改</tspan><tspan x="545" dy="20">19,640.09 → 8,699.92</tspan></text>
+        <rect class="node green" x="750" y="750" width="280" height="144" rx="15"/>
+        <text class="title" x="890" y="783">CCJ 毛利加回</text><text class="body" x="890" y="809"><tspan x="890">每个聚合层级</tspan><tspan x="890" dy="20">profit += ccj_amt</tspan><tspan x="890" dy="20">full_profit += ccj_amt</tspan><tspan x="890" dy="20">最终门店毛利 25,621.15</tspan></text>
+        <rect class="node green" x="1085" y="750" width="300" height="144" rx="15"/>
+        <text class="title" x="1235" y="783">SSLS 大类转移</text><text class="body" x="1235" y="809"><tspan x="1235">来源大类加回 own SSLS</tspan><tspan x="1235" dy="20">熟食类扣当日 total SSLS</tspan><tspan x="1235" dy="20">SKU/SPU/门店不转移</tspan><tspan x="1235" dy="20">只改分类分布，不改门店总额</tspan></text>
+        <path class="edge-dashed" d="M200 894V942H545V894"/><path class="edge" d="M340 822H395"/><path class="edge" d="M695 822H750"/><path class="edge" d="M1030 822H1085"/><path class="edge-dashed" d="M1235 530V716H890V750"/>
+        <rect class="node red" x="388" y="952" width="664" height="66" rx="13"/>
+        <text class="body" x="720" y="978"><tspan x="720">已实现二选一：配方任一原料 SKU/日命中 SSLS，整组加工事件取消。</tspan><tspan x="720" dy="20">本次 17 个成品日优先走生熟联动；最终加工 OUT 与 SSLS 原料日交集为 0。</tspan></text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="risk" class="truth">
+    <div class="section-head"><div><h2>3. “为什么现在不能直接判断逻辑已合理”的问题因果树</h2><p>根节点不是“程序报错”，而是“当前结果不能无条件发布”。左侧为已证实数据问题，右侧为具备明确代码路径的潜在问题。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1440 1180" role="img" aria-label="问题因果树">
+        <rect class="node red" x="455" y="35" width="530" height="90" rx="18"/>
+        <text class="title" x="720" y="70">根问题：账本守恒，但业务证据不足，当前不可正式发布</text>
+        <text class="body" x="720" y="98">计算可闭合 ≠ 成本来源真实 ≠ 分类历史正确 ≠ 业务关系完整</text>
+        <path class="edge-risk" d="M720 125V174H350V210"/><path class="edge-risk" d="M720 174H1090V210"/>
+        <rect class="node red" x="145" y="210" width="410" height="76" rx="15"/>
+        <text class="title" x="350" y="241">A. 已证实：本次数据直接触发</text><text class="body" x="350" y="265">有确切行数、金额或 gate 结果</text>
+        <rect class="node amber" x="885" y="210" width="410" height="76" rx="15"/>
+        <text class="title" x="1090" y="241">B. 高风险：代码语义与业务旧口径漂移</text><text class="body" x="1090" y="265">尚未造成 hard gate 失败，但存在明确触发条件</text>
+
+        <path class="edge-risk" d="M350 286V340H120V380"/><path class="edge-risk" d="M350 340H350V380"/><path class="edge-risk" d="M350 340H580V380"/>
+        <rect class="node red" x="25" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="120" y="411">A1 零成本出流</text><text class="body" x="120" y="438"><tspan x="120">193 SKU 日</tspan><tspan x="120" dy="20">qty 691.425</tspan><tspan x="120" dy="20">publish fail</tspan><tspan x="120" dy="20">可能抬高毛利</tspan></text>
+        <rect class="node red" x="255" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="350" y="411">A2 最新分类快照</text><text class="body" x="350" y="438"><tspan x="350">监控平台 08-12</tspan><tspan x="350" dy="20">整窗统一映射</tspan><tspan x="350" dy="20">1,449 SKU 命中</tspan><tspan x="350" dy="20">11 SKU 回退 dim_goods</tspan></text>
+        <rect class="node red" x="485" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="580" y="411">A3 加工与跨码</text><text class="body" x="580" y="438"><tspan x="580">加工成功 188 事件</tspan><tspan x="580" dy="20">SSLS 优先隔离 17</tspan><tspan x="580" dy="20">多配方隔离 24</tspan><tspan x="580" dy="20">跨码直接验收 59</tspan></text>
+
+        <path class="edge" d="M1090 286V340H810V380"/><path class="edge" d="M1090 340H1040V380"/><path class="edge" d="M1090 340H1270V380"/>
+        <rect class="node amber" x="715" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="810" y="411">B1 day_clear 漂移</text><text class="body" x="810" y="438"><tspan x="810">约 98% SKU 日为 0</tspan><tspan x="810" dy="20">但无软日清分支</tspan><tspan x="810" dy="20">只当输出维度</tspan><tspan x="810" dy="20">与 v0.11 不同</tspan></text>
+        <rect class="node amber" x="945" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="1040" y="411">B2 加工反冲边界</text><text class="body" x="1040" y="438"><tspan x="1040">仅反推已消耗成品</tspan><tspan x="1040" dy="20">不还原实际总产量</tspan><tspan x="1040" dy="20">不推断未售成品库存</tspan><tspan x="1040" dy="20">成品盘点仍独立</tspan></text>
+        <rect class="node amber" x="1175" y="380" width="190" height="150" rx="14"/>
+        <text class="title" x="1270" y="411">B3 二选一保护</text><text class="body" x="1270" y="438"><tspan x="1270">SSLS 命中整组取消</tspan><tspan x="1270" dy="20">不做数量抵扣</tspan><tspan x="1270" dy="20">新增 hard gate</tspan><tspan x="1270" dy="20">本次重叠 0</tspan></text>
+
+        <rect class="node amber" x="35" y="618" width="605" height="120" rx="16"/>
+        <text class="title" x="338" y="649">A4 验收数量/金额已完全对齐</text>
+        <text class="body" x="338" y="676"><tspan x="338">同码缺数量且金额一致时，用独立 receive_sale 事实只补数量，不改采购金额</tspan><tspan x="338" dy="21">SKU 日销售额/量与 v1.5 完全一致；门店日验收金额 6/6 日一致</tspan><tspan x="338" dy="21">跨码 purchase_di 已给 B 数量/金额的 59 关系日直接落 B，防止重复内部过账</tspan></text>
+        <path class="edge-risk" d="M350 530V580H338V618"/>
+
+        <rect class="node amber" x="800" y="618" width="605" height="120" rx="16"/>
+        <text class="title" x="1103" y="649">B4 最新维表回看历史</text>
+        <text class="body" x="1103" y="676"><tspan x="1103">dim_goods / inventory_pool 等包含“最新日快照”型来源，并非每个历史日都有真实当日快照</tspan><tspan x="1103" dy="21">历史回刷时可能用 08-11 商品属性解释 08-06 事实；分类与可售状态会发生时间穿越</tspan><tspan x="1103" dy="21">hard gate 只检查守恒，不能发现这种业务语义错误</tspan></text>
+        <path class="edge" d="M1090 530V618"/>
+
+        <rect class="node red" x="222" y="830" width="996" height="112" rx="17"/>
+        <text class="title" x="720" y="861">外部症状：FM 与 v1.5 的门店毛利差 -6.309%</text>
+        <text class="body" x="720" y="888"><tspan x="720">FM ¥25,621.15 vs v1.5 ¥27,346.50，差额 -¥1,725.35；全链路毛利差 -4.881%</tspan><tspan x="720" dy="21">销售、验收和 SCM ¥7,450.93 完全一致，因此差异主要在成本、库存、盘点与内部关系。</tspan><tspan x="720" dy="21">当前最大结构性阻塞是 193 个缺成本 SKU 日，不能靠删除真实成本把数字调近。</tspan></text>
+        <path class="edge-risk" d="M338 738V785H720V830"/><path class="edge" d="M1103 738V785H720"/>
+
+        <rect class="node green" x="335" y="1018" width="770" height="112" rx="17"/>
+        <text class="title" x="720" y="1049">人工判断时应分成两问</text>
+        <text class="body" x="720" y="1076"><tspan x="720">① 数学账本是否闭合？—— 本次答案：是，10 项会计 hard gate 全通过。</tspan><tspan x="720" dy="21">② 闭合账本使用的业务证据是否完整且符合真实运营？—— 仍缺 193 个 SKU 日成本。</tspan><tspan x="720" dy="21">因此现阶段结果适合定位规则，不适合作为无条件上线结论。</tspan></text>
+        <path class="edge" d="M720 942V1018"/>
+      </svg>
+    </div>
+  </section>
+
+  <section id="run">
+    <div class="section-head"><div><h2>4. 近一周实跑：从正常人工盘点日开始</h2><p>先检查盘点日期，再选 08-05 作为 D-1，正式输出 08-06 至 08-11。08-09 无人工盘点，但跨日链未中断。</p></div></div>
+    <div class="diagram-wrap">
+      <svg class="diagram" viewBox="0 0 1420 620" role="img" aria-label="近一周实跑时间线">
+        <path class="edge" d="M195 150H225"/><path class="edge" d="M385 150H415"/><path class="edge" d="M575 150H605"/>
+        <path class="edge" d="M765 150H795"/><path class="edge" d="M955 150H985"/><path class="edge" d="M1145 150H1175"/>
+        <rect class="node gray" x="35" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="115" y="109">08-05</text><text class="body" x="115" y="135"><tspan x="115">D-1 / bootstrap</tspan><tspan x="115" dy="20">人工盘点 181</tspan><tspan x="115" dy="20">仅提供期初</tspan><tspan x="115" dy="20">不进发布结果</tspan></text>
+        <rect class="node blue" x="225" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="305" y="109">08-06</text><text class="body" x="305" y="135"><tspan x="305">盘点 433</tspan><tspan x="305" dy="20">销售 26,139.76</tspan><tspan x="305" dy="20">毛利 5,689.45</tspan><tspan x="305" dy="20">负钉 119</tspan></text>
+        <rect class="node blue" x="415" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="495" y="109">08-07</text><text class="body" x="495" y="135"><tspan x="495">盘点 456</tspan><tspan x="495" dy="20">销售 26,150.76</tspan><tspan x="495" dy="20">毛利 5,160.93</tspan><tspan x="495" dy="20">负钉 131</tspan></text>
+        <rect class="node blue" x="605" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="685" y="109">08-08</text><text class="body" x="685" y="135"><tspan x="685">盘点 195</tspan><tspan x="685" dy="20">销售 29,503.04</tspan><tspan x="685" dy="20">毛利 5,679.63</tspan><tspan x="685" dy="20">负钉 125</tspan></text>
+        <rect class="node red" x="795" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="875" y="109">08-09</text><text class="body" x="875" y="135"><tspan x="875">人工盘点 0</tspan><tspan x="875" dy="20">销售 25,899.62</tspan><tspan x="875" dy="20">毛利 5,067.27</tspan><tspan x="875" dy="20">负钉 140</tspan></text>
+        <rect class="node blue" x="985" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="1065" y="109">08-10</text><text class="body" x="1065" y="135"><tspan x="1065">盘点 434</tspan><tspan x="1065" dy="20">销售 29,016.58</tspan><tspan x="1065" dy="20">毛利 6,039.11</tspan><tspan x="1065" dy="20">负钉 137</tspan></text>
+        <rect class="node blue" x="1175" y="78" width="160" height="144" rx="15"/>
+        <text class="title" x="1255" y="109">08-11</text><text class="body" x="1255" y="135"><tspan x="1255">盘点 406</tspan><tspan x="1255" dy="20">销售 27,203.94</tspan><tspan x="1255" dy="20">毛利 6,020.30</tspan><tspan x="1255" dy="20">负钉 118</tspan></text>
+
+        <path class="edge-loop" d="M305 222V270H495V222"/><path class="edge-loop" d="M495 222V285H685V222"/><path class="edge-loop" d="M685 222V300H875V222"/><path class="edge-loop" d="M875 222V285H1065V222"/><path class="edge-loop" d="M1065 222V270H1255V222"/>
+        <text class="edge-label" x="780" y="322">每日 end_qty/end_amt 精确成为次日 init_qty/init_amt；08-09 无人工盘点不等于链路断裂</text>
+
+        <rect class="node green" x="72" y="378" width="382" height="156" rx="17"/>
+        <text class="title" x="263" y="411">本次运行规模</text><text class="body" x="263" y="438"><tspan x="263">08-05 预热 + 6 天发布</tspan><tspan x="263" dy="21">输出：88,972 行 × 125 字段</tspan><tspan x="263" dy="21">quarantine：402 条</tspan><tspan x="263" dy="21">10 项会计 hard gate 通过</tspan><tspan x="263" dy="21">服务器生产写入：0</tspan></text>
+        <rect class="node amber" x="519" y="378" width="382" height="156" rx="17"/>
+        <text class="title" x="710" y="411">与 v1.5 的稳定部分</text><text class="body" x="710" y="438"><tspan x="710">SKU 日销售额、销售量：完全一致</tspan><tspan x="710" dy="21">门店日验收金额：6/6 日一致</tspan><tspan x="710" dy="21">SCM：¥7,450.9309，完全一致</tspan><tspan x="710" dy="21">分类：监控平台 08-12 最新映射</tspan><tspan x="710" dy="21">会计 hard gate：10/10 通过</tspan></text>
+        <rect class="node red" x="966" y="378" width="382" height="156" rx="17"/>
+        <text class="title" x="1157" y="411">与 v1.5 的不一致部分</text><text class="body" x="1157" y="438"><tspan x="1157">FM 门店毛利：¥25,621.1455</tspan><tspan x="1157" dy="21">v1.5：¥27,346.4972</tspan><tspan x="1157" dy="21">差额：-¥1,725.3517</tspan><tspan x="1157" dy="21">差率：-6.309%</tspan><tspan x="1157" dy="21">当前仍未通过 ±2% 门禁</tspan></text>
+      </svg>
+    </div>
+  </section>
+
+  <section id="appendix">
+    <div class="section-head"><div><h2>5. 证据附录</h2><p>以下内容服务于复核图中节点，不改变主流程。展开查看具体数值与口径。</p></div></div>
+
+    <details open>
+      <summary>5.1 Publish gate 与隔离原因</summary>
+      <div>
+        <table>
+          <thead><tr><th>项目</th><th>数量</th><th>结论</th></tr></thead>
+          <tbody>
+            <tr><td>ISSUE_COST_EVIDENCE</td><td>193 SKU 日 / 52 SKU</td><td class="bad">FAIL；唯一发布阻塞</td></tr>
+            <tr><td>CATEGORY_SNAPSHOT_EVIDENCE</td><td>监控平台 2026-08-12</td><td class="good">PASS</td></tr>
+            <tr><td>PROCESSING_SELF_RELATION_NOOP</td><td>162</td><td>27 对自环安全忽略</td></tr>
+            <tr><td>MULTIPLE_ACTIVE_PROCESSING_RECIPES</td><td>24</td><td>4 个成品待判断共同/替代</td></tr>
+            <tr><td>PROCESSING_RAW_LOSS_PRIORITY</td><td>17</td><td>生熟联动优先</td></tr>
+            <tr><td>PROCESSING_EXTERNAL_RECEIPT_PRIORITY</td><td>6</td><td>外部验收优先，防重复加工</td></tr>
+            <tr><td>ALLOCATED_RECEIPT</td><td>59 关系日 / 15 对</td><td>B 数量/金额直接验收入账</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details>
+      <summary>5.2 Hard gate 全部通过</summary>
+      <div>
+        <table>
+          <thead><tr><th>检查</th><th>含义</th><th>结果</th></tr></thead>
+          <tbody>
+            <tr><td>NO_NEGATIVE_END_QTY_AMT</td><td>无负期末数量/金额</td><td class="good">PASS</td></tr>
+            <tr><td>SKU_QTY_BALANCE</td><td>SKU 数量方程闭合</td><td class="good">PASS</td></tr>
+            <tr><td>SKU_AMOUNT_BALANCE</td><td>SKU 金额方程闭合</td><td class="good">PASS</td></tr>
+            <tr><td>EXTERNAL_OBSERVATION_CONSERVATION</td><td>外部观测不被内部逻辑篡改</td><td class="good">PASS</td></tr>
+            <tr><td>D1_EXACT_ROLL_FORWARD</td><td>D+1 期初严格等于 D 期末</td><td class="good">PASS</td></tr>
+            <tr><td>INTERNAL_AMOUNT_CONSERVATION</td><td>内部 IN/OUT 金额守恒</td><td class="good">PASS</td></tr>
+            <tr><td>BOM_PARENT_FULLY_TRANSFERRED</td><td>BOM 父品价值完整转出</td><td class="good">PASS</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details>
+      <summary>5.3 每日毛利对比</summary>
+      <div>
+        <table>
+          <thead><tr><th>日期</th><th>销售</th><th>FM 门店毛利</th><th>v1.5 门店毛利</th><th>差率</th><th>负库存钉零成本</th></tr></thead>
+          <tbody>
+            <tr><td>2026-08-06</td><td>26,139.76</td><td>5,689.45</td><td>4,621.22</td><td class="bad">+23.12%</td><td>1,597.07</td></tr>
+            <tr><td>2026-08-07</td><td>26,150.76</td><td>5,160.93</td><td>4,445.41</td><td class="bad">+16.10%</td><td>2,032.17</td></tr>
+            <tr><td>2026-08-08</td><td>29,503.04</td><td>5,679.63</td><td>4,048.31</td><td class="bad">+40.30%</td><td>1,843.43</td></tr>
+            <tr><td>2026-08-09</td><td>25,899.62</td><td>5,067.27</td><td>3,928.62</td><td class="bad">+28.98%</td><td>1,620.82</td></tr>
+            <tr><td>2026-08-10</td><td>29,016.58</td><td>6,039.11</td><td>5,331.03</td><td class="bad">+13.28%</td><td>1,957.14</td></tr>
+            <tr><td>2026-08-11</td><td>27,203.94</td><td>6,020.30</td><td>4,971.90</td><td class="bad">+21.09%</td><td>1,776.79</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <details>
+      <summary>5.4 期初来源分布与当前状态分支</summary>
+      <div class="two-col">
+        <div class="panel">
+          <h3>期初来源</h3>
+          <table><tbody>
+            <tr><td>正常 D-1 / 快照来源</td><td>1,516 行 / qty 15,647.568 / amt 174,137.21</td></tr>
+            <tr><td>null bootstrap → 0</td><td>1,277 行</td></tr>
+            <tr><td>无源记录 → 0</td><td>253 行</td></tr>
+            <tr><td>明确零库存</td><td>144 行</td></tr>
+            <tr><td>负值钉零</td><td>33 行</td></tr>
+            <tr><td>有数量无价格</td><td>8 行 / qty 52 / amt 0</td></tr>
+          </tbody></table>
+        </div>
+        <div class="panel">
+          <h3>期末分支</h3>
+          <table><tbody>
+            <tr><td>normal</td><td>16,081</td></tr>
+            <tr><td>counted</td><td>1,924</td></tr>
+            <tr><td>negative_clamp</td><td>770</td></tr>
+            <tr><td>known_loss</td><td>611</td></tr>
+          </tbody></table>
+          <p>这里有一个刻意保留的事实：<code>day_clear</code> 没有成为第五个库存分支。</p>
+          <p>报损口径：正式已知报损数量来自 <code>know_lost_qty</code>，正式金额按日账 <code>issue_cost</code> 重算；源 <code>know_lost_amt</code> 与上游 <code>unknow_lost_qty/amt</code> 仅用于审计。只有盘点推导的未知损耗进入 <code>store_unknow_lost_amt</code>。</p>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>5.5 CCJ / SSLS 调整量</summary>
+      <div>
+        <table>
+          <thead><tr><th>日期</th><th>CCJ</th><th>SSLS</th></tr></thead>
+          <tbody>
+            <tr><td>2026-08-06</td><td>1,359.13</td><td>355.14</td></tr>
+            <tr><td>2026-08-07</td><td>1,507.84</td><td>569.82</td></tr>
+            <tr><td>2026-08-08</td><td>1,680.14</td><td>555.07</td></tr>
+            <tr><td>2026-08-09</td><td>1,157.00</td><td>440.66</td></tr>
+            <tr><td>2026-08-10</td><td>1,072.36</td><td>290.79</td></tr>
+            <tr><td>2026-08-11</td><td>1,414.37</td><td>537.85</td></tr>
+            <tr><td>合计</td><td>8,190.84</td><td>2,749.33</td></tr>
+          </tbody>
+        </table>
+        <div class="formula">accounting_loss = ¥18,822.6175 known + ¥817.4720 unknown = ¥19,640.0894<br>display_loss = accounting_loss − ¥8,190.8348 CCJ − ¥2,749.3345 SSLS = ¥8,699.9201</div>
+        <p><code>purchase_wastage</code> 在镜像层是最新快照，但业务日期来自每条记录的 <code>created_at</code>；CCJ/SSLS 只改变兼容展示字段，不改变日账库存、issue cost 或内部过账。CCJ 在所有层级加回毛利；SSLS 只在大分类做来源类贷方与熟食类借方，门店总毛利不因 SSLS 转移而改变。</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>5.6 当前真实物理层名称与数据边界</summary>
+      <div class="panel">
+        <p><strong>代码版本：</strong>v0.17；<strong>实际 DuckDB 物理表：</strong>主要仍以 <code>v014_*</code> 命名。这是兼容物理合同，不代表正在跑 v0.14。</p>
+        <p><strong>生产只读：</strong>QDM/StarRocks 源与 v1.5 基准；<strong>本地写入：</strong>本地 DuckDB 试跑与 HTML 报告；<strong>服务器/生产写入：</strong>0。</p>
+        <p><strong>分类证据：</strong>经营监控平台 <code>2026-08-12 / MONITORING_PLATFORM_LATEST</code>，整窗统一映射；1,449 SKU 命中，11 SKU 回退同次运行最新 dim_goods。</p>
+        <p><strong>最新快照源：</strong>商品、库存池等部分表以最新可用日解释整段历史，必须与真正历史快照口径区分。</p>
+      </div>
+    </details>
+  </section>
+
+  <footer class="footer">生成日期：2026-08-12｜用途：人工逻辑审查｜结论边界：本地试跑和生产只读对照，不构成生产发布。</footer>
+</div>
+<script>
+(() => {
+  const svg = document.getElementById('megaSvg');
+  if (!svg) return;
+  const viewport = document.getElementById('megaViewport');
+  const canvas = document.getElementById('megaCanvas');
+  const detail = document.getElementById('megaDetail');
+  const zoomValue = document.getElementById('megaZoomValue');
+  const search = document.getElementById('megaSearch');
+  const mini = document.getElementById('megaMini');
+  const miniCtx = mini.getContext('2d');
+  const WORLD = { w: 3600, h: 2880 };
+  let view = { x: 0, y: 0, w: WORLD.w, h: WORLD.h };
+  let drag = null;
+  let riskIndex = -1;
+  const risks = ['dimensions', 'evidence-missing', 'zero-cost', 'branch', 'loss-double-risk', 'gates', 'processing-state-risk'];
+
+  function applyView() {
+    svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`);
+    zoomValue.textContent = `${Math.round(WORLD.w / view.w * 100)}%`;
+    drawMini();
+  }
+  function fit() {
+    view = { x: 0, y: 0, w: WORLD.w, h: WORLD.h };
+    clearSelected();
+    applyView();
+  }
+  function clampView() {
+    view.w = Math.max(520, Math.min(WORLD.w, view.w));
+    view.h = Math.max(390, Math.min(WORLD.h, view.h));
+    view.x = Math.max(0, Math.min(WORLD.w - view.w, view.x));
+    view.y = Math.max(0, Math.min(WORLD.h - view.h, view.y));
+  }
+  function zoomAt(factor, clientX, clientY) {
+    const rect = svg.getBoundingClientRect();
+    const px = (clientX - rect.left) / rect.width;
+    const py = (clientY - rect.top) / rect.height;
+    const worldX = view.x + px * view.w;
+    const worldY = view.y + py * view.h;
+    view.w *= factor;
+    view.h *= factor;
+    clampView();
+    view.x = worldX - px * view.w;
+    view.y = worldY - py * view.h;
+    clampView();
+    applyView();
+  }
+  function focusNode(node, width = 1080) {
+    const box = node.getBBox();
+    view.w = Math.min(WORLD.w, width);
+    view.h = view.w * (viewport.clientHeight / Math.max(1, viewport.clientWidth));
+    view.x = box.x + box.width / 2 - view.w / 2;
+    view.y = box.y + box.height / 2 - view.h / 2;
+    clampView();
+    clearSelected();
+    node.classList.add('selected');
+    detail.innerHTML = `<strong>${escapeHtml(node.dataset.title || '')}</strong>　${escapeHtml(node.dataset.detail || '')}`;
+    applyView();
+  }
+  function focusRect(x, y, w, h) {
+    let targetW = Math.min(WORLD.w, w * 1.03);
+    let targetH = Math.min(WORLD.h, h * 1.24);
+    view.w = targetW;
+    view.h = targetH;
+    view.x = x + w / 2 - targetW / 2;
+    view.y = y + h / 2 - targetH / 2;
+    clampView(); clearSelected(); applyView();
+  }
+  function clearSelected() {
+    canvas.querySelectorAll('.mega-node.selected').forEach(n => n.classList.remove('selected'));
+  }
+  function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  }
+  function nodeByKey(key) {
+    return canvas.querySelector(`.mega-node[data-key="${key}"]`);
+  }
+  function drawMini() {
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = mini.clientWidth || 175;
+    const cssH = mini.clientHeight || 205;
+    if (mini.width !== Math.round(cssW * dpr) || mini.height !== Math.round(cssH * dpr)) {
+      mini.width = Math.round(cssW * dpr); mini.height = Math.round(cssH * dpr);
+    }
+    miniCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    miniCtx.clearRect(0, 0, cssW, cssH);
+    const sx = cssW / WORLD.w, sy = cssH / WORLD.h;
+    miniCtx.fillStyle = '#f8fbfd'; miniCtx.fillRect(0, 0, cssW, cssH);
+    const laneColors = ['#e8f3ff','#f1efff','#e9f8f1','#fff6dc','#fff0f0'];
+    [[28,28,3544,330],[28,382,3544,455],[28,862,3544,455],[28,1342,3544,610],[28,1977,3544,875]].forEach((r,i) => {
+      miniCtx.fillStyle = laneColors[i]; miniCtx.fillRect(r[0]*sx,r[1]*sy,r[2]*sx,r[3]*sy);
+    });
+    miniCtx.strokeStyle = '#397ba9'; miniCtx.lineWidth = 1.5;
+    miniCtx.fillStyle = 'rgba(89,145,184,.12)';
+    miniCtx.fillRect(view.x*sx,view.y*sy,view.w*sx,view.h*sy);
+    miniCtx.strokeRect(view.x*sx,view.y*sy,view.w*sx,view.h*sy);
+  }
+
+  svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    zoomAt(e.deltaY > 0 ? 1.14 : 0.86, e.clientX, e.clientY);
+  }, { passive: false });
+  svg.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    svg.setPointerCapture(e.pointerId);
+    drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+    svg.classList.add('dragging');
+  });
+  svg.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const rect = svg.getBoundingClientRect();
+    view.x = drag.vx - (e.clientX - drag.x) * view.w / rect.width;
+    view.y = drag.vy - (e.clientY - drag.y) * view.h / rect.height;
+    clampView(); applyView();
+  });
+  function endDrag() { drag = null; svg.classList.remove('dragging'); }
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+  canvas.querySelectorAll('.mega-node').forEach(node => {
+    let downPoint = null;
+    node.addEventListener('pointerdown', e => { downPoint = { x: e.clientX, y: e.clientY }; });
+    node.addEventListener('click', e => {
+      if (!downPoint || (Math.abs(downPoint.x - e.clientX) < 5 && Math.abs(downPoint.y - e.clientY) < 5)) {
+        focusNode(node, Math.max(900, Math.min(1500, view.w)));
+      }
+      downPoint = null;
+    });
+    node.addEventListener('dblclick', e => { e.stopPropagation(); focusNode(node, 950); });
+  });
+  document.querySelectorAll('[data-mega-action]').forEach(button => button.addEventListener('click', () => {
+    const action = button.dataset.megaAction;
+    const rect = svg.getBoundingClientRect();
+    if (action === 'fit') fit();
+    if (action === 'in') zoomAt(.78, rect.left + rect.width/2, rect.top + rect.height/2);
+    if (action === 'out') zoomAt(1.28, rect.left + rect.width/2, rect.top + rect.height/2);
+    if (action === 'loss') focusNode(nodeByKey('loss-impact'), 1400);
+    if (action === 'risk') { riskIndex = (riskIndex + 1) % risks.length; focusNode(nodeByKey(risks[riskIndex]), 1000); }
+  }));
+  const phaseRects = {
+    source: [28, 28, 3544, 330],
+    relation: [28, 382, 3544, 455],
+    event: [28, 862, 3544, 455],
+    ledger: [28, 1342, 3544, 610],
+    profit: [28, 1977, 3544, 875]
+  };
+  document.querySelectorAll('[data-mega-phase]').forEach(button => button.addEventListener('click', () => {
+    focusRect(...phaseRects[button.dataset.megaPhase]);
+  }));
+  search.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const q = search.value.trim().toLowerCase();
+    if (!q) return;
+    const found = [...canvas.querySelectorAll('.mega-node')].find(n => `${n.dataset.title} ${n.dataset.detail}`.toLowerCase().includes(q));
+    if (found) focusNode(found, 1050);
+    else detail.textContent = `未找到包含“${search.value.trim()}”的节点。`;
+  });
+  mini.addEventListener('click', e => {
+    const rect = mini.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * WORLD.w;
+    const y = (e.clientY - rect.top) / rect.height * WORLD.h;
+    view.x = x - view.w/2; view.y = y - view.h/2; clampView(); applyView();
+  });
+  window.addEventListener('resize', () => { clampView(); applyView(); });
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') fit(); });
+  fit();
+})();
+</script>
+</body>
+</html>

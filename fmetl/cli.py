@@ -17,6 +17,9 @@ from fmetl.mirror.v014_source import (
 )
 from fmetl.mirror.v014_stage import build_v014_stage_bundle, persist_v014_stage_bundle
 from fmetl.connectors import QdmApi
+from fmetl.connectors.category_mapping import (
+    CategoryMappingSource, load_category_mapping_snapshot,
+)
 from fmetl.connectors.processing_relations import ProcessingRelationSource
 from fmetl.validation.preflight import SYNC_SCRIPT_SHA256, validate_mirror_registry, verify_sync_script
 from fmetl.validation.run_v014 import run_v014_shadow_week
@@ -70,6 +73,13 @@ def _processing_relations(path: Path | None):
     return frame
 
 
+def _category_snapshot(path: Path | None):
+    return (
+        CategoryMappingSource().fetch_latest_once()
+        if path is None else load_category_mapping_snapshot(path)
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="fmetl development CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -102,6 +112,10 @@ def main() -> int:
     shadow.add_argument(
         "--processing-json", type=Path,
         help="optional dated processing-relation export; otherwise read the Foodmart API once",
+    )
+    shadow.add_argument(
+        "--category-json", type=Path,
+        help="optional saved monitoring-platform effective mapping; otherwise fetch latest once",
     )
     shadow.add_argument(
         "--reuse-source-cache", action="store_true",
@@ -180,6 +194,7 @@ def main() -> int:
             start=args.start,
             source_db=args.stage_db,
             output_db=args.db,
+            category_snapshot=_category_snapshot(args.category_json),
         )
         publishable = is_publishable(result.validation)
         print(json.dumps({

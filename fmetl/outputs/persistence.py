@@ -12,6 +12,7 @@ from fmetl.contracts.v014 import OUTPUT_CONTRACT
 INTERNAL_TABLES = (
     "v014_relation_registry", "v014_relation_resolution", "v014_internal_posting",
     "v014_sku_daily", "v014_quarantine", "v014_run_manifest", "v014_validation_result",
+    "v014_category_snapshot", "v014_category_mapping_audit",
 )
 
 
@@ -60,6 +61,8 @@ def persist_v014_shadow(
     quarantine: pd.DataFrame,
     run_manifest: pd.DataFrame,
     validation_result: pd.DataFrame,
+    category_snapshot: pd.DataFrame | None = None,
+    category_mapping_audit: pd.DataFrame | None = None,
 ) -> None:
     """Atomically replace only local v0.14 shadow tables."""
     db_path = Path(db_path)
@@ -96,6 +99,10 @@ def persist_v014_shadow(
             ("v014_validation_result", validation_result),
         ):
             _replace(conn, table, frame)
+        if category_snapshot is not None:
+            _replace(conn, "v014_category_snapshot", category_snapshot)
+        if category_mapping_audit is not None:
+            _replace(conn, "v014_category_mapping_audit", category_mapping_audit)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")

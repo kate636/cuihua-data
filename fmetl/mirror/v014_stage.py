@@ -281,7 +281,6 @@ def _bom_stage(raw: pd.DataFrame) -> pd.DataFrame:
 
 def _explicit_convert_stage(
     relation: pd.DataFrame,
-    events: pd.DataFrame,
 ) -> pd.DataFrame:
     columns = (
         "store_id", "business_date", "source_article_id", "target_article_id",
@@ -296,23 +295,18 @@ def _explicit_convert_stage(
     }).copy()
     keys = ["store_id", "business_date", "source_article_id", "target_article_id"]
     frame = _as_text(frame, keys)
-    observed: set[tuple[str, str, str, str]] = set()
-    if not events.empty:
-        event = events.rename(columns={
-            "shop_id": "store_id", "inc_day": "business_date",
-            "receive_sku_code": "source_article_id", "sale_sku_code": "target_article_id",
-        }).copy()
-        event = _as_text(event, keys)
-        observed = set(event[keys].itertuples(index=False, name=None))
     parent_rate = pd.to_numeric(frame["parent_rate"], errors="coerce")
     sub_rate = pd.to_numeric(frame["sub_rate"], errors="coerce")
     reciprocal = parent_rate.mul(sub_rate).sub(1.0).abs().le(0.001)
     frame["convert_rate"] = parent_rate.where(parent_rate.gt(0) & reciprocal)
     frame["cost_rate"] = 1.0
-    frame["actual_event"] = [tuple(row) in observed for row in frame[keys].to_numpy()]
-    # The mirror contains a static unit relation, not proof that every receipt converts.
-    frame["fixed_rule"] = False
-    frame["approved"] = frame["actual_event"] & frame["convert_rate"].notna()
+    frame["actual_event"] = False
+    # article_convert is the formal fixed A->B rule.  There is no separate
+    # dated convert-detail fact.  On a receipt day, purchase_di already carries
+    # the allocated B quantity and amount; this rule validates its A->B ratio
+    # and must not create a second internal OUT/IN event.
+    frame["fixed_rule"] = frame["convert_rate"].notna()
+    frame["approved"] = frame["fixed_rule"]
     frame["effective_from"] = frame["business_date"]
     frame["effective_to"] = frame["business_date"]
     return frame[list(columns)]
@@ -339,83 +333,44 @@ def _exclude_bom_backed_explicit_relations(
     ].reset_index(drop=True)
 
 
-def _stock_convert_events(raw: pd.DataFrame) -> pd.DataFrame:
-    columns = (
-        "store_id", "business_date", "event_group_id", "source_article_id",
-        "target_article_id", "source_qty", "target_qty", "source_common_qty",
-        "target_common_qty", "amount_allocation_ratio", "quantity_source",
-    )
-    if raw.empty:
-        return _empty(columns)
-    frame = raw.rename(columns={
-        "shop_id": "store_id", "inc_day": "business_date", "id": "event_group_id",
-        "receive_sku_code": "source_article_id", "sale_sku_code": "target_article_id",
-        "receive_qty": "source_qty", "stock_qty": "target_qty",
-    }).copy()
-    frame["source_qty"] = pd.to_numeric(frame["source_qty"], errors="coerce")
-    frame["target_qty"] = pd.to_numeric(frame["target_qty"], errors="coerce")
-    rate = pd.to_numeric(frame["convert_rate"], errors="coerce")
-    valid = (
-        frame[["source_qty", "target_qty"]].notna().all(axis=1)
-        & frame["source_qty"].ge(0) & frame["target_qty"].ge(0) & rate.gt(0)
-    )
-    frame = frame.loc[valid].copy()
-    rate = rate.loc[valid]
-    frame["source_common_qty"] = frame["source_qty"]
-    frame["target_common_qty"] = frame["target_qty"] / rate
-    frame["amount_allocation_ratio"] = 1.0
-    frame["quantity_source"] = "STOCK_CONVERT_DETAIL"
-    frame["event_group_id"] = "CONVERT|" + frame["event_group_id"].astype(str)
-    return frame[list(columns)]
-
-
-def _exclude_receipt_backed_conversion_events(
-    events: pd.DataFrame,
+def _observed_receipt_relation_pairs(
     purchase: pd.DataFrame,
+    receive_sale: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Do not post a conversion twice when purchase already lands on the sale SKU.
-
-    ``purchase_di`` is the authoritative store receipt fact.  For rows where
-    its parent/child pair matches a same-day stock-convert event, the allocated
-    child receipt already contains the converted quantity and cost.  The
-    convert detail remains relation evidence, but is not another inventory
-    movement.  A convert event without a matching receipt allocation remains a
-    real internal movement and is kept for the ledger.
-    """
-    if events.empty or purchase.empty:
-        return events.copy()
-    keys = ["store_id", "business_date", "source_article_id", "target_article_id"]
-    receipt = purchase.rename(columns={
-        "article_id": "source_article_id",
-        "sale_article_id": "target_article_id",
-    }).copy()
-    receipt = _as_text(receipt, keys)
-    receipt_qty = pd.to_numeric(receipt["sale_article_qty"], errors="coerce").fillna(0.0)
-    receipt_amt = pd.to_numeric(
-        receipt["sale_article_purchase_amt"], errors="coerce"
-    ).fillna(0.0)
-    receipt_pairs = receipt.loc[
-        receipt_qty.abs().gt(0.000001) | receipt_amt.abs().gt(0.000001), keys
-    ].drop_duplicates()
-    if receipt_pairs.empty:
-        return events.copy()
-    probe = events.merge(
-        receipt_pairs.assign(_receipt_backed=True),
-        on=keys,
-        how="left",
-        validate="many_to_one",
-    )
-    return probe.loc[probe["_receipt_backed"].isna(), events.columns].reset_index(drop=True)
-
-
-def _observed_receipt_relation_pairs(purchase: pd.DataFrame) -> pd.DataFrame:
-    """Return dated receipt pairs backed by a non-zero quantity or amount."""
+    """Return dated receipt pairs with observed A and B quantities when present."""
     columns = ["store_id", "business_date", "article_id", "sale_article_id"]
     qty = pd.to_numeric(purchase["sale_article_qty"], errors="coerce").fillna(0.0)
     amt = pd.to_numeric(
         purchase["sale_article_purchase_amt"], errors="coerce"
     ).fillna(0.0)
-    return purchase.loc[qty.abs().gt(0.000001) | amt.abs().gt(0.01), columns]
+    observed = purchase.loc[
+        qty.abs().gt(0.000001) | amt.abs().gt(0.01),
+        columns + ["sale_article_qty", "sale_article_purchase_amt"],
+    ].copy()
+    observed = observed.rename(columns={
+        "sale_article_qty": "external_receipt_target_qty",
+        "sale_article_purchase_amt": "external_receipt_target_amt",
+    })
+    observed["external_receipt_source_qty"] = np.nan
+    if receive_sale is not None and not receive_sale.empty:
+        bridge = receive_sale.rename(columns={"inc_day": "business_date"}).copy()
+        bridge = _as_text(bridge, columns)
+        bridge["inbound_qty"] = pd.to_numeric(
+            bridge["inbound_qty"], errors="coerce"
+        )
+        bridge = bridge.groupby(columns, as_index=False, dropna=False).agg(
+            external_receipt_source_qty=("inbound_qty", "sum")
+        )
+        observed = observed.drop(
+            columns="external_receipt_source_qty"
+        ).merge(bridge, on=columns, how="left", validate="many_to_one")
+    observed["external_receipt_quantity_rate"] = np.where(
+        observed["external_receipt_source_qty"].abs().gt(0.000001),
+        observed["external_receipt_target_qty"]
+        / observed["external_receipt_source_qty"],
+        np.nan,
+    )
+    return observed
 
 
 def _mark_receipt_backed_processing(
@@ -474,15 +429,6 @@ def _mark_receipt_backed_processing(
     return output.drop(
         columns=["_external_receipt_qty", "_external_receipt_amt"]
     )
-
-
-def _flow_backed_explicit_pairs(explicit: pd.DataFrame) -> pd.DataFrame:
-    """Exclude static compatibility rows that do not prove a dated flow."""
-    if explicit.empty:
-        return explicit.copy()
-    return explicit.loc[
-        explicit["actual_event"].map(_bool) | explicit["fixed_rule"].map(_bool)
-    ].copy()
 
 
 def _bom_events(receive_sale: pd.DataFrame, bom: pd.DataFrame) -> pd.DataFrame:
@@ -1044,7 +990,7 @@ def build_v014_stage_bundle(
     source = mirrors.frames
     required = {
         "sales", "store_receipt", "known_loss", "inventory_detail", "day_clear",
-        "receive_sale", "bom_relation", "article_convert", "stock_convert_detail",
+        "receive_sale", "bom_relation", "article_convert",
         "product_group", "goods", "store_profile", "article_sale", "supply_chain",
         "order_saleability", "purchase_wastage", "order_offline", "order_online",
         "inventory_pool", "price",
@@ -1067,52 +1013,35 @@ def build_v014_stage_bundle(
     # confirmed processing row into a count-gated packaging flow.  Packaging
     # remains exclusive to the dedicated article-convert evidence below.
     explicit = _explicit_convert_stage(
-        source["article_convert"], source["stock_convert_detail"]
+        source["article_convert"]
     )
     explicit = _exclude_bom_backed_explicit_relations(explicit, bom)
     purchase = source["store_receipt"].copy()
-    stock_conversion_evidence = _stock_convert_events(source["stock_convert_detail"])
-    stock_conversion_events = _exclude_receipt_backed_conversion_events(
-        stock_conversion_evidence, purchase
-    )
     bom_events = _bom_events(source["receive_sale"], bom)
-    event_frames = [
-        frame for frame in (bom_events, stock_conversion_events)
-        if not frame.empty
-    ]
-    conversion_events = (
-        pd.concat(event_frames, ignore_index=True)
-        if event_frames else bom_events.copy()
-    )
+    conversion_events = bom_events.copy()
 
     candidate_frames: list[pd.DataFrame] = []
     # ``purchase_di`` is a dense daily SKU snapshot.  Only rows with an
     # observed receipt amount or quantity are evidence that this source/target
     # pair participated in the day's receipt flow; zero snapshots must not
     # create thousands of unresolved relation candidates.
-    observed_purchase = _observed_receipt_relation_pairs(purchase)
+    observed_purchase = _observed_receipt_relation_pairs(
+        purchase, source["receive_sale"]
+    )
     purchase_candidates = observed_purchase[
-        ["store_id", "business_date", "article_id", "sale_article_id"]
+        [
+            "store_id", "business_date", "article_id", "sale_article_id",
+            "external_receipt_source_qty", "external_receipt_target_qty",
+            "external_receipt_target_amt", "external_receipt_quantity_rate",
+        ]
     ].rename(
         columns={"article_id": "source_article_id", "sale_article_id": "target_article_id"}
     )
     candidate_frames.append(purchase_candidates)
-    if not stock_conversion_evidence.empty:
-        candidate_frames.append(stock_conversion_evidence[[
-            "store_id", "business_date", "source_article_id", "target_article_id",
-        ]])
     if not processing.empty:
         candidate_frames.append(processing.rename(columns={
             "raw_article_id": "source_article_id", "finished_article_id": "target_article_id",
         })[["store_id", "business_date", "source_article_id", "target_article_id"]])
-    if not explicit.empty:
-        # A static article-convert row proves compatibility only.  It enters
-        # the dated posting registry only when an actual event or an approved
-        # fixed conversion rule exists.
-        explicit_event = _flow_backed_explicit_pairs(explicit)
-        candidate_frames.append(explicit_event[[
-            "store_id", "business_date", "source_article_id", "target_article_id",
-        ]])
     candidates = pd.concat(candidate_frames, ignore_index=True)
     candidate_keys = ["store_id", "business_date", "source_article_id", "target_article_id"]
     candidates = _as_text(candidates, candidate_keys).drop_duplicates(candidate_keys)
@@ -1261,10 +1190,24 @@ def build_v014_stage_bundle(
     )
     completeness = mirrors.completeness.copy()
     completeness["source_name"] = completeness["source_name"].astype(str)
+    product_group = source["product_group"].copy()
+    weight = goods[["article_id", "unit_weight", "sale_unit"]].copy()
+    weight["article_id"] = weight["article_id"].astype(str)
+    conflicting_weight = weight.groupby("article_id").agg(
+        unit_weight_count=("unit_weight", "nunique"),
+        sale_unit_count=("sale_unit", "nunique"),
+    )
+    if conflicting_weight.gt(1).any(axis=1).any():
+        raise ValueError("latest goods has conflicting unit weight or sale unit per SKU")
+    weight = weight.drop_duplicates("article_id")
+    product_group["article_id"] = product_group["article_id"].astype(str)
+    product_group = product_group.merge(
+        weight, on="article_id", how="left", validate="many_to_one"
+    )
     frames = {
         "source_manifest": mirrors.manifest.copy(),
         "source_completeness": completeness,
-        "product_group": source["product_group"].copy(),
+        "product_group": product_group,
         "relation_candidates": candidates,
         "bom": bom,
         "processing": processing,

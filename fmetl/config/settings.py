@@ -24,6 +24,7 @@ class Settings:
     qdm_secret_key: str
     qdm_version: str
     processing_relation_url: str = "http://47.115.213.115:8080/api/proc-rel/export"
+    category_mapping_url: str = "http://47.115.213.115:8080/api/sku-category/effective-mapping"
     page_size: int = 20_000
     valid_day_bf19_threshold: float = 500.0
 
@@ -45,6 +46,10 @@ class Settings:
             processing_relation_url=os.getenv(
                 "FM_PROCESSING_RELATION_URL",
                 "http://47.115.213.115:8080/api/proc-rel/export",
+            ),
+            category_mapping_url=os.getenv(
+                "FM_CATEGORY_MAPPING_URL",
+                "http://47.115.213.115:8080/api/sku-category/effective-mapping",
             ),
         )
 

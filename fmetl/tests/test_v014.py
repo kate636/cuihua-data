@@ -36,9 +36,7 @@ from fmetl.mirror.v014_source import (
 from fmetl.mirror.v014_stage import (
     _bom_events,
     _build_day_clear_frame,
-    _exclude_receipt_backed_conversion_events,
     _exclude_bom_backed_explicit_relations,
-    _flow_backed_explicit_pairs,
     _mark_receipt_backed_processing,
     _observed_receipt_relation_pairs,
     _processing_stage,
@@ -397,23 +395,6 @@ class V014RelationTests(unittest.TestCase):
             {"store_id": "A3XV", "business_date": "2026-07-20", "source_article_id": "A", "target_article_id": "B"},
         ])
 
-    def test_receipt_backed_convert_is_evidence_not_a_second_inventory_flow(self) -> None:
-        events = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "event_group_id": "CONVERT|1", "source_article_id": "A",
-            "target_article_id": "B", "source_qty": 3.0, "target_qty": 3.0,
-            "source_common_qty": 3.0, "target_common_qty": 3.0,
-            "amount_allocation_ratio": 1.0,
-            "quantity_source": "STOCK_CONVERT_DETAIL",
-        }])
-        purchase = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "article_id": "A", "sale_article_id": "B",
-            "sale_article_qty": 2.83, "sale_article_purchase_amt": 135.64,
-        }])
-        kept = _exclude_receipt_backed_conversion_events(events, purchase)
-        self.assertTrue(kept.empty)
-
     def test_only_posted_cross_code_receipt_marks_processing_priority(self) -> None:
         processing = pd.DataFrame([
             {
@@ -454,18 +435,6 @@ class V014RelationTests(unittest.TestCase):
         observed = _observed_receipt_relation_pairs(purchase)
         self.assertEqual([("C", "D")], list(observed[["article_id", "sale_article_id"]].itertuples(index=False, name=None)))
 
-    def test_static_convert_without_event_is_not_a_dated_flow_candidate(self) -> None:
-        explicit = pd.DataFrame([
-            {"source_article_id": "A", "target_article_id": "B", "actual_event": False, "fixed_rule": False},
-            {"source_article_id": "C", "target_article_id": "D", "actual_event": True, "fixed_rule": False},
-            {"source_article_id": "E", "target_article_id": "F", "actual_event": False, "fixed_rule": True},
-        ])
-        observed = _flow_backed_explicit_pairs(explicit)
-        self.assertEqual(
-            [("C", "D"), ("E", "F")],
-            list(observed[["source_article_id", "target_article_id"]].itertuples(index=False, name=None)),
-        )
-
     def test_group_identity_is_candidate_not_flow(self) -> None:
         groups = freeze_product_group_snapshot(self.groups_raw)
         pairs = build_product_group_candidates(self.candidates, groups)
@@ -478,6 +447,54 @@ class V014RelationTests(unittest.TestCase):
             "PRODUCT_GROUP_CONVERSION_EVIDENCE_MISSING",
             quarantine.iloc[0]["reason_code"],
         )
+
+    def test_allocated_receipt_uses_observed_ratio_and_weight_only_as_audit(self) -> None:
+        raw = self.groups_raw.copy()
+        raw["unit_weight"] = [1.0, 0.25, 1.0]
+        raw["sale_unit"] = ["袋", "份", "袋"]
+        candidates = self.candidates.assign(
+            external_receipt_source_qty=2.0,
+            external_receipt_target_qty=8.0,
+            external_receipt_target_amt=80.0,
+            external_receipt_quantity_rate=4.0,
+        )
+        pairs = build_product_group_candidates(
+            candidates, freeze_product_group_snapshot(raw)
+        )
+        registry, quarantine = resolve_relation_registry(
+            candidates, product_group_pairs=pairs, relation_version="r1"
+        )
+        self.assertEqual(4.0, pairs.iloc[0]["product_weight_quantity_rate"])
+        self.assertEqual("ALLOCATED_RECEIPT", registry.iloc[0]["relation_type"])
+        self.assertEqual(4.0, registry.iloc[0]["quantity_rate"])
+        self.assertEqual("EXTERNAL_DIRECT", registry.iloc[0]["posting_mode"])
+        self.assertFalse(bool(registry.iloc[0]["formal_flow_allowed"]))
+        self.assertTrue(quarantine.empty)
+
+    def test_article_convert_confirms_allocated_receipt_without_convert_detail(self) -> None:
+        candidates = self.candidates.assign(
+            external_receipt_source_qty=2.0,
+            external_receipt_target_qty=8.0,
+            external_receipt_target_amt=80.0,
+            external_receipt_quantity_rate=4.0,
+        )
+        convert = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "source_article_id": "A", "target_article_id": "B",
+            "effective_from": "2026-07-20", "effective_to": "2026-07-20",
+            "actual_event": False, "fixed_rule": True,
+            "convert_rate": 4.0, "cost_rate": 1.0, "approved": True,
+        }])
+        registry, quarantine = resolve_relation_registry(
+            candidates, explicit_convert=convert, relation_version="r1"
+        )
+        row = registry.iloc[0]
+        self.assertEqual("ALLOCATED_RECEIPT", row["relation_type"])
+        self.assertEqual(4.0, row["quantity_rate"])
+        self.assertEqual("EXTERNAL_DIRECT", row["posting_mode"])
+        self.assertFalse(bool(row["formal_flow_allowed"]))
+        self.assertIn("article_convert_ratio", row["evidence_source"])
+        self.assertTrue(quarantine.empty)
 
     def test_formal_type_conflict_is_quarantined(self) -> None:
         bom = pd.DataFrame([{
@@ -667,6 +684,28 @@ class V014ProcessingTests(unittest.TestCase):
         self.assertEqual(1, len(plan.sources))
         self.assertEqual(1, len(plan.targets))
         self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
+
+    def test_multiple_relation_ids_need_explicit_recipe_group_evidence(self) -> None:
+        finished, recipes, registry = self._inputs()
+        second = recipes.copy()
+        second["relation_id"] = "P2"
+        second["raw_article_id"] = "R2"
+        second["raw_qty"] = 0.5
+        recipes = pd.concat([recipes, second], ignore_index=True)
+        second_registry = registry.copy()
+        second_registry["source_article_id"] = "R2"
+        registry = pd.concat([registry, second_registry], ignore_index=True)
+
+        plan = infer_processing_postings(
+            finished, recipes, registry, relation_snapshot_id="r1"
+        )
+
+        self.assertTrue(plan.targets.empty)
+        self.assertTrue(plan.sources.empty)
+        self.assertEqual(
+            "MULTIPLE_ACTIVE_PROCESSING_RECIPES",
+            plan.quarantined.iloc[0]["reason_code"],
+        )
 
     def test_missing_count_uses_sales_and_ordinary_loss_backflush(self) -> None:
         plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")

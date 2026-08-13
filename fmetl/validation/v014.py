@@ -242,27 +242,34 @@ def validate_category_evidence(
     start_date: str,
     end_date: str,
 ) -> pd.DataFrame:
-    """Require dated immutable category evidence before release.
+    """Require auditable category evidence before release.
 
     Legacy static rules remain deterministic and can support diagnostics. They
     cannot prove the classification state of a later business day.
     """
     declared_immutable = mapper.evidence_status == "DATED_IMMUTABLE_SNAPSHOT"
     covers_window = bool(
-        mapper.snapshot_start
-        and mapper.snapshot_end
-        and mapper.snapshot_start <= start_date
-        and mapper.snapshot_end >= end_date
+        mapper.snapshot_start and mapper.snapshot_end
+        and mapper.snapshot_start <= start_date and mapper.snapshot_end >= end_date
     )
-    failures = 0 if declared_immutable and covers_window else 1
+    latest_platform = mapper.evidence_status == "MONITORING_PLATFORM_LATEST_SNAPSHOT"
+    latest_not_older_than_run = bool(
+        mapper.snapshot_end and mapper.snapshot_end >= end_date
+    )
+    failures = 0 if (
+        (declared_immutable and covers_window)
+        or (latest_platform and latest_not_older_than_run)
+    ) else 1
     return pd.DataFrame([{
         "check_name": "CATEGORY_SNAPSHOT_EVIDENCE",
         "passed": failures == 0,
         "failure_count": failures,
         "detail": (
-            "category mapping must be a dated immutable snapshot covering "
-            f"{start_date}..{end_date}; status={mapper.evidence_status}, "
-            f"coverage={mapper.snapshot_start or '-'}..{mapper.snapshot_end or '-'}"
+            "category mapping must be either a dated snapshot covering the run "
+            "or the monitoring platform's latest healthy snapshot uniformly "
+            f"applied to the run; run={start_date}..{end_date}, "
+            f"status={mapper.evidence_status}, "
+            f"snapshot={mapper.snapshot_start or '-'}..{mapper.snapshot_end or '-'}"
         ),
         "gate_type": "PUBLISH",
     }])

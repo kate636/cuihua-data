@@ -14,7 +14,8 @@ from fmetl.validation.v014 import (
     validate_publishability,
     validate_v014_ledger,
 )
-from fmetl.master_data.category import load_category_mapper
+from fmetl.master_data.category import load_category_mapper, mapper_from_latest_snapshot
+from fmetl.connectors.category_mapping import _snapshot_from_payload
 
 
 def _activity(article_ids: list[str]) -> pd.DataFrame:
@@ -61,6 +62,34 @@ class ShadowLedgerTests(unittest.TestCase):
             mapper,
             start_date="2026-08-03",
             end_date="2026-08-04",
+        )
+        self.assertTrue(bool(gate.iloc[0]["passed"]))
+
+    def test_latest_platform_category_is_uniformly_applied_to_earlier_window(self) -> None:
+        payload = {
+            "business_date": "2026-08-12", "generated_at": "2026-08-13 09:48:17",
+            "version": 1, "stale": False, "sync_error": None,
+            "items": [{
+                "article_id": "A",
+                "category_level1_description": "标品类",
+                "category_level2_description": "饮料类",
+                "category_level3_description": "茶饮类",
+            }],
+        }
+        mapper = mapper_from_latest_snapshot(
+            _snapshot_from_payload(payload, source_url="test://category")
+        )
+        mapped = mapper.map_frame(pd.DataFrame([{
+            "article_id": "A", "business_date": "2026-08-06",
+            "category_level1_description": "旧类",
+            "category_level2_description": "旧中类",
+            "category_level3_description": "旧小类", "sale_unit": "瓶",
+        }]))
+        self.assertEqual("水饮类", mapped.iloc[0]["report_category_name"])
+        self.assertEqual("饮料类", mapped.iloc[0]["category_level2_description"])
+        self.assertEqual("MONITORING_PLATFORM_LATEST", mapped.iloc[0]["category_mapping_source"])
+        gate = validate_category_evidence(
+            mapper, start_date="2026-08-06", end_date="2026-08-11"
         )
         self.assertTrue(bool(gate.iloc[0]["passed"]))
 

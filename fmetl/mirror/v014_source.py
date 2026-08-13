@@ -14,10 +14,8 @@ from fmetl.mirror.registry import EXTRACTION_CONTRACTS, HIVE_SOURCE_BY_MIRROR
 from fmetl.validation.manifest import stable_frame_checksum
 
 
-# These are original observations or dimensions mirrored from Hive.  The two
-# application-owned sources (product_group and stock_convert_detail) are kept
-# here because they are relationship evidence, never because they are allowed
-# to replace a Hive fact.
+# These are original observations or dimensions mirrored from Hive. Product
+# group is application-owned identity evidence; it never replaces a Hive fact.
 DAILY_SOURCE_KEYS: tuple[str, ...] = (
     "sales",
     "store_receipt",
@@ -40,7 +38,6 @@ DAILY_SOURCE_KEYS: tuple[str, ...] = (
     "price",
     "inventory_pool",
     "product_group",
-    "stock_convert_detail",
 )
 
 LATEST_SOURCE_KEYS: tuple[str, ...] = ("goods", "store_profile", "purchase_wastage")

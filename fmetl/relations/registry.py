@@ -54,8 +54,9 @@ def freeze_product_group_snapshot(raw: pd.DataFrame) -> pd.DataFrame:
         if conflicts.any():
             bad = conflicts[conflicts].index.tolist()[:20]
             raise V014RelationError(f"article maps to multiple groups on one day: {bad}")
+    optional = [column for column in ("unit_weight", "sale_unit") if column in frame]
     return frame[
-        ["business_date", "article_id", "article_group_id", "article_group_name"]
+        ["business_date", "article_id", "article_group_id", "article_group_name", *optional]
     ].drop_duplicates(keys, ignore_index=True)
 
 
@@ -92,6 +93,8 @@ def build_product_group_candidates(
                 "article_id": f"{side}_article_id",
                 "article_group_id": f"{side}_article_group_id",
                 "article_group_name": f"{side}_article_group_name",
+                "unit_weight": f"{side}_unit_weight",
+                "sale_unit": f"{side}_sale_unit",
             }),
             on=["business_date", f"{side}_article_id"],
             how="left",
@@ -104,6 +107,20 @@ def build_product_group_candidates(
     pairs["same_product_group"] = same_group
     pairs["article_group_id"] = pairs["source_article_group_id"].where(same_group)
     pairs["article_group_name"] = pairs["source_article_group_name"].where(same_group)
+    if {"source_unit_weight", "target_unit_weight"}.issubset(pairs.columns):
+        source_weight = pd.to_numeric(pairs["source_unit_weight"], errors="coerce")
+        target_weight = pd.to_numeric(pairs["target_unit_weight"], errors="coerce")
+        pairs["product_weight_quantity_rate"] = np.where(
+            source_weight.gt(0) & target_weight.gt(0),
+            source_weight / target_weight,
+            np.nan,
+        )
+        observed_rate = pd.to_numeric(
+            pairs.get("external_receipt_quantity_rate"), errors="coerce"
+        )
+        pairs["receipt_weight_rate_residual"] = (
+            observed_rate - pairs["product_weight_quantity_rate"]
+        )
     return pairs
 
 
@@ -221,10 +238,11 @@ def resolve_relation_registry(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Resolve pair/date evidence into a single formal path or quarantine.
 
-    BOM, processing and explicit conversion are all formal evidence.  If more
-    than one formal type hits the same pair/day, no priority is silently chosen.
-    Product-group identity is only a candidate unless an approved fixed rule or
-    an actual conversion event exists in ``explicit_convert``.
+    BOM and processing create internal flows.  A valid article-convert relation
+    confirms the A->B ratio, while the dated B quantity and amount in
+    ``purchase_di`` are posted once as an allocated external receipt; no
+    separate convert-detail event is required.  If more than one internal type
+    hits the same pair/day, no priority is silently chosen.
     """
     required = {"store_id", "business_date", "source_article_id", "target_article_id"}
     missing = sorted(required - set(candidates.columns))
@@ -276,6 +294,20 @@ def resolve_relation_registry(
     for item in work.itertuples(index=False):
         store, day = str(item.store_id), str(item.business_date)
         source, target = str(item.source_article_id), str(item.target_article_id)
+        external_target_qty = pd.to_numeric(
+            getattr(item, "external_receipt_target_qty", np.nan), errors="coerce"
+        )
+        external_target_amt = pd.to_numeric(
+            getattr(item, "external_receipt_target_amt", np.nan), errors="coerce"
+        )
+        has_external_receipt = (
+            pd.notna(external_target_qty)
+            and abs(float(external_target_qty)) > 0.000001
+        ) or (
+            pd.notna(external_target_amt)
+            and abs(float(external_target_amt)) > 0.01
+        )
+        convert_hit: Mapping[str, tuple[object, ...]] | None = None
         formal: list[
             tuple[RelationType, Mapping[str, tuple[object, ...]], str]
         ] = []
@@ -301,7 +333,7 @@ def resolve_relation_registry(
                     formal.append((RelationType.BOM, bom_hit, "official_pork_beef_bom"))
             if proc_hit is not None:
                 formal.append((RelationType.PROCESSING, proc_hit, "approved_processing_relation"))
-            if convert_hit is not None:
+            if convert_hit is not None and not has_external_receipt:
                 event = any(
                     _truthy(value)
                     for value in convert_hit.get("actual_event", ())
@@ -353,6 +385,26 @@ def resolve_relation_registry(
                     "source_article_id": source, "target_article_id": target,
                     "reason_code": "RELATION_RATIO_MISSING", "detail": evidence,
                 })
+        elif has_external_receipt:
+            observed_rate = pd.to_numeric(
+                getattr(item, "external_receipt_quantity_rate", np.nan), errors="coerce"
+            )
+            relation_type = RelationType.ALLOCATED_RECEIPT
+            relation_rate = (
+                _positive_rate(convert_hit, ("convert_rate", "quantity_rate"))
+                if convert_hit is not None else None
+            )
+            evidence = (
+                "purchase_di_allocated_target_qty_and_amount+article_convert_ratio"
+                if relation_rate is not None
+                else "purchase_di_allocated_target_qty_and_amount"
+            )
+            quantity_rate = relation_rate or (
+                float(observed_rate)
+                if pd.notna(observed_rate) and float(observed_rate) > 0 else None
+            )
+            cost_rate = 1.0
+            status = "ACTIVE"
         elif pair_key in pg_lookup:
             relation_type = RelationType.PRODUCT_GROUP_CANDIDATE
             evidence = "same_product_group_only"
@@ -385,13 +437,19 @@ def resolve_relation_registry(
             "relation_type": relation_type.value,
             "quantity_rate": quantity_rate,
             "cost_rate": cost_rate,
-            "posting_mode": "DIRECT" if relation_type is RelationType.SAME_SKU else "INTERNAL_TRANSFER",
+            "posting_mode": (
+                "DIRECT" if relation_type is RelationType.SAME_SKU
+                else "EXTERNAL_DIRECT" if relation_type is RelationType.ALLOCATED_RECEIPT
+                else "INTERNAL_TRANSFER"
+            ),
             "effective_from": day,
             "effective_to": day,
             "evidence_source": evidence,
             "relation_version": relation_version,
             "status": status,
             "relation_id": digest,
-            "formal_flow_allowed": status == "ACTIVE",
+            "formal_flow_allowed": (
+                status == "ACTIVE" and relation_type is not RelationType.ALLOCATED_RECEIPT
+            ),
         })
     return pd.DataFrame(rows), pd.DataFrame(quarantine)

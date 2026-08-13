@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 from pathlib import Path
 
 import pandas as pd
+
+from fmetl.connectors.category_mapping import CategoryMappingSnapshot
 
 
 RULE_PATH = Path(__file__).resolve().parents[1] / "config" / "v1_5_category_rules.json"
@@ -29,6 +31,7 @@ class CategoryMapper:
     frozen_skus: frozenset[str]
     cooked_override_skus: frozenset[str]
     cooked_override_effective_from: dict[str, str]
+    latest_categories: dict[str, tuple[str, str, str]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if len(self.frozen_skus) != 119:
@@ -42,6 +45,7 @@ class CategoryMapper:
         level3: object,
         sale_unit: object,
         business_date: object | None = None,
+        use_static_sku_overrides: bool = True,
     ) -> CategoryDecision:
         sku = "" if pd.isna(article_id) else str(article_id)
         l1 = "" if pd.isna(level1) else str(level1)
@@ -49,7 +53,7 @@ class CategoryMapper:
         l3 = "" if pd.isna(level3) else str(level3)
         unit = "" if pd.isna(sale_unit) else str(sale_unit)
 
-        if sku in self.frozen_skus:
+        if use_static_sku_overrides and sku in self.frozen_skus:
             return CategoryDecision("冷冻类", "frozen_sku_119")
         if l1 == "标品类" and l2 == "冰品类":
             return CategoryDecision("冷冻类", "ice_category")
@@ -83,7 +87,7 @@ class CategoryMapper:
             return CategoryDecision("熟食类", "weighted_ready_food")
         business_day = "" if business_date is None or pd.isna(business_date) else str(business_date)
         override_from = self.cooked_override_effective_from.get(sku, "")
-        if sku in self.cooked_override_skus and (
+        if use_static_sku_overrides and sku in self.cooked_override_skus and (
             not business_day or not override_from or business_day >= override_from
         ):
             return CategoryDecision("熟食类", "v1_5_cooked_override")
@@ -105,6 +109,21 @@ class CategoryMapper:
         if missing:
             raise KeyError(f"category input missing columns: {missing}")
         out = df.copy()
+        if self.latest_categories:
+            latest = out["article_id"].astype(str).map(self.latest_categories)
+            matched = latest.notna()
+            for position, column in enumerate((
+                "category_level1_description",
+                "category_level2_description",
+                "category_level3_description",
+            )):
+                out.loc[matched, column] = latest.loc[matched].map(
+                    lambda values: values[position]
+                )
+            out["category_mapping_source"] = "LATEST_DIM_GOODS_FALLBACK"
+            out.loc[matched, "category_mapping_source"] = "MONITORING_PLATFORM_LATEST"
+        else:
+            out["category_mapping_source"] = "STATIC_RULE_INPUT"
         decisions = [
             self.decide(
                 row.article_id,
@@ -113,14 +132,48 @@ class CategoryMapper:
                 row.category_level3_description,
                 row.sale_unit,
                 getattr(row, "business_date", None),
+                use_static_sku_overrides=not bool(matched.iloc[index])
+                if self.latest_categories else True,
             )
-            for row in out.itertuples(index=False)
+            for index, row in enumerate(out.itertuples(index=False))
         ]
         out["report_category_name"] = [decision.name for decision in decisions]
         out["report_category_code"] = out["report_category_name"]
         out["category_rule_reason"] = [decision.reason for decision in decisions]
         out["category_rule_version"] = self.version
         return out
+
+
+def mapper_from_latest_snapshot(
+    snapshot: CategoryMappingSnapshot,
+    *,
+    base: CategoryMapper | None = None,
+) -> CategoryMapper:
+    """Overlay one latest platform snapshot across the complete run window."""
+    base_mapper = base or load_category_mapper()
+    frame = snapshot.frame
+    mapping = {
+        str(row.article_id): (
+            str(row.category_level1_description),
+            str(row.category_level2_description),
+            str(row.category_level3_description),
+        )
+        for row in frame.itertuples(index=False)
+    }
+    return replace(
+        base_mapper,
+        version=(
+            f"monitoring-platform-latest-{snapshot.business_date}"
+            f"-v{snapshot.version or 'unknown'}"
+        ),
+        source=snapshot.source_url,
+        cooked_override_source=snapshot.source_url,
+        rule_checksum=snapshot.snapshot.checksum,
+        evidence_status="MONITORING_PLATFORM_LATEST_SNAPSHOT",
+        snapshot_start=snapshot.business_date,
+        snapshot_end=snapshot.business_date,
+        latest_categories=mapping,
+    )
 
 
 def load_category_mapper(path: Path = RULE_PATH) -> CategoryMapper:

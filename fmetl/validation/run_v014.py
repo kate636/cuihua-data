@@ -15,7 +15,10 @@ import pandas as pd
 
 from fmetl import __version__
 from fmetl.calculations.ledger import run_weighted_ledger
-from fmetl.master_data.category import CategoryMapper, load_category_mapper
+from fmetl.connectors.category_mapping import CategoryMappingSnapshot
+from fmetl.master_data.category import (
+    CategoryMapper, load_category_mapper, mapper_from_latest_snapshot,
+)
 from fmetl.validation.manifest import stable_frame_checksum
 from fmetl.contracts.v014 import OUTPUT_CONTRACT
 
@@ -356,6 +359,7 @@ def run_v014_shadow_week(
     start: str | None = None,
     source_db: Path | str,
     output_db: Path | str,
+    category_snapshot: CategoryMappingSnapshot | None = None,
 ) -> V014RunResult:
     """Execute the current engine against compatible v014 physical tables.
 
@@ -563,7 +567,10 @@ def run_v014_shadow_week(
                 window.start, window.end
             )
             quarantine = quarantine.loc[keep].copy()
-        category_mapper = load_category_mapper()
+        category_mapper = (
+            mapper_from_latest_snapshot(category_snapshot)
+            if category_snapshot is not None else load_category_mapper()
+        )
         validation = pd.concat(
             [
                 validation,
@@ -590,6 +597,37 @@ def run_v014_shadow_week(
         )
         del metrics
         gc.collect()
+        activity_qty = (
+            report_input["gross_sale_qty"].abs()
+            + report_input["known_lost_qty"].abs()
+            + report_input["store_receive_qty"].abs()
+            + report_input["bom_out_qty"].abs()
+            + report_input["pack_out_qty"].abs()
+            + report_input["compose_out_qty"].abs()
+            + report_input["residual_transfer_out_qty"].abs()
+        )
+        category_mapping_audit = (
+            report_input.assign(_active=activity_qty.gt(0.000001))
+            .groupby("sku_id", as_index=False, dropna=False)
+            .agg(
+                sku_name=("sku_name", "first"),
+                category_level1_description=("category_level1_description", "first"),
+                category_level2_description=("category_level2_description", "first"),
+                category_level3_description=("category_level3_description", "first"),
+                category_mapping_source=("category_mapping_source", "first"),
+                active_in_window=("_active", "max"),
+            )
+        )
+        platform_mapped_active = int((
+            category_mapping_audit["active_in_window"].map(bool)
+            & category_mapping_audit["category_mapping_source"].eq(
+                "MONITORING_PLATFORM_LATEST"
+            )
+        ).sum())
+        active_category_count = int(
+            category_mapping_audit["active_in_window"].map(bool).sum()
+        )
+        latest_fallback_active = active_category_count - platform_mapped_active
         product_group = freeze_product_group_snapshot(
             _read_product_group(
                 conn, window, article_ids=set(report_input["sku_id"].astype(str))
@@ -642,6 +680,9 @@ def run_v014_shadow_week(
             "category_evidence_status": category_mapper.evidence_status,
             "category_snapshot_start": category_mapper.snapshot_start,
             "category_snapshot_end": category_mapper.snapshot_end,
+            "category_active_sku_count": active_category_count,
+            "category_platform_mapped_active_sku_count": platform_mapped_active,
+            "category_latest_goods_fallback_active_sku_count": latest_fallback_active,
             "stage_checksums": json.dumps(stage_checksums, sort_keys=True),
             "output_contract_sha256": hashlib.sha256(
                 "\n".join(
@@ -684,6 +725,10 @@ def run_v014_shadow_week(
             quarantine=quarantine,
             run_manifest=manifest,
             validation_result=validation,
+            category_snapshot=(
+                category_snapshot.frame if category_snapshot is not None else None
+            ),
+            category_mapping_audit=category_mapping_audit,
         )
         return V014RunResult(window, output_path, len(levels), len(quarantine), validation)
     finally:
