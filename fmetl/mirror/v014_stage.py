@@ -373,6 +373,97 @@ def _observed_receipt_relation_pairs(
     return observed
 
 
+def _fixed_relation_convert_events(
+    purchase: pd.DataFrame,
+    explicit: pd.DataFrame,
+) -> pd.DataFrame:
+    """Convert a same-code A receipt through one unambiguous fixed A->B rule.
+
+    ``article_convert`` is the event rule; a positive same-code receipt is the
+    day's quantity basis.  A source/day is deliberately skipped when it has
+    multiple fixed targets or ``purchase_di`` already allocated any quantity
+    to a different sales code, because either case would reuse the same A
+    receipt more than once.
+    """
+    columns = (
+        "store_id", "business_date", "event_group_id", "source_article_id",
+        "target_article_id", "source_qty", "target_qty", "source_common_qty",
+        "target_common_qty", "amount_allocation_ratio", "quantity_source",
+    )
+    if purchase.empty or explicit.empty:
+        return _empty(columns)
+    keys = ["store_id", "business_date", "source_article_id"]
+    relation = explicit.loc[
+        explicit["approved"].map(_bool)
+        & explicit["fixed_rule"].map(_bool)
+        & explicit["source_article_id"].astype(str).ne(
+            explicit["target_article_id"].astype(str)
+        )
+    ].copy()
+    if relation.empty:
+        return _empty(columns)
+    relation = _as_text(
+        relation,
+        [*keys, "target_article_id"],
+    )
+    relation["convert_rate"] = pd.to_numeric(
+        relation["convert_rate"], errors="coerce"
+    )
+    relation = relation.loc[relation["convert_rate"].gt(0)].copy()
+    pair_keys = [*keys, "target_article_id"]
+    rate_conflict = relation.groupby(pair_keys)["convert_rate"].nunique().gt(1)
+    if rate_conflict.any():
+        bad = rate_conflict[rate_conflict].index.tolist()[:20]
+        raise ValueError(f"fixed convert relation has conflicting rates: {bad}")
+    target_count = relation.groupby(keys)["target_article_id"].transform("nunique")
+    relation = relation.loc[target_count.eq(1)].drop_duplicates(
+        pair_keys
+    )
+
+    receipt = purchase.rename(columns={
+        "article_id": "source_article_id",
+        "sale_article_id": "receipt_target_article_id",
+    }).copy()
+    receipt = _as_text(
+        receipt,
+        [*keys, "receipt_target_article_id"],
+    )
+    receipt_qty = pd.to_numeric(receipt["sale_article_qty"], errors="coerce").fillna(0.0)
+    same = receipt.loc[
+        receipt["source_article_id"].eq(receipt["receipt_target_article_id"])
+        & receipt_qty.gt(0.000001),
+        [*keys, "sale_article_qty"],
+    ].copy()
+    same["sale_article_qty"] = pd.to_numeric(
+        same["sale_article_qty"], errors="raise"
+    )
+    same = same.groupby(keys, as_index=False).agg(
+        source_qty=("sale_article_qty", "sum")
+    )
+    cross_source_days = receipt.loc[
+        receipt["source_article_id"].ne(receipt["receipt_target_article_id"])
+        & receipt_qty.abs().gt(0.000001),
+        keys,
+    ].drop_duplicates().assign(_already_allocated=True)
+    event = relation.merge(same, on=keys, how="inner", validate="one_to_one")
+    event = event.merge(
+        cross_source_days, on=keys, how="left", validate="one_to_one"
+    )
+    event = event.loc[event["_already_allocated"].isna()].copy()
+    if event.empty:
+        return _empty(columns)
+    event["target_qty"] = event["source_qty"] * event["convert_rate"]
+    event["source_common_qty"] = event["source_qty"]
+    event["target_common_qty"] = event["source_qty"]
+    event["amount_allocation_ratio"] = 1.0
+    event["quantity_source"] = "ARTICLE_CONVERT_FIXED_RELATION_PLUS_A_RECEIPT"
+    event["event_group_id"] = (
+        "FIXED_CONVERT|" + event["store_id"] + "|" + event["business_date"]
+        + "|" + event["source_article_id"] + "|" + event["target_article_id"]
+    )
+    return event[list(columns)].reset_index(drop=True)
+
+
 def _mark_receipt_backed_processing(
     processing: pd.DataFrame,
     receipt_postings: pd.DataFrame,
@@ -1018,7 +1109,11 @@ def build_v014_stage_bundle(
     explicit = _exclude_bom_backed_explicit_relations(explicit, bom)
     purchase = source["store_receipt"].copy()
     bom_events = _bom_events(source["receive_sale"], bom)
-    conversion_events = bom_events.copy()
+    fixed_convert_events = _fixed_relation_convert_events(purchase, explicit)
+    conversion_events = pd.concat(
+        [frame for frame in (bom_events, fixed_convert_events) if not frame.empty],
+        ignore_index=True,
+    ) if not (bom_events.empty and fixed_convert_events.empty) else bom_events.copy()
 
     candidate_frames: list[pd.DataFrame] = []
     # ``purchase_di`` is a dense daily SKU snapshot.  Only rows with an
@@ -1038,6 +1133,10 @@ def build_v014_stage_bundle(
         columns={"article_id": "source_article_id", "sale_article_id": "target_article_id"}
     )
     candidate_frames.append(purchase_candidates)
+    if not fixed_convert_events.empty:
+        candidate_frames.append(fixed_convert_events[[
+            "store_id", "business_date", "source_article_id", "target_article_id",
+        ]])
     if not processing.empty:
         candidate_frames.append(processing.rename(columns={
             "raw_article_id": "source_article_id", "finished_article_id": "target_article_id",

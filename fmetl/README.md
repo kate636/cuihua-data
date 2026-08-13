@@ -186,7 +186,7 @@ flowchart TB
 | 商品集快照 | 判断两个 SKU 是否属于同一商品身份 | 当天发生转换、转换数量和比例 |
 | 正式 BOM | 判断父品和子品、出成率和成本率 | 门店当天实际拆分量，需事件证据 |
 | 加工关系 | 判断原料、成品、配方比例和生效日 | 当日已消费成品量，需销售和普通已知报损证明 |
-| `article_convert` | 正式 A→B 单位/包装关系与比例 | 当天是否有可入账数量；当天数量来自 `purchase_di` |
+| `article_convert` | 正式 A→B 单位/包装关系与比例 | 当天 A 数量；来自 `purchase_di` 的同码 A 验收，或其已分配 B 验收 |
 | `purchase_di` 跨码分配 | 已直接给出 B 的当日数量和采购金额 | 关系类型；由 `article_convert`、官方 BOM 或加工关系确认 |
 | `receive_sale` | 提供兼容的验收→销售分配计划 | 原始订验流水 |
 
@@ -199,7 +199,7 @@ flowchart TB
 - `v014_stage_activities`：SKU 日销售、退回、验收、报损、盘点和日清。
 - `v014_stage_openings`：影子窗口首日期初库存种子。
 - `v014_stage_bom`、`v014_stage_processing`、`v014_stage_explicit_convert`：正式关系输入。
-- `v014_stage_conversion_events`：当日 BOM 数量事件；跨码验收由 `purchase_di` 直接落 B，不生成第二套内部事件。
+- `v014_stage_conversion_events`：当日 BOM 与固定换码数量事件；`purchase_di` 已分配到 B 时直接落 B，否则唯一 A→B 固定关系按同日 A 验收量生成内部换码。
 - `v014_stage_finished_processing_daily`：加工成品净销售和普通已知报损输入；兼容物理名，不含盘点或库存余额。
 - `v014_stage_reporting_metrics`：输出字段需要的独立销售、订单、SCM 和维度底项。
 
@@ -211,7 +211,7 @@ flowchart TB
     SAME -->|是| R1["SAME_SKU：同码入池"]
     SAME -->|否| ALLOC{"purchase_di 已给 B 数量/金额？"}
     ALLOC -->|是| R7["ALLOCATED_RECEIPT：B 外部验收直接入池"]
-    ALLOC -->|否| FORMAL["检查正式 BOM、正式加工；A→B 固定关系只保留审计"]
+    ALLOC -->|否| FORMAL["检查正式 BOM、正式加工与唯一 A→B 固定关系"]
     FORMAL --> COUNT{"命中几种正式关系？"}
     COUNT -->|多种| R6["CONFLICT：整对隔离"]
     COUNT -->|一种且比例完整| R2["ACTIVE：允许正式内部过账"]
@@ -235,7 +235,7 @@ flowchart TB
 - 只有 `status=ACTIVE` 且 `formal_flow_allowed=true` 的关系可以生成内部流。
 - 商品集重量可计算规格比例，但不能单独证明当天发生数量流；重量比例只作审计。
 - `purchase_di` 是稠密日快照；只有当日验收数量或金额非零的行才生成订验候选。
-- `article_convert` 是正式固定关系；不需要、也不存在“当日换码转换明细表”。当 `purchase_di` 已给 B 数量/金额时直接落 B，并用关系比例校验，绝不再造内部 OUT/IN。
+- `article_convert` 是正式固定关系；不需要、也不存在“当日换码转换明细表”。当 `purchase_di` 已给 B 数量/金额时直接落 B；否则唯一 A→B 关系按同日 A 验收量和固定比例直接生成 A OUT/B IN。两种路径二选一。
 - 每条登记记录保存关系版本、证据来源、生效日期、数量比例和成本比例。
 
 关系类型：
@@ -246,7 +246,7 @@ flowchart TB
 | `BOM` | 猪肉、牛肉一父多子拆分 | `DISASSEMBLY_BOM` |
 | `PROCESSING` | 多原料加工为成品 | `RECIPE_COMPOSE` |
 | `ALLOCATED_RECEIPT` | A 的验收已在 `purchase_di` 分配到 B | B 外部验收直接入账；无内部流 |
-| `EXPLICIT_CONVERT` | A→B 固定关系；仅保留兼容合同 | 当前主链不单独造流 |
+| `EXPLICIT_CONVERT` | 唯一 A→B 固定关系，且当日 A 有同码验收 | `PACK_CONVERT`；若 `purchase_di` 已分配 B 则不重复造流 |
 | `PRODUCT_GROUP_CANDIDATE` | 仅能确认同一商品集 | 不过账 |
 | `UNRESOLVED` / `CONFLICT` | 无关系或关系冲突 | 隔离 |
 
@@ -265,12 +265,15 @@ flowchart TB
     P2 --> P3["按 raw_qty ÷ yield_qty 计算各原料转出"]
 
     TYPE -->|换码或包装| C1{"purchase_di 已给 B 数量/金额？"}
-    C1 -->|是| C2["按 A→B 关系校验比例；B 直接作为外部验收入账"]
-    C1 -->|否| C3["无当日数量可过账；只保留固定关系"]
+    C1 -->|是| C2["B 直接作为外部验收入账；不重复造流"]
+    C1 -->|否| C3{"唯一 A→B 且当日 A 有同码验收？"}
+    C3 -->|是| C4["A 验收量 × 固定比例；生成 A OUT/B IN"]
+    C3 -->|否| C5["无数量或关系歧义：不过账"]
 
     B3 --> LEGS["生成来源 OUT 与目标 IN 两侧"]
     P3 --> LEGS
     C2 --> DIRECT["不生成第二套内部 OUT/IN，防止重复成本"]
+    C4 --> LEGS
     LEGS --> CHECK["数量证据完整；目标金额分配比例合计 = 1"]
     CHECK -->|通过| POST["进入同日账本"]
     CHECK -->|失败| QUAR["整组隔离，不允许单边入账"]
@@ -709,11 +712,11 @@ fmetl/
 |---|---:|
 | 完整重跑 | A3XV，2026-08-05 预热，08-06～11 发布 |
 | 单元与集成测试 | 以当前完整测试结果为准 |
-| 输出行数 | 88,972 |
+| 输出行数 | 88,996 |
 | 账本硬门禁 | 10/10 通过 |
 | v1.5 SKU 日销售额、销售量 | 完全一致 |
 | v1.5 门店日验收金额 | 完全一致 |
-| 门店周毛利 | v0.17 25,621.15；v1.5 27,346.50；差 -1,725.35（-6.31%） |
+| 门店周毛利 | v0.17 25,611.95；v1.5 27,346.50；差 -1,734.55（-6.34%） |
 | 缺成本证据 | 193 个 SKU 日、52 个 SKU；同日无未使用正成本证据，阻止发布 |
 | 分类快照证据 | 经营监控平台最新 2026-08-12；1,449 SKU 命中、11 SKU 回退最新 `dim_goods`，通过 |
 | 服务器写入 | 0 |

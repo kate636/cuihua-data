@@ -37,6 +37,7 @@ from fmetl.mirror.v014_stage import (
     _bom_events,
     _build_day_clear_frame,
     _exclude_bom_backed_explicit_relations,
+    _fixed_relation_convert_events,
     _mark_receipt_backed_processing,
     _observed_receipt_relation_pairs,
     _processing_stage,
@@ -434,6 +435,71 @@ class V014RelationTests(unittest.TestCase):
         ])
         observed = _observed_receipt_relation_pairs(purchase)
         self.assertEqual([("C", "D")], list(observed[["article_id", "sale_article_id"]].itertuples(index=False, name=None)))
+
+    def test_fixed_relation_directly_converts_same_code_receipt(self) -> None:
+        purchase = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "article_id": "A", "sale_article_id": "A",
+            "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
+        }])
+        explicit = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "source_article_id": "A", "target_article_id": "B",
+            "fixed_rule": True, "approved": True, "convert_rate": 0.5,
+        }])
+
+        event = _fixed_relation_convert_events(purchase, explicit).iloc[0]
+
+        self.assertEqual("A", event.source_article_id)
+        self.assertEqual("B", event.target_article_id)
+        self.assertEqual(6.0, event.source_qty)
+        self.assertEqual(3.0, event.target_qty)
+        self.assertEqual(
+            "ARTICLE_CONVERT_FIXED_RELATION_PLUS_A_RECEIPT",
+            event.quantity_source,
+        )
+
+    def test_fixed_relation_skips_ambiguous_or_already_allocated_source(self) -> None:
+        purchase = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "A", "sale_article_id": "A",
+                "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "article_id": "A", "sale_article_id": "B",
+                "sale_article_qty": 3.0, "sale_article_purchase_amt": 60.0,
+            },
+        ])
+        explicit = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "source_article_id": "A", "target_article_id": target,
+                "fixed_rule": True, "approved": True, "convert_rate": rate,
+            }
+            for target, rate in (("B", 0.5), ("C", 2.0))
+        ])
+
+        self.assertTrue(_fixed_relation_convert_events(purchase, explicit).empty)
+
+    def test_fixed_relation_rejects_conflicting_rates_for_same_pair(self) -> None:
+        purchase = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "article_id": "A", "sale_article_id": "A",
+            "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
+        }])
+        explicit = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "source_article_id": "A", "target_article_id": "B",
+                "fixed_rule": True, "approved": True, "convert_rate": rate,
+            }
+            for rate in (0.5, 0.25)
+        ])
+
+        with self.assertRaisesRegex(ValueError, "conflicting rates"):
+            _fixed_relation_convert_events(purchase, explicit)
 
     def test_group_identity_is_candidate_not_flow(self) -> None:
         groups = freeze_product_group_snapshot(self.groups_raw)
