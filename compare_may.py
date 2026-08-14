@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""5月 fmetl vs QDM 全量对比 — 门店×大分类 → 逐日 → SKU"""
+"""5月 fmetl 与 QDM 完整数据对比：先看门店和大分类，再看每日和 SKU 明细。"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fmetl.config import get_settings
@@ -213,7 +213,7 @@ if tot['qdm_profit'] != 0:
 # 2. 逐日对比
 # ============================================================
 print("\n\n" + "=" * 100)
-print("2. 逐日下钻 — 差异最大的 3 个分类")
+print("2. 按日期查看差异最大的 3 个分类")
 print("=" * 100)
 
 top3cats = cat_s.head(3)['cat1_name'].tolist()
@@ -299,7 +299,7 @@ for cat in top3cats:
     for _, r in dcat.iterrows():
         print(f"{r['business_date']:>12} {r['fmetl_profit']:>10,.0f} {r['qdm_profit']:>10,.0f} {r['profit_diff']:>10,.0f} {r['fmetl_sale']:>10,.0f} {r['qdm_sale']:>10,.0f} {r['fmetl_init']:>10,.0f} {r['qdm_init']:>10,.0f} {r['fmetl_end']:>10,.0f} {r['qdm_end']:>10,.0f} {int(r['sku_cnt_x']):>5}")
 
-# 保存中间结果供后续 SKU 下钻
+# 保存中间结果，供后续按 SKU 查看差异明细
 conn.close()
 print("\n\n分类汇总 + 逐日对比完成。")
-print("接下来: SKU 级下钻...")
+print("接下来：按 SKU 查看差异明细...")

@@ -20,7 +20,7 @@ print("=" * 100)
 print("Step 0: 获取数据")
 print("=" * 100)
 
-# DuckDB 的 dim_goods 就是从 strategy_fm_dim_goods 全量拉下来的
+# DuckDB 的 dim_goods 是 strategy_fm_dim_goods 的完整副本
 goods_df = conn.execute("""
 SELECT DISTINCT article_id, category_level1_id, category_level1_description,
        category_level2_description, category_level3_description
@@ -208,7 +208,7 @@ print(f"\n{'─'*175}")
 print(f"{'全月总计':<20} {tot['fmetl_profit']:>10,.0f} {tot['qdm_profit']:>10,.0f} {tot['fmetl_profit']-tot['qdm_profit']:>10,.0f} {pct:>+7.1f}% {tot['fmetl_sale']:>10,.0f} {tot['qdm_sale']:>10,.0f} {(tot['fmetl_sale']-tot['qdm_sale'])/abs(tot['qdm_sale'])*100 if tot['qdm_sale']!=0 else 0:>+7.1f}%")
 
 # ============================================================
-# Step 3: 逐日 + SKU 级下钻
+# Step 3: 按日期和 SKU 查看差异明细
 # ============================================================
 print("\n\n" + "=" * 100)
 print("Step 3: 逐日趋势 + 差异构成分析")

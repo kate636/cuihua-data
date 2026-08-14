@@ -10,12 +10,12 @@
 
 ---
 
-## 1. 已冻结决策
+## 1. 已确认且本版不再修改的决策
 
 1. 新 ETL 不在旧 `fmetl` 上继续修补。旧目录完整归档, 重新建立 v0.13 目录、数据合同和测试。
-2. 所有公司数据只从 StarRocks 镜像层读取, 不直连 Hive。镜像同步权威脚本为 v1_5 `sync_strategy_fm.sh`。
-3. “镜像层权威”是字段级边界, 不等于公司派生利润/库存可重新进入核心计算。
-4. 范围固定为 `store_id='A3XV'`。出现其他门店直接阻断运行。
+2. 所有公司数据只从 StarRocks 源数据副本层读取, 不直连 Hive。源数据副本同步权威脚本为 v1_5 `sync_strategy_fm.sh`。
+3. “源数据副本层权威”是字段级边界, 不等于公司派生利润/库存可重新进入核心计算。
+4. 范围固定为 `store_id='A3XV'`。读到其他门店时立即停止运行并报告门店编号。
 5. 有效营业日与 v1_5 一致: `strategy_fm_store_daily_di.bf19_sale_amt >= 500`。
 6. 平台“客数”是订单客次: `COUNT DISTINCT canonical_order_key`, 不是去重用户数。
 7. 新老客与 v1_5 一致: 首单日早于周一为老客, 否则为本周新客; 无身份映射为“其他”。
@@ -23,35 +23,35 @@
 9. 运营 KPI（售罄、上架 SKU、排名、销售占比、品效）不在本次迁移范围。
 10. 报告品类精确采用 v1_5 CASE 顺序和 119 个冷冻 SKU 清单, 但只实现一份共享规则。
 11. 猪肉多产出拆分、蔬菜包装换码、熟食/烘焙配方加工和 matnr 成本参考必须分流, 不再统称 BOM。
-12. DESIGN-001 的“按日成本库存状态机”继续作为核心, 但关系解析和数量流来源以本文修订为准。
+12. DESIGN-001 的“按日成本库存处理规则”继续作为核心, 但关系解析和数量流来源以本文修订为准。
 
 ---
 
 ## 2. 事实核对结果
 
-### 2.1 镜像层
+### 2.1 源数据副本层
 
 `sync_strategy_fm.sh` 实际同步 28 张 StarRocks 表, 全部限定 A3XV, 包括:
 
 - 销售、进货、SCM、损耗、加工、促销、让利;
 - 日清、商品、门店、日历、可订可售维度;
-- receive_sale、订验关系、单位换算、BOM 关系边、盘点明细;
+- receive_sale、订验关系、单位换算、BOM 关系条数、盘点明细;
 - offline/online 订单明细和 trade user;
 - full_link、store_daily、article_sale、chdj_article 公司结果表。
 
-v0.13 不把 Hive 表名写入运行 SQL。Hive 血缘只在 contract 和文档中保留。
+v0.13 不把 Hive 表名写入运行 SQL。Hive 来源只在 contract 和文档中保留。
 
 特殊损耗沿用 v1_5 所读的 StarRocks 原生业务表
 `default_catalog.ads_business_analysis.cuihua_t_purchase_wastage`。它不是上述 28 张
-Hive 镜像目标，因此在 registry 中明确标为 `managed_by_sync_script=false` 的辅助观测源，
+Hive 源数据副本目标，因此在 registry 中明确标为 `managed_by_sync_script=false` 的辅助核对来源，
 不能伪装成 `sync_strategy_fm.sh` 的同步目标；除这一项 v1_5 既有原生源外，核心事实与维度
-均来自该脚本维护的镜像表。
+均来自该脚本维护的源数据副本表。
 
 可订可售的权威源明确为同步脚本第 26 步生成的
-`strategy_fm_dim_order_saleable`（Hive 血缘
+`strategy_fm_dim_order_saleable`（Hive 来源
 `dim_store_article_order_sale_info_di`），日粒度业务键为
 `store_id + inc_day + article_id`。v1.5 `step1_flag_sku_di.sql` 只消费
-`saleable` 做售罄展示，但镜像同时提供 `is_order`。v0.13 分别保存：
+`saleable` 做售罄展示，但源数据副本同时提供 `is_order`。v0.13 分别保存：
 
 ```text
 is_order  -> is_orderable（可订）
@@ -60,9 +60,9 @@ status    -> saleability_status（源状态）
 ```
 
 三列不得合并。`strategy_fm_purchase_order_tmp` 是下单商品池和订货参数快照，
-不是最终可订可售标记，也不进入库存成本池。
+不是最终可订可售标记，也不进入库存用于计算单位成本的数量和金额。
 
-### 2.2 订单符号（2026-07-01 至 2026-07-14, StarRocks 镜像）
+### 2.2 订单符号（2026-07-01 至 2026-07-14, StarRocks 源数据副本）
 
 线上:
 
@@ -81,9 +81,9 @@ status    -> saleability_status（源状态）
 
 > `sales_amt` 和 `qty` 已是有符号事件值。v0.13 原样求和, 禁止根据 `order_status` 再次乘 -1。
 
-运行质量检查仍要监控 refund/return 每日净额符号, 但异常时阻断, 不自动翻号。
+运行质量检查仍要检查 refund/return 每日净额符号；符号异常时停止运行，不自动改变正负号。
 
-### 2.3 订单键（同期 StarRocks 镜像）
+### 2.3 订单键（同期 StarRocks 源数据副本）
 
 - offline: 36,332 行; `store+day+order+SKU` 仅 35,325 个;
 - online: 2,790 行; 同样候选键仅 2,765 个;
@@ -95,7 +95,7 @@ status    -> saleability_status（源状态）
 
 ```text
 客次业务键 = channel + store_id + business_date + order_id
-原子行技术键 = source_row_hash + duplicate_ordinal
+源表最细记录技术键 = source_row_hash + duplicate_ordinal
 ```
 
 `duplicate_ordinal` 保留完全相同的多行性。不能为了制造唯一键而丢弃数量/金额。
@@ -109,7 +109,7 @@ status    -> saleability_status（源状态）
 | 冷藏及加工类 | 550 | 51 | 2,088 | 362.29 | 8,017.20 | 8,017.18 |
 | 预制菜 | 96 | 8 | 371 | 185.50 | 7,393.60 | 7,393.60 |
 
-这证明源 compose 不是空观测。新 ETL 数量流优先使用它, 配方用于把 raw/finished 连成组和解释缺侧; 销售/库存反推降为告警或影子估算。
+这证明源表 `compose` 包含实际记录。新 ETL 优先使用这些数量；配方用于连接原料和成品并解释缺失的一侧；根据销售或库存变化计算加工量只用于提示问题或本地试算。
 
 ### 2.5 猪肉 BOM 与蔬菜包装换码
 
@@ -125,15 +125,15 @@ receive_sale 近 14 日跨 SKU 关系:
 - 普罗旺斯番茄 kg -> 500g: `2 / 0.5`;
 - 红薯 25kg/件 -> kg: `25 / 0.04`。
 
-`strategy_fm_dim_article_convert` 在 2026-07-01 至 07-14 有 77,998 条唯一快照关系, 不是空骨架。
+`strategy_fm_dim_article_convert` 在 2026-07-01 至 07-14 有 77,998 条唯一关系记录，并非只有表结构的空表。
 
 ---
 
-## 3. 镜像字段级权威矩阵
+## 3. 源数据副本字段级权威矩阵
 
-| 镜像 | 可进核心的字段 | 禁止作为重构真值的字段 |
+| 源数据副本 | 可进核心的字段 | 禁止作为重构真值的字段 |
 |---|---|---|
-| sales_di | 销售数量/金额、订单观测 | 公司派生利润 |
+| sales_di | 销售数量、销售金额、订单记录 | 公司派生利润 |
 | purchase_di | 门店销售 SKU 进货 `sale_article_qty/sale_article_purchase_amt`；源期初作首日基线 | 用 `avg_inbound_price/inventory_cost` 覆盖当日真实进货额；上游未知损耗推导 |
 | scm_di | 门店订货、DC 实际出库、应付额、SCM 账面成本、已带符号退仓 | 把 DC 出库/采购成本再次记作门店库存进货；公司全链路利润 |
 | loss_di | 登记已知损耗 | 方程未知损耗 |
@@ -145,9 +145,9 @@ receive_sale 近 14 日跨 SKU 关系:
 | trade_user | 订单身份和首单日 | 未去重直接 JOIN 订单明细 |
 | store_daily | A3XV 有效营业日 | SKU 销售事实 |
 | dim_order_saleable | `is_order`、`saleable`、`status` 及订货基数 | 库存数量、采购/进货成本 |
-| purchase_order_tmp | 下单商品池、订货参数的参考快照 | 最终可订可售标记、采购/进货事实 |
+| purchase_order_tmp | 下单商品池、订货参数的固定日期的参考数据 | 最终可订可售标记、采购/进货事实 |
 | chdj_article | day_clear/业务标签的兼容参考 | profit、stock、loss、avg7d |
-| full_link/article_sale | 验收和影子对比 | 核心利润/库存上游 |
+| full_link/article_sale | 验收和本地试算对比 | 核心利润/库存上游 |
 
 DuckDB `mirror_*`/`atomic_*` 是这些授权字段的幂等本地副本, 不发明新业务事实。
 
@@ -163,21 +163,21 @@ DC 实际出库及供应链财务:
   结算/收入 = out_stock_pay_amt
   供应链成本 = out_stock_amt_cb
 
-门店销售 SKU 进货（库存池唯一外部入流）:
+门店销售 SKU 收货（库存数量和金额唯一的外部增加项）：
   qty = purchase_di.sale_article_qty
   amt = purchase_di.sale_article_purchase_amt
 ```
 
 SCM 退仓字段已经是负数，原样进入 SCM 净额对账，禁止再次翻号。它们默认不直接
-改变门店库存成本池；门店实物退仓必须有独立的门店事件证据。
+改变门店库存用于计算单位成本的数量和金额；门店实物退仓必须有独立的门店事件依据。
 
 `receive_sale` 的 parent `inbound_qty/inbound_amount` 会在每个 child 行重复，只有在
 猪肉/包装采用 parent 重构模式时，才可先按 parent 做一致性检查和去重后形成一次外部
-进货。此时同一 parent 的 `purchase_di` child 分配行只作 shadow 对账，不能再次入池。
+进货。此时同一 parent 的 `purchase_di` child 分配行只作 shadow 对账，不能再次进入单位成本计算。
 
-### 3.2 SKU 日事实的符号与标签
+### 3.2 SKU日期记录事实的符号与标签
 
-2026-07-08 至 07-14 镜像实查确认：
+2026-07-08 至 07-14 源数据副本实查确认：
 
 - `sales_di.qty_spec/sales_amt` 的退货事件已经出现负值；
 - `return_sale_qty/return_sale_amt` 也已带负号，但部分业务退货会拆成“负销售行 +
@@ -185,20 +185,20 @@ SCM 退仓字段已经是负数，原样进入 SCM 净额对账，禁止再次�
 - 正式库存数量按 `qty_spec` 正负拆为非负 `gross_sale_qty` 和 `sale_return_qty`，源
   return 字段仅作业务标签审计；收入保留 `net_sale_amt=SUM(sales_amt)`；
 - `loss_di.know_lost_qty` 是正式已知损耗数量，源已知/未知损耗金额和未知数量仅作对照；
-- 库存明细的合法非负 `actual_stock_qty` 是期末余额观测，均可进入库存状态机；
-  `created_by/updated_by` 只记录操作人证据，不能用 `created_by=系统` 反推“没有人工盘点”；
-- 系统负库存快照无业务意义，阻断其覆盖；`inventory_date` 必须等于 `inc_day`，并校验
+- 库存明细中的合法非负 `actual_stock_qty` 是源表期末数量，可以进入库存处理规则；
+  `created_by/updated_by` 只用于判断操作人，不能因 `created_by=系统` 就断定“没有人工盘点”；
+- 系统生成的负库存数量无业务意义，不允许它覆盖计算期末；`inventory_date` 必须等于 `inc_day`，并校验
   `profit_loss_qty = actual_stock_qty - sale_stock_qty`；
 - 日清兼容标签来自 `strategy_fm_chdj_article_di.day_clear`。
 
-`strategy_fm_dim_day_clear` 一周每天约 9.1 万 SKU，实查为全商品日快照；它没有
+`strategy_fm_dim_day_clear` 一周每天约 9.1 万 SKU，实际是当天全部商品的标记表；它没有
 `day_clear` 字段，禁止用“存在记录”推导 `day_clear=0`。
 
 盘点来源存在不可逆的信息损失。2026-07-14 的 SKU `21279829` 是已确认样例：
 `created_by=updated_by=系统` 且快照三数量均为 0，但当天外部进货 10、销售 2、已知
 损耗 0，业务确认该快照来自实盘。v0.13 因而不猜测操作者，而是将合法快照作为期末
-余额事实，由自身状态机计算 `unknown_lost_qty = 10 - 2 - 0 = 8`。源
-`loss_di.unknow_lost_qty=8` 仅用于对照，禁止直接过账。该政策可能吸收上游快照的时点
+余额事实，由自身处理规则计算 `unknown_lost_qty = 10 - 2 - 0 = 8`。源
+`loss_di.unknow_lost_qty=8` 仅用于对照，禁止直接计入每日库存和成本。该政策可能吸收上游快照的时点
 差异，必须在周测中单列“系统余额覆盖产生的未知损耗”并与 v1.5 对照。
 
 ---
@@ -291,7 +291,7 @@ status, failed_step, error
 
 ### 5.3 API 分页
 
-不再用“结果第一列”自动 keyset。每张镜像 contract 必须声明:
+不再用“结果第一列”自动 keyset。每张源数据副本 contract 必须声明:
 
 ```text
 partition_column
@@ -316,7 +316,7 @@ category_rule_version = v1_5-frozen-20260715
 frozen SKU unique count = 119
 ```
 
-它是 v0.13 已批准业务规则, 不冒充服务器 v2.3, 也不宣称是未存在的“v2.5”。
+它是 v0.13 已批准的业务规则，不代表服务器 v2.3，也不称为并不存在的“v2.5”。
 
 ### 6.2 精确顺序
 
@@ -338,7 +338,7 @@ frozen SKU unique count = 119
 
 ## 7. 订单、渠道和新老客
 
-### 7.1 原子行
+### 7.1 源表最细记录
 
 ```text
 atomic_order_event
@@ -370,7 +370,7 @@ online|A3XV|business_date|order_id
 sync 脚本当前把 order 与 trade 按 order_id 直接 JOIN。v0.13 抽取时要求:
 
 1. 先把 trade_user 压到 `inc_day+order_id` 一行;
-2. 同一订单多身份直接阻断;
+2. 同一订单出现多个身份时停止计算并报告订单;
 3. JOIN 前后订单行数相等;
 4. 首次建表扫描可用全历史 `MIN(DATE(trade_time))`;
 5. 每日增量与旧值取更小日期。
@@ -443,8 +443,8 @@ QUARANTINED
 3. article_convert 有有效双向比例, 且属于一对一包装/换单位 -> PACK_CONVERT;
 4. BOM edge 为一拆多/父品 fanout>=2, 且经品类形态允许 -> DISASSEMBLY_BOM;
 5. order_receive 只证明订货码->验收码 -> PROCUREMENT_ALIAS;
-6. 证据不足 -> UNRESOLVED, 不产生正式内部流;
-7. 同时命中多种 -> QUARANTINED。
+6. 依据不足 -> UNRESOLVED, 不产生正式内部流;
+7. 同时符合多种 -> QUARANTINED。
 
 ### 8.3 猪肉 DISASSEMBLY_BOM
 
@@ -462,9 +462,9 @@ QUARANTINED
 
 1. receive_sale `sale_article_qty` 作为 v0.13 兼容桥, 标记 `UPSTREAM_DAL_RECEIVE_SALE`;
 2. purchase + BOM relation + dressing rate 重建 shadow;
-3. 销售/损耗权重反推只作差异分析。
+3. 根据销售或损耗权重计算的分配只用于差异分析。
 
-成本分摊优先级（金额始终守恒）:
+成本分摊优先级（金额始终前后总额相等）:
 
 1. 当日源 child 拆分金额完整、全部活跃 child 有正金额时，使用源拆分金额比例；
 2. 零价赠品或同一 parent 出现有价/零价混合 child 时，全组使用
@@ -472,26 +472,26 @@ QUARANTINED
 3. 前两项不可用时，只有所有活跃部位已可靠换算到同一库存计量单位（例如全部为 kg）
    才可按标准重量分摊父品总成本。此时各部位取得相同的公共单位成本：
    `child_in_amt = normalized_child_qty * parent_total_cost / sum(normalized_child_qty)`；
-4. 单位换算覆盖不足，尤其“件”和“公斤”无法可靠互换时，进入 quarantine，不得直接
+4. 单位换算依据不足，尤其“件”和“公斤”无法可靠互换时，该关系不计算，并把原因写入问题明细表 `quarantine`；不得直接
    假定每件等于每公斤。
 
 当前构建里程碑已实现第 1、2 层；第 3 层尚缺“部位库存数量 -> 公共标准重量”的 100%
 覆盖 adapter，代码会按第 4 层 fail closed。该 adapter 完成并通过真实周测前，不得宣称
-“同公共单位成本”已进入正式过账。
+“同公共单位成本”已进入正式转换记录。
 
-“先算猪肉分类毛利率，再把同一毛利率回填每个部位”只允许作为报表展示分摊口径。
-它通过销售额反推 SKU 成本，会形成循环并污染跨日库存金额，因此禁止写入核心库存成本、
+“先算猪肉分类毛利率，再把同一毛利率写到每个部位”只允许用于报表展示分摊。
+它根据销售额倒算 SKU 成本，会形成循环并改变跨日库存金额，因此禁止写入核心库存成本、
 SKU 会计毛利或下一日期初。展示表使用时必须保留 `allocation_basis=REPORT_ONLY_CATEGORY_MARGIN`。
 
 ### 8.4 蔬菜/水果 PACK_CONVERT
 
 - article_convert 优先于 matnr/name 推断;
-- 必须按 `store_id + business_date + parent + sub` 使用当天镜像快照，禁止借用其他日期比例;
+- 必须按 `store_id + business_date + parent + sub` 使用当天源数据副本快照，禁止借用其他日期比例;
 - 有实际 receive_sale/compose 换码事件才产生 pack out/in;
 - 无事件时不因关系存在而虚构数量;
-- 按公共重量单位守恒;
+- 按公共重量单位前后总额相等;
 - 不使用猪肉销售价值权重分摊;
-- 无效/互逆不一致比例进 quarantine。
+- 比例无效或正反换算不一致时，不计算该关系，并把原因写入问题明细表 `quarantine`。
 
 ### 8.5 RECIPE_COMPOSE
 
@@ -499,8 +499,8 @@ SKU 会计毛利或下一日期初。展示表使用时必须保留 `allocation_
 
 1. `atomic_compose` 实际 in/out qty;
 2. 一侧实际数量 + 快照配方推导缺侧;
-3. 只对显式允许的日清加工 SKU, 销售/库存平衡反推作 shadow;
-4. 两侧都无观测时不默认生产量=销售量。
+3. 只对明确允许的日清加工 SKU，根据销售和库存平衡计算加工量，并且只做本地试算；
+4. 原料和成品两侧都没有源表数量时，不默认生产量等于销售量。
 
 金额:
 
@@ -519,11 +519,11 @@ matnr 只是 SAP 物料身份, 本身不产生数量流。
 - 无实际事件只能用于成本对照/有来源的单位换算;
 - 禁止跨店 sibling EUC 进正式成本;
 - 同 matnr 跨报告品类不能 `MAX(category)` 任取;
-- matnr 结果按 `(matnr, report_category_code)` 聚合, 或对品类唯一性做阻断检查。
+- matnr 结果按 `(matnr, report_category_code)` 聚合；如果要求品类唯一，则发现跨品类时停止运行并报告明细。
 
 ---
 
-## 9. 每日成本库存状态机
+## 9. 每日成本库存处理规则
 
 状态身份:
 
@@ -553,13 +553,13 @@ store_id + business_date + article_id
 9. profit consumes finalized amount flows
 ```
 
-软日清补充约束：当 `new_supply - sale - known_loss < 0` 时，负的
+只清当天新增数量并保留期初库存补充约束：当 `new_supply - sale - known_loss < 0` 时，负的
 `unknown_lost_qty` 仅作为“消耗期初库存”的展示/追溯值；期初消耗已包含在 `end_qty`，
-不能再把这个展示值直接第二次过账到库存方程。计算层另存
+不能再把这个展示值直接第二次计入每日库存和成本到库存方程。计算层另存
 `balance_unknown_qty = eq_qty - end_qty`，金额同理保存
-`balance_unknown_amt = eq_amt - end_amt`；平衡校验使用过账字段，损耗展示使用原字段。
+`balance_unknown_amt = eq_amt - end_amt`；平衡校验使用计入每日库存和成本字段，损耗展示使用原字段。
 
-符号进入状态机前必须拆流：订单事实继续无损保留退款/退货负号；库存状态的
+符号进入处理规则前必须拆流：订单事实继续无损保留退款/退货负号；库存状态的
 `sale_qty`/`known_lost_qty` 只表示非负出流，退货和盘盈分别进入非负的
 `sale_return_qty/amt`、`inventory_gain_qty/amt`。禁止把带符号订单净额直接塞入库存出流，
 也禁止静默假设每日净值一定非负。
@@ -574,7 +574,7 @@ issue_unit_cost     = available_amt / available_qty
 ending_unit_cost    = end_stock_amt / end_stock_qty, 传给次日
 ```
 
-镜像事实只有日粒度，因此这是“跨日滚动、日内期间加权”，不是按单据时间排序的实时
+源数据副本事实只有日粒度，因此这是“前一天期末库存转为当天期初库存、日内期间加权”，不是按单据时间排序的实时
 移动平均。D+1 必须直接复制 D 的 `end_qty/end_amt`，禁止用展示时四舍五入后的
 `ending_unit_cost` 反算金额。
 
@@ -582,9 +582,9 @@ ending_unit_cost    = end_stock_amt / end_stock_qty, 传给次日
 
 ---
 
-## 10. v1_5 特殊损耗正式口径
+## 10. v1_5 特殊损耗正式计算规则
 
-`cuihua_t_purchase_wastage` 没有 store_id。因 v0.13 仅有 A3XV, 抽取时固定赋值 `store_id='A3XV'`, 不再作为阻断。
+`cuihua_t_purchase_wastage` 没有 `store_id`。因 v0.13 仅处理 A3XV，读取时固定写入 `store_id='A3XV'`，不因此停止运行。
 
 保留原值:
 
@@ -616,8 +616,8 @@ adjusted_full_profit    = accounting_full_profit + ccj_amt
 
 - 每笔调整保留 source_record_id、SKU、日期、reason、qty、amt;
 - `total_ssls_amt` 精确沿用 v1_5 只按 `business_date` 汇总的语义，不擅自增加
-  `day_clear` 分组；如果同日多个 day_clear 导致展示层不守恒，记录
-  `ssls_transfer_delta` 供审计，不在 v0.13 内静默改口径;
+  `day_clear` 分组；如果同日多个 day_clear 导致展示层不前后总额相等，记录
+  `ssls_transfer_delta` 供审计，不在 v0.13 内静默改计算规则;
 - 原值和调整值并存, 不覆盖追溯。
 
 ---
@@ -626,13 +626,13 @@ adjusted_full_profit    = accounting_full_profit + ccj_amt
 
 保留/重建:
 
-- SKU 底项;
+- SKU 基础指标；
 - 门店/大中小/SPU/黑白猪/SKU 层级汇总;
 - 订单客次;
 - 线上/线下/接龙/及时达;
 - 本周新客/老客的客次、金额、数量;
 - BOM、加工、包装换码追溯;
-- 库存滚动;
+- 前一天期末库存转为当天期初库存;
 - `(matnr, report_category_code)` 物料码结果。
 
 不迁移/不新增:
@@ -668,7 +668,7 @@ JOIN trade before_rows = after_rows
 one order/day has at most one thirdparty identity
 refund/return source sign is preserved
 online + offline = total signed sales/qty
-jielong + 及时达 = online  # 按 v1_5 渠道口径
+jielong + 及时达 = online  # 按 v1_5 渠道计算规则
 new_order_count + old_order_count + other_order_count = completed_order_count
 day_clear=2 is re-distinct, not 0+1
 ```
@@ -678,7 +678,7 @@ day_clear=2 is re-distinct, not 0+1
 ```text
 each from/to/day resolves to exactly one relation type
 same pair never enters BOM + pack + compose twice
-quarantined relations create no formal flow
+关系未通过检查时，不生成来源转出或目标转入
 relation snapshot checksum is in run manifest
 ```
 
@@ -701,7 +701,7 @@ report-only category margin allocation never writes back to inventory cost
 article_convert pair never defaults to DISASSEMBLY_BOM
 no observed conversion -> no invented pack flow
 common-weight residual ~= 0
-invalid reciprocal factor -> quarantine
+正反比例不一致 -> 不计算关系并记录原因
 article_convert must match the same store and business date
 ```
 
@@ -746,14 +746,14 @@ accounting and adjusted values both trace to source rows
 
 ## 13. 实施顺序
 
-### Phase 1: 归档和新骨架
+### Phase 1：归档旧文件并建立新表结构
 
 - 完整归档旧 `fmetl`;
 - 新建 v0.13 包;
 - 建立 settings/contracts/store/API;
 - 不发布业务结果。
 
-### Phase 2: 镜像原子层
+### Phase 2: 源数据副本层
 
 - 按 `sync_strategy_fm.sh` 建 registry;
 - 完成 A3XV、分区、粒度、符号和 staging 验证;
@@ -787,7 +787,7 @@ accounting and adjusted values both trace to source rows
 - SKU/levels/customer/matnr/trace 输出;
 - 不迁移运营 KPI。
 
-### Phase 7: 影子验收与切换
+### Phase 7: 本地试算验收与切换
 
 1. 单日;
 2. 连续 7 日;
@@ -796,8 +796,8 @@ accounting and adjusted values both trace to source rows
 5. 服务器 `/opt/fm/data/fm.duckdb` 验收;
 6. 显式 publish, 不在核心 run 中自动 SCP/SSH。
 
-切换门禁：现有服务器 cron 仍执行 `python -m fmetl.executor`。只有在 v0.13 executor/CLI
-完成、服务器 cron 已原子切换且可回滚后，才允许把重构分支合并到 `main`；骨架阶段不得覆盖
+切换检查：现有服务器 cron 仍执行 `python -m fmetl.executor`。只有在 v0.13 executor/CLI
+全部功能完成、服务器定时任务已一次性切换且可以恢复旧版后，才允许把重构分支合并到 `main`；只有表结构、功能未完成的阶段不得覆盖
 生产入口。
 
 ---
@@ -812,13 +812,13 @@ accounting and adjusted values both trace to source rows
 - REVIEW-001~009 和历史报告;
 - 用户当前未提交改动。
 
-这些是审计证据, 不作物理删除。
+这些是审计依据, 不作物理删除。
 
 ### 14.2 新目录只保留
 
 - DESIGN-003;
 - v0.13 architecture;
-- 镜像字段合同;
+- 源数据副本字段合同;
 - 当前 README;
 - 当前 validation/review 索引。
 
@@ -848,7 +848,7 @@ accounting and adjusted values both trace to source rows
 
 ---
 
-## 16. 最终链路
+## 16. 最终过程
 
 ```text
 v1_5 sync_strategy_fm.sh
@@ -872,7 +872,7 @@ order visits + channel + weekly new/old
 compatible FM tables and explicit publish
 ```
 
-这是“基于权威镜像层的完整 ETL 重构”, 不是对公司派生结果做第二次包装。
+这是“基于权威源数据副本层的完整 ETL 重构”, 不是对公司派生结果做第二次包装。
 
 ---
 
@@ -880,19 +880,19 @@ compatible FM tables and explicit publish
 
 ### 17.1 单一日内内部流 DAG
 
-BOM、PACK、RECIPE 不再分三次独立跑状态机，而是合并成同一
+BOM、PACK、RECIPE 不再分三次独立跑处理规则，而是合并成同一
 `store_id + business_date` DAG。每个 SKU 每日只调用一次库存状态转换；源腿先按当前
-加权成本定价，同一事件的目标腿按比例接收完全相同的总金额。事件金额必须守恒，关系环、
-孤立腿和目标先于源到达均阻断。
+加权成本定价；同一次转换的目标商品按比例接收来源商品转出的全部金额。转出金额必须等于转入金额；关系成环、
+发现只有单侧的转换记录，或目标商品先于来源商品入账时，停止运行并报告明细。
 
 正式事件先做成本可达性检查：有金额的期初/外部进货是种子，成本沿当日 DAG 传播；任一
-源 SKU 没有成本证据时整笔进入 quarantine。该检查只证明成本覆盖，数量是否足够仍由
-每日状态机独立阻断。
+来源 SKU 没有成本依据时，整次转换不计算，并把原因写入问题明细表 `quarantine`。该检查只证明有成本来源，数量是否足够仍由
+每天独立检查；某天失败时停止该天及其后续日期的计算。
 
 ### 17.2 关系优先级补充
 
 - Foodmart `raw=finished` 的身份配方只审计，不产生库存流；
-- `article_convert` 同时承载包装换码和 BOM 单位证据。只有父 fanout=1 且子 fanin=1
+- `article_convert` 同时承载包装换码和 BOM 单位依据。只有父 fanout=1 且子 fanin=1
   的双向唯一关系才是 PACK；猪肉 fanout>=2 时 BOM 优先；
 - 已有 `receive_sale` 父/子实际数量的 BOM 不因辅助 convert 比例无效而删除单边；
 - BOM、PACK 和有实际加工事件的 RECIPE 都允许把外部 child 进货重建回源 SKU，之后再
@@ -900,12 +900,12 @@ BOM、PACK、RECIPE 不再分三次独立跑状态机，而是合并成同一
 
 ### 17.3 期初、物料和日清边界
 
-- 首日取 `purchase_di` 的唯一非零期初元组；负期初钉零并留警告；全空元组按 0；
+- 首日取 `purchase_di` 的唯一非零期初元组；负期初强制设为0并留警告；全空元组按 0；
   正数量无金额保留数量与未定价警告，不伪造成本；
 - 70–77 物料类可进入成本账本，但不直接进入经营分类；其成本通过正式加工流转给成品；
 - 销售 SKU 的 day_clear 必须来自 `chdj_article`；无销售存量或关系物料缺标签时按非日清
-  兜底并单列审计；`dim_day_clear` 无此字段，不参与推断；
-- 退货成本使用“期初 + 当日进货 + 已完成内部流入”的退货前加权池，不使用退货收入。
+  无其他依据时采用并单列审计；`dim_day_clear` 无此字段，不参与推断；
+- 退货成本按退货前可用数量和金额计算，即“期初 + 当日收货 + 已完成的内部转入”；不使用退货销售收入作为成本。
 
 ### 17.4 accounting 与 adjusted 并存
 
@@ -919,12 +919,12 @@ SKU 成本、期末金额或下一日期初。运营 KPI 仍不迁移。
 
 ### 17.5 关系时态和验收快照
 
-- BOM 与 article_convert 证据必须以
-  `store_id + business_date + parent_article_id + sub_article_id` 命中，禁止把其他门店或
-  其他日期出现过的父子对当作当天正式关系；Foodmart 配方是一次运行只拉一次的最新批准快照；
+- BOM 与 article_convert 依据必须以
+  `store_id + business_date + parent_article_id + sub_article_id` 符合，禁止把其他门店或
+  其他日期出现过的父子对当作当天已确认关系；Foodmart 配方是一次运行只拉一次的最新批准快照；
 - `relation_snapshot_id` 是 Foodmart 配方、七日 BOM、七日 article_convert 三者校验和的
-  联合摘要，不再只代表配方；三份关系输入同时持久化到本地影子库；
+  联合摘要，不再只代表配方；三份关系输入同时持久化到本地试算库；
 - `shadow_run_manifest` 记录版本、Git、同步脚本、分类规则、联合关系和全部源清单摘要；
   `shadow_source_manifest` 按请求分区记录行数和 SHA-256，0 行分区也必须存在；
 - v1.5 比较另存 reference/comparison manifest。levels 必须覆盖请求的完整 7 天；SKU 缺日
-  允许用于非阻塞下钻，但必须明确记录缺失日期，不能混入完整周 SKU 汇总。
+  允许用于非阻塞查看明细，但必须明确记录缺失日期，不能混入完整周 SKU 汇总。

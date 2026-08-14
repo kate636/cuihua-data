@@ -296,7 +296,7 @@
       <span class="pill">D-1：2026-08-05</span>
       <span class="pill">分类：监控平台最新 2026-08-12</span>
       <span class="pill good">10 项必须通过的账目检查全部通过</span>
-      <span class="pill bad">发布条件未通过：193 个商品日缺成本</span>
+      <span class="pill bad">发布条件未通过：193 条商品×日期记录缺成本</span>
       <span class="pill bad">本地试算，不代表生产发布</span>
     </div>
   </header>
@@ -340,7 +340,7 @@
 
         <rect class="node blue" x="270" y="116" width="182" height="146" rx="18"/>
         <text class="title" x="361" y="154">统一业务记录</text>
-        <text class="body" x="361" y="181"><tspan x="361">7 天 × 3,229 个商品</tspan><tspan x="361" dy="21">22,603 条商品日记录</tspan><tspan x="361" dy="21">销售、收货、盘点、报损</tspan></text>
+        <text class="body" x="361" y="181"><tspan x="361">7 天 × 3,229 个商品</tspan><tspan x="361" dy="21">22,603 条商品×日期记录</tspan><tspan x="361" dy="21">销售、收货、盘点、报损</tspan></text>
 
         <rect class="node violet" x="504" y="116" width="182" height="146" rx="18"/>
         <text class="title" x="595" y="154">商品关系清单</text>
@@ -366,14 +366,14 @@
 
         <rect class="node red" x="220" y="330" width="982" height="102" rx="16"/>
         <text class="title" x="711" y="361">当前结论</text>
-        <text class="body" x="711" y="388"><tspan x="711">数量和金额方程一致；分类统一使用监控平台 2026-08-12 最新映射。</tspan><tspan x="711" dy="22">仍有 193 个商品日没有成本，因此本次结果只用于检查规则，不能正式发布。</tspan></text>
+        <text class="body" x="711" y="388"><tspan x="711">数量和金额方程一致；分类统一使用监控平台 2026-08-12 最新映射。</tspan><tspan x="711" dy="22">仍有 193 条商品×日期记录没有成本，因此本次结果只用于检查规则，不能正式发布。</tspan></text>
       </svg>
     </div>
     <div class="callout-grid">
       <div class="callout warn"><strong>S1 分类日期</strong>全部日期统一使用监控平台 2026-08-12 最新分类；1,449 个商品直接匹配，11 个使用最新商品主数据。</div>
       <div class="callout warn"><strong>S2 换码数量</strong>商品重量可以计算重量换算参考比，但不能证明当天转换。验收已写成 B 时直接收 B；仍写在 A 时，只有唯一固定关系才使用 A 的当天收货量。</div>
       <div class="callout risk"><strong>S3 加工</strong>生熟联动报损和加工只能选一条：17 个成品日保留生熟联动；其余实际计算加工 188 次。</div>
-      <div class="callout risk"><strong>S4/S5 发布</strong>10 项账目检查全部通过，但仍有 193 个商品日缺成本，本次结果不能发布。</div>
+      <div class="callout risk"><strong>S4/S5 发布</strong>10 项账目检查全部通过，但仍有 193 条商品×日期记录缺成本，本次结果不能发布。</div>
     </div>
   </section>
 
@@ -410,21 +410,21 @@
             <marker id="megaArrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto"><path d="M0,0 L0,8 L11,4 z" fill="#5e987c"/></marker>
           </defs>
           <g id="megaCanvas">
-            <rect class="mega-lane" x="28" y="28" width="3544" height="330" rx="24"/><text class="mega-lane-label" x="58" y="66">A　数据镜像与外部事实</text>
+            <rect class="mega-lane" x="28" y="28" width="3544" height="330" rx="24"/><text class="mega-lane-label" x="58" y="66">A　数据来源与外部业务记录</text>
             <rect class="mega-lane" x="28" y="382" width="3544" height="455" rx="24"/><text class="mega-lane-label" x="58" y="420">B　决定每对商品当天走哪条处理路径</text>
             <rect class="mega-lane" x="28" y="862" width="3544" height="455" rx="24"/><text class="mega-lane-label" x="58" y="900">C　同时记录来源商品转出和目标商品转入</text>
             <rect class="mega-lane" x="28" y="1342" width="3544" height="610" rx="24"/><text class="mega-lane-label" x="58" y="1380">D　计算每个 SKU 每天的库存、单位成本和期末</text>
             <rect class="mega-lane" x="28" y="1977" width="3544" height="875" rx="24"/><text class="mega-lane-label" x="58" y="2015">E　报损、毛利与输出</text>
 
             <!-- A -->
-            <g class="mega-node" data-key="source" data-title="25 个必需数据源" data-detail="生产数据只读。每张表先查应有行数，再分批读取；本次服务器写入为 0。"><rect class="node blue" x="80" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="235" y="145">QDM / StarRocks</text><text class="mega-body" x="235" y="177"><tspan x="235">25 个必需数据源</tspan><tspan x="235" dy="24">生产数据只读</tspan><tspan x="235" dy="24">按日期或最新快照读取</tspan></text></g>
+            <g class="mega-node" data-key="source" data-title="25 个必需数据源" data-detail="生产数据只读。每张表先查应有行数，再分批读取；本次服务器写入为 0。"><rect class="node blue" x="80" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="235" y="145">QDM / StarRocks</text><text class="mega-body" x="235" y="177"><tspan x="235">25 个必需数据源</tspan><tspan x="235" dy="24">生产数据只读</tspan><tspan x="235" dy="24">按日期或最新数据读取</tspan></text></g>
             <g class="mega-node" data-key="extract" data-title="检查数据是否完整" data-detail="先查询每张表应有多少行；分批读取后再核对实际行数；只有每个字段都相同的重复行才能删除。"><rect class="node amber" x="490" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="645" y="145">检查读取是否完整</text><text class="mega-body" x="645" y="177"><tspan x="645">先查应有行数，再分批读取</tspan><tspan x="645" dy="24">核对实际行数</tspan><tspan x="645" dy="24">检查重复、缺日和断档</tspan></text></g>
             <g class="mega-node" data-key="cache" data-title="本地原始数据缓存" data-detail="每张表每个日期读取成功后立即保存，失败可以从上次成功位置继续。本地计算结果不是生产表。"><rect class="node blue" x="900" y="105" width="310" height="150" rx="18"/><text class="mega-title" x="1055" y="145">本地原始数据缓存</text><text class="mega-body" x="1055" y="177"><tspan x="1055">每张表 × 每天立即保存</tspan><tspan x="1055" dy="24">记录来源、行数和校验值</tspan><tspan x="1055" dy="24">失败后可继续读取</tspan></text></g>
             <g class="mega-node" data-key="facts" data-title="每个商品每天的业务记录" data-detail="统一为门店、日期、商品一行。销售、收货、盘点和报损分别整理，不互相覆盖。"><rect class="node green" x="1310" y="105" width="350" height="150" rx="18"/><text class="mega-title" x="1485" y="145">商品每日业务记录</text><text class="mega-body" x="1485" y="177"><tspan x="1485">销售 / 收货 / 盘点 / 报损</tspan><tspan x="1485" dy="24">退货 / 供应链金融 / 补贴 / 价格</tspan><tspan x="1485" dy="24">每天 3,229 个商品</tspan></text></g>
             <g class="mega-node" data-key="loss-source" data-title="报损数量怎样进入库存" data-detail="只有已知报损数量 know_lost_qty 直接扣库存。源表金额和上游未知损耗只供核对，不能直接决定成本。"><rect class="node red" x="1760" y="92" width="390" height="176" rx="18"/><text class="mega-title" x="1955" y="132">报损输入</text><text class="mega-body" x="1955" y="164"><tspan x="1955">已知报损数量直接扣库存</tspan><tspan x="1955" dy="24">报损金额按当天成本重算</tspan><tspan x="1955" dy="24">上游未知损耗只供核对</tspan><tspan x="1955" dy="24">负数已知报损直接报错</tspan></text></g>
             <g class="mega-node" data-key="relations-source" data-title="商品关系从哪里来" data-detail="父品拆分、加工配方、固定换码和商品集分开保存。没有当日换码流水表。"><rect class="node violet" x="2250" y="105" width="360" height="150" rx="18"/><text class="mega-title" x="2430" y="145">商品关系来源</text><text class="mega-body" x="2430" y="177"><tspan x="2430">父品拆分 / 加工 / A→B 比例</tspan><tspan x="2430" dy="24">验收分配 / 商品集</tspan><tspan x="2430" dy="24">验收表给当天 A 或 B 数量</tspan></text></g>
-            <g class="mega-node" data-key="dimensions" data-title="商品、门店和分类" data-detail="商品信息、日清标记、门店和分类用于补充业务记录。部分数据源只提供最新快照，因此历史日期也可能使用最新属性。"><rect class="node blue" x="2710" y="105" width="330" height="150" rx="18"/><text class="mega-title" x="2875" y="145">商品、门店和分类</text><text class="mega-body" x="2875" y="177"><tspan x="2875">商品信息 / 日清标记 / 门店</tspan><tspan x="2875" dy="24">分类规则与覆盖</tspan><tspan x="2875" dy="24">部分数据只提供最新快照</tspan></text><circle class="mega-risk-badge" cx="3015" cy="108" r="22"/><text class="mega-risk-label" x="3015" y="108">R1</text></g>
-            <g class="mega-node" data-key="stage" data-title="统一业务记录" data-detail="7 天共 22,603 条商品日记录。每笔外部业务只整理一次，后续计算直接使用。"><rect class="node green" x="3140" y="105" width="380" height="150" rx="18"/><text class="mega-title" x="3330" y="145">统一业务记录</text><text class="mega-body" x="3330" y="177"><tspan x="3330">门店 × 日期 × 商品</tspan><tspan x="3330" dy="24">日清标签只允许 0 或 1</tspan><tspan x="3330" dy="24">7 天 22,603 行</tspan></text></g>
+            <g class="mega-node" data-key="dimensions" data-title="商品、门店和分类" data-detail="商品信息、日清标记、门店和分类用于补充业务记录。部分数据源只保留最新一份，因此计算历史日期时也可能使用最新属性。"><rect class="node blue" x="2710" y="105" width="330" height="150" rx="18"/><text class="mega-title" x="2875" y="145">商品、门店和分类</text><text class="mega-body" x="2875" y="177"><tspan x="2875">商品信息 / 日清标记 / 门店</tspan><tspan x="2875" dy="24">分类规则与覆盖</tspan><tspan x="2875" dy="24">部分数据只保留最新一份</tspan></text><circle class="mega-risk-badge" cx="3015" cy="108" r="22"/><text class="mega-risk-label" x="3015" y="108">R1</text></g>
+            <g class="mega-node" data-key="stage" data-title="统一业务记录" data-detail="7 天共 22,603 条商品×日期记录。每笔外部业务只整理一次，后续计算直接使用。"><rect class="node green" x="3140" y="105" width="380" height="150" rx="18"/><text class="mega-title" x="3330" y="145">统一业务记录</text><text class="mega-body" x="3330" y="177"><tspan x="3330">门店 × 日期 × 商品</tspan><tspan x="3330" dy="24">日清标签只允许 0 或 1</tspan><tspan x="3330" dy="24">7 天 22,603 行</tspan></text></g>
             <path class="mega-edge source" d="M390 180H490"/><path class="mega-edge source" d="M800 180H900"/>
             <path class="mega-edge source" d="M1210 180H1310"/><path class="mega-edge loss" d="M1660 180H1760"/>
             <path class="mega-edge dashed" d="M1005 255V286H2390V255"/><path class="mega-edge dashed" d="M1105 255V306H2825V255"/>
@@ -433,21 +433,21 @@
             <!-- B -->
             <g class="mega-node" data-key="relation-start" data-title="待判断的商品对" data-detail="每对来源商品 A 和目标商品 B 都从原始数据、门店和日期开始，不预先假定属于拆分或加工。"><rect class="node violet" x="120" y="495" width="330" height="115" rx="16"/><text class="mega-title" x="285" y="534">来源商品 A → 目标商品 B</text><text class="mega-body" x="285" y="566"><tspan x="285">保留门店、日期和数据来源</tspan><tspan x="285" dy="23">再判断走哪条路</tspan></text></g>
             <g class="mega-node" data-key="same-judge" data-title="来源与目标是否同一商品" data-detail="同一商品直接接收收货，不生成自己转出、自己转入的商品转换记录。"><polygon class="node amber" points="700,465 850,552 700,639 550,552"/><text class="mega-title" x="700" y="540">A 与 B 是同一商品吗？</text><text class="mega-body" x="700" y="571">先比较商品代码</text></g>
-            <g class="mega-node" data-key="same" data-title="验收码和销售码相同" data-detail="2,129 个关系日。直接把收货记到同一商品，不生成自己转出、自己转入的无效明细。"><rect class="node gray" x="565" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="700" y="730">同码直接收货</text><text class="mega-body" x="700" y="762">2,129 个关系日；不做内部转换</text></g>
-            <g class="mega-node" data-key="formal-count" data-title="这对商品命中几种关系" data-detail="父品拆分、加工和固定换码会改变商品库存；验收已经写成 B 时直接收 B。"><polygon class="node amber" points="1170,465 1340,552 1170,639 1000,552"/><text class="mega-title" x="1170" y="540">命中几种关系？</text><text class="mega-body" x="1170" y="571">父品拆分 / 加工 / 换码</text></g>
-            <g class="mega-node" data-key="formal-conflict" data-title="商品关系冲突" data-detail="同一对商品同一天命中两种以上关系。不设置默认优先级；这对商品当天不转换，写入问题清单。"><rect class="node red" x="1035" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1170" y="730">关系冲突</text><text class="mega-body" x="1170" y="762">命中 2 类以上 → 不计算</text></g>
+            <g class="mega-node" data-key="same" data-title="验收码和销售码相同" data-detail="同码关系在 6 天内形成 2,129 条关系×日期记录。直接把收货记到同一商品，不生成自己转出、自己转入的无效明细。"><rect class="node gray" x="565" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="700" y="730">同码直接收货</text><text class="mega-body" x="700" y="762">2,129 条关系×日期；不做内部转换</text></g>
+            <g class="mega-node" data-key="formal-count" data-title="这对商品符合几种关系" data-detail="父品拆分、加工和固定换码会改变商品库存；验收已经写成 B 时直接收 B。"><polygon class="node amber" points="1170,465 1340,552 1170,639 1000,552"/><text class="mega-title" x="1170" y="540">符合几种关系？</text><text class="mega-body" x="1170" y="571">父品拆分 / 加工 / 换码</text></g>
+            <g class="mega-node" data-key="formal-conflict" data-title="商品关系冲突" data-detail="同一对商品同一天符合两种以上关系。不设置默认优先级；这对商品当天不转换，写入问题清单。"><rect class="node red" x="1035" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1170" y="730">关系冲突</text><text class="mega-body" x="1170" y="762">符合 2 类以上 → 不计算</text></g>
             <g class="mega-node" data-key="evidence-judge" data-title="当天数量和比例能否计算" data-detail="只有一种关系还不够，还要检查当天数量、固定比例和有效日期是否齐全。"><polygon class="node amber" points="1640,465 1810,552 1640,639 1470,552"/><text class="mega-title" x="1640" y="540">当天数据够不够？</text><text class="mega-body" x="1640" y="571">数量、比例、日期都要齐全</text></g>
-            <g class="mega-node" data-key="formal-active" data-title="当天可以处理的关系" data-detail="父品拆分 476 个关系日，加工 414 个，B 已直接收货 59 个，固定换码 46 个。"><rect class="node green" x="1505" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1640" y="730">关系可用</text><text class="mega-body" x="1640" y="762">拆分 476 / 加工 414 / 收 B 59 / 换码 46</text></g>
+            <g class="mega-node" data-key="formal-active" data-title="当天可以处理的关系" data-detail="父品拆分 476 条关系×日期记录，加工 414 条，B 已直接收货 59 条，固定换码实际发生 46 次。"><rect class="node green" x="1505" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="1640" y="730">关系可用</text><text class="mega-body" x="1640" y="762">拆476｜加工414｜收B59｜换码46</text></g>
             <g class="mega-node" data-key="evidence-missing" data-title="生熟联动报损优先" data-detail="不再要求成品必须盘点。如果配方中任一原料当天有生熟联动报损，整个配方当天不再计算加工，也不做部分抵扣。本周 17 个成品日。"><rect class="node red" x="1855" y="690" width="310" height="104" rx="15"/><text class="mega-title" x="2010" y="730">生熟联动优先</text><text class="mega-body" x="2010" y="762">17 个成品日不再算加工</text><circle class="mega-risk-badge" cx="2140" cy="692" r="22"/><text class="mega-risk-label" x="2140" y="692">R2</text></g>
-            <g class="mega-node" data-key="group-judge" data-title="源表是否已经写出 B 的收货" data-detail="未命中拆分、加工或固定换码时，继续检查源收货表是否已经给出 B 的正数数量和采购金额。"><polygon class="node amber" points="2360,465 2520,552 2360,639 2200,552"/><text class="mega-title" x="2360" y="540">源表已写 B 的数量和金额？</text><text class="mega-body" x="2360" y="571">有则直接收 B</text></g>
-            <g class="mega-node" data-key="group-candidate" data-title="验收已经直接写成 B" data-detail="59 个关系日、15 对商品。B 的数量和采购金额已经明确，直接把 B 记为收货；固定比例或重量只用于核对。"><rect class="node violet" x="2220" y="690" width="280" height="104" rx="15"/><text class="mega-title" x="2360" y="730">直接收商品 B</text><text class="mega-body" x="2360" y="762">59 个关系日；不再做 A→B</text></g>
+            <g class="mega-node" data-key="group-judge" data-title="源表是否已经写出 B 的收货" data-detail="未符合拆分、加工或固定换码时，继续检查源收货表是否已经给出 B 的正数数量和采购金额。"><polygon class="node amber" points="2360,465 2520,552 2360,639 2200,552"/><text class="mega-title" x="2360" y="540">源表已写 B 的数量和金额？</text><text class="mega-body" x="2360" y="571">有则直接收 B</text></g>
+            <g class="mega-node" data-key="group-candidate" data-title="验收已经直接写成 B" data-detail="59 条关系×日期记录，涉及 15 对商品。B 的数量和采购金额已经明确，直接把 B 记为收货；固定比例或重量只用于核对。"><rect class="node violet" x="2220" y="690" width="280" height="104" rx="15"/><text class="mega-title" x="2360" y="730">直接收商品 B</text><text class="mega-body" x="2360" y="762">59 条关系×日期；不再做 A→B</text></g>
             <g class="mega-node" data-key="unresolved" data-title="没有可计算关系" data-detail="只有同商品集时保留商品重量和计算比例供检查，但未确认拆分、加工或固定换码类型前不改变库存；其他无依据关系等待确认。"><rect class="node red" x="2600" y="690" width="270" height="104" rx="15"/><text class="mega-title" x="2735" y="730">没有可计算关系</text><text class="mega-body" x="2735" y="762">同组重量比只供检查；不转换</text></g>
             <g class="mega-node" data-key="double-count" data-title="B 已经收货时不再重复加工" data-detail="验收已经给出 B 的正数数量和采购金额时，只收 B 一次；同一 A→B 的加工关系保留供检查，但不再扣 A。本周 6 个成品日。"><rect class="node red" x="3005" y="483" width="450" height="138" rx="17"/><text class="mega-title" x="3230" y="523">收商品 B 和加工只能选一条</text><text class="mega-body" x="3230" y="555"><tspan x="3230">B 已经收货 → 不再扣 A</tspan><tspan x="3230" dy="24">本周 6 个成品日</tspan><tspan x="3230" dy="24">加工关系只保留供检查</tspan></text></g>
             <path class="mega-edge relation" d="M2430 255V424H285V495"/><path class="mega-edge relation" d="M450 552H550"/><path class="mega-edge relation" d="M700 639V690"/><text class="mega-edge-label" x="735" y="671">是</text><path class="mega-edge relation" d="M850 552H1000"/><text class="mega-edge-label" x="925" y="541">否</text><path class="mega-edge risk" d="M1170 639V690"/><text class="mega-edge-label" x="1210" y="671">≥2</text><path class="mega-edge relation" d="M1340 552H1470"/><text class="mega-edge-label" x="1405" y="541">1</text><path class="mega-edge relation" d="M1640 639V690"/><text class="mega-edge-label" x="1676" y="671">是</text><path class="mega-edge risk" d="M1810 552H2010V690"/><text class="mega-edge-label" x="1910" y="541">否</text><path class="mega-edge dashed" d="M1170 465V448H2360V465"/><text class="mega-edge-label" x="2050" y="438">0 类</text><path class="mega-edge dashed" d="M2360 639V690"/><text class="mega-edge-label" x="2394" y="671">是</text><path class="mega-edge risk" d="M2520 552H2735V690"/><text class="mega-edge-label" x="2640" y="541">否</text><path class="mega-edge risk" d="M3330 255V483"/>
 
             <!-- C -->
             <g class="mega-node" data-key="bom" data-title="父品拆成子品" data-detail="用父品和子品的验收数量确定拆分量；把父品成本按有效比例全部分给子品。"><rect class="node green" x="90" y="955" width="390" height="168" rx="18"/><text class="mega-title" x="285" y="995">父品拆成子品</text><text class="mega-body" x="285" y="1027"><tspan x="285">父品数量 → 子品数量</tspan><tspan x="285" dy="24">先检查公共单位数量</tspan><tspan x="285" dy="24">父品成本按比例全部分出</tspan><tspan x="285" dy="24">本周 31 次父品转出</tspan></text></g>
-            <g class="mega-node" data-key="processing" data-title="根据成品消耗计算原料用量" data-detail="已消耗成品量等于净销售量加普通报损量；每种原料用量按配方比例计算。不要求成品盘点，原料账面余额不足也不停算。本周 188 次，转出和转入金额均为 6,519.06459 元。"><rect class="node green" x="610" y="935" width="430" height="208" rx="18"/><text class="mega-title" x="825" y="975">原料加工成成品</text><text class="mega-body" x="825" y="1007"><tspan x="825">成品消耗 = 净销售 + 普通报损</tspan><tspan x="825" dy="24">原料用量 = 成品消耗 × 配方比例</tspan><tspan x="825" dy="24">生熟联动命中 → 该配方不加工</tspan><tspan x="825" dy="24">188 次 / 成品转入 1,017</tspan><tspan x="825" dy="24">原料转出 195.758 / 6,519.06 元</tspan></text></g>
+            <g class="mega-node" data-key="processing" data-title="根据成品消耗计算原料用量" data-detail="已消耗成品量等于净销售量加普通报损量；每种原料用量按配方比例计算。不要求成品盘点，原料账面余额不足也不停算。本周 188 次，转出和转入金额均为 6,519.06459 元。"><rect class="node green" x="610" y="935" width="430" height="208" rx="18"/><text class="mega-title" x="825" y="975">原料加工成成品</text><text class="mega-body" x="825" y="1007"><tspan x="825">成品消耗 = 净销售 + 普通报损</tspan><tspan x="825" dy="24">原料用量 = 成品消耗 × 配方比例</tspan><tspan x="825" dy="24">生熟联动符合 → 该配方不加工</tspan><tspan x="825" dy="24">188 次 / 成品转入 1,017</tspan><tspan x="825" dy="24">原料转出 195.758 / 6,519.06 元</tspan></text></g>
             <g class="mega-node" data-key="pack" data-title="A→B 固定换码" data-detail="验收已经写成 B 时直接收 B。验收仍写在 A 时，只有唯一有效 A→B 关系才按当天 A 验收量和固定比例转换。本周 46 次、10 对商品。"><rect class="node gray" x="1170" y="955" width="390" height="168" rx="18"/><text class="mega-title" x="1365" y="995">A→B 固定换码</text><text class="mega-body" x="1365" y="1027"><tspan x="1365">已写成 B：直接收 B</tspan><tspan x="1365" dy="24">仍写在 A：A 数量 × 固定比例</tspan><tspan x="1365" dy="24">46 次 / 10 对商品</tspan><tspan x="1365" dy="24">不依赖当日转换明细表</tspan></text></g>
             <g class="mega-node" data-key="residual" data-title="残余物和门店退货" data-detail="残余物转移和门店退货分别保留数量和金额，不并入父品拆分或加工字段。"><rect class="node gray" x="1690" y="955" width="350" height="168" rx="18"/><text class="mega-title" x="1865" y="995">残余物和门店退货</text><text class="mega-body" x="1865" y="1027"><tspan x="1865">分别记录转入和转出</tspan><tspan x="1865" dy="24">独立保存数量与金额</tspan><tspan x="1865" dy="24">不并入父品拆分</tspan></text></g>
             <g class="mega-node" data-key="posting-judge" data-title="来源转出和目标转入是否齐全" data-detail="同一次转换必须同时有来源商品转出和目标商品转入，且两边金额相等；否则整次转换不计入结果。"><polygon class="node amber" points="2320,945 2505,1039 2320,1133 2135,1039"/><text class="mega-title" x="2320" y="1026">转出和转入是否齐全？</text><text class="mega-body" x="2320" y="1058">两边金额必须相等</text></g>
@@ -467,7 +467,7 @@
             <g class="mega-node" data-key="opening" data-title="期初库存" data-detail="第一天从 08-05 的期末数据取得期初；以后每天直接复制前一天的期末。8 个 SKU 的首日期初有数量但没有金额。"><rect class="node blue" x="65" y="1435" width="310" height="150" rx="18"/><text class="mega-title" x="220" y="1475">期初库存</text><text class="mega-body" x="220" y="1507"><tspan x="220">今天期初 = 昨天期末</tspan><tspan x="220" dy="24">首日来自 08-05 源数据</tspan><tspan x="220" dy="24">同时记录数量、金额和来源</tspan></text></g>
             <g class="mega-node" data-key="inflows" data-title="当天可用的数量和金额" data-detail="期初、门店收货、父品拆分/加工/换码转入、销售退回和盘盈分别汇总数量与金额。"><rect class="node green" x="455" y="1435" width="390" height="150" rx="18"/><text class="mega-title" x="650" y="1475">当天可用数量和金额</text><text class="mega-body" x="650" y="1507"><tspan x="650">期初 + 门店收货</tspan><tspan x="650" dy="24">+ 商品转换转入</tspan><tspan x="650" dy="24">+ 销售退回 + 盘盈</tspan></text></g>
             <g class="mega-node" data-key="issue-cost" data-title="计算当天出库单位成本" data-detail="当天可用数量大于 0 时，单位成本等于可用金额除以可用数量；否则按既定顺序寻找已有历史成本或当天库存参考价。"><polygon class="node amber" points="1095,1415 1280,1510 1095,1605 910,1510"/><text class="mega-title" x="1095" y="1488">当天有可用数量？</text><text class="mega-body" x="1095" y="1522"><tspan x="1095">有：可用金额 ÷ 可用数量</tspan><tspan x="1095" dy="24">没有：寻找已有参考成本</tspan></text></g>
-            <g class="mega-node" data-key="zero-cost" data-title="发生销售或报损但没有成本" data-detail="193 个商品日发生销售、已知报损或商品转出，但没有可用单位成本；涉及 52 个商品、691.425 出库数量，因此不满足正式发布条件。"><rect class="node red" x="930" y="1690" width="330" height="148" rx="18"/><text class="mega-title" x="1095" y="1730">缺成本</text><text class="mega-body" x="1095" y="1762"><tspan x="1095">193 个商品日 / 52 个商品</tspan><tspan x="1095" dy="24">相关出库数量 691.425</tspan><tspan x="1095" dy="24">不满足正式发布条件</tspan></text><circle class="mega-risk-badge" cx="1235" cy="1692" r="22"/><text class="mega-risk-label" x="1235" y="1692">R3</text></g>
+            <g class="mega-node" data-key="zero-cost" data-title="发生销售或报损但没有成本" data-detail="193 条商品×日期记录发生销售、已知报损或商品转出，但没有可用单位成本；涉及 52 个商品、691.425 出库数量，因此不满足正式发布条件。"><rect class="node red" x="930" y="1690" width="330" height="148" rx="18"/><text class="mega-title" x="1095" y="1730">缺成本</text><text class="mega-body" x="1095" y="1762"><tspan x="1095">193 条商品×日期记录 / 52 个商品</tspan><tspan x="1095" dy="24">相关出库数量 691.425</tspan><tspan x="1095" dy="24">不满足正式发布条件</tspan></text><circle class="mega-risk-badge" cx="1235" cy="1692" r="22"/><text class="mega-risk-label" x="1235" y="1692">R3</text></g>
             <g class="mega-node" data-key="priced-outs" data-title="用同一个成本计算所有转出" data-detail="销售成本、已知报损金额和每类商品转出金额都等于对应数量乘当天出库单位成本；传入金额不一致时直接报错。"><rect class="node green" x="1410" y="1435" width="420" height="150" rx="18"/><text class="mega-title" x="1620" y="1475">计算全部转出成本</text><text class="mega-body" x="1620" y="1507"><tspan x="1620">销售数量 × 当天单位成本</tspan><tspan x="1620" dy="24">报损数量 × 当天单位成本</tspan><tspan x="1620" dy="24">商品转出数量 × 当天单位成本</tspan></text></g>
             <g class="mega-node" data-key="equation" data-title="计算理论期末库存" data-detail="理论期末等于当天可用库存，减商品转出、销售和已知报损；数量和金额使用相同加减结构。"><rect class="node amber" x="1960" y="1435" width="420" height="150" rx="18"/><text class="mega-title" x="2170" y="1475">理论期末库存</text><text class="mega-body" x="2170" y="1507"><tspan x="2170">可用库存 − 商品转出</tspan><tspan x="2170" dy="24">− 销售 − 已知报损</tspan><tspan x="2170" dy="24">数量和金额分别计算</tspan></text></g>
             <g class="mega-node" data-key="branch" data-title="按固定顺序决定期末" data-detail="先使用有效人工盘点；没有盘点且理论期末小于 0 时归零；其余情况使用理论期末。日清标签不单独改变库存公式。"><polygon class="node amber" points="2670,1405 2870,1510 2670,1615 2470,1510"/><text class="mega-title" x="2670" y="1477">如何确定期末？</text><text class="mega-body" x="2670" y="1510"><tspan x="2670">先看人工盘点</tspan><tspan x="2670" dy="24">再看理论期末是否小于 0</tspan><tspan x="2670" dy="24">日清标签不另设公式</tspan></text><circle class="mega-risk-badge" cx="2835" cy="1417" r="22"/><text class="mega-risk-label" x="2835" y="1417">R4</text></g>
@@ -487,13 +487,13 @@
             <g class="mega-node" data-key="loss-accounting" data-title="库存账中的报损金额" data-detail="已知报损金额等于报损数量乘当天出库单位成本；未知损耗金额只由理论库存和人工盘点的差额计算。源表报损金额只供核对。"><rect class="node red" x="395" y="2230" width="580" height="180" rx="18"/><text class="mega-title" x="685" y="2270">报损金额汇总</text><text class="mega-body" x="685" y="2302"><tspan x="685">已知报损 = 数量 × 当天成本 = 19,638.75 元</tspan><tspan x="685" dy="24">未知损耗 = 理论期末 − 实盘 = 759.18 元</tspan><tspan x="685" dy="24">合计 = 20,397.94 元</tspan><tspan x="685" dy="24">源表金额和上游未知损耗只供核对</tspan></text></g>
             <g class="mega-node" data-key="loss-impact" data-title="报损如何降低毛利" data-detail="已知报损先减少期末库存金额；毛利公式包含期末金额减期初金额，因此报损已降低毛利。公式不再单独减一次报损金额。"><rect class="node amber" x="1080" y="2230" width="500" height="180" rx="18"/><text class="mega-title" x="1330" y="2270">报损对毛利的影响</text><text class="mega-body" x="1330" y="2302"><tspan x="1330">报损先减少期末库存金额</tspan><tspan x="1330" dy="24">毛利包含：期末金额 − 期初金额</tspan><tspan x="1330" dy="24">因此报损已经降低毛利</tspan><tspan x="1330" dy="24">不再单独减报损，避免重复扣减</tspan></text></g>
             <g class="mega-node" data-key="base-profit" data-title="基础门店毛利公式" data-detail="基础毛利等于净销售额减收货金额，减商品转入金额、加商品转出金额，加期末库存金额、减期初库存金额，再减超出库存的成本。"><rect class="node green" x="1700" y="2215" width="620" height="210" rx="18"/><text class="mega-title" x="2010" y="2255">基础门店毛利</text><text class="mega-body" x="2010" y="2289"><tspan x="2010">净销售额 − 门店收货金额</tspan><tspan x="2010" dy="24">− 商品转入金额 + 商品转出金额</tspan><tspan x="2010" dy="24">+ 期末库存金额 − 期初库存金额</tspan><tspan x="2010" dy="24">− 超出库存的成本</tspan><tspan x="2010" dy="24">报损已通过期末库存反映，不重复扣减</tspan></text></g>
-            <g class="mega-node" data-key="special-source" data-title="炒菜机和生熟联动报损" data-detail="特殊报损表保存最新快照，但每条记录按 created_at 确定发生日期。炒菜机和生熟联动只调整报表展示，不修改库存、成本或商品转换明细。"><rect class="node violet" x="75" y="2535" width="430" height="190" rx="18"/><text class="mega-title" x="290" y="2575">特殊报损</text><text class="mega-body" x="290" y="2607"><tspan x="290">记录创建时间决定业务日期</tspan><tspan x="290" dy="24">CCJ = 炒菜机报损</tspan><tspan x="290" dy="24">SSLS = 生熟联动报损</tspan><tspan x="290" dy="24">只调报表，不改库存和成本</tspan></text></g>
+            <g class="mega-node" data-key="special-source" data-title="炒菜机和生熟联动报损" data-detail="特殊报损表只保留最新一份数据，但每条记录按 created_at 确定发生日期。炒菜机和生熟联动只调整报表展示，不修改库存、成本或商品转换明细。"><rect class="node violet" x="75" y="2535" width="430" height="190" rx="18"/><text class="mega-title" x="290" y="2575">特殊报损</text><text class="mega-body" x="290" y="2607"><tspan x="290">记录创建时间决定业务日期</tspan><tspan x="290" dy="24">CCJ = 炒菜机报损</tspan><tspan x="290" dy="24">SSLS = 生熟联动报损</tspan><tspan x="290" dy="24">只调报表，不改库存和成本</tspan></text></g>
             <g class="mega-node" data-key="display-loss" data-title="报表显示的损耗" data-detail="报表损耗金额从库存账损耗中减去炒菜机和生熟联动报损；未知损耗保持不变，因此只改变报表显示值。"><rect class="node amber" x="595" y="2535" width="500" height="190" rx="18"/><text class="mega-title" x="845" y="2575">报表损耗</text><text class="mega-body" x="845" y="2607"><tspan x="845">20,397.94 − 炒菜机 − 生熟联动</tspan><tspan x="845" dy="24">报表损耗 = 9,457.77 元</tspan><tspan x="845" dy="24">报表已知报损 = 8,698.58 元</tspan><tspan x="845" dy="24">未知损耗 759.18 元保持不变</tspan></text></g>
             <g class="mega-node" data-key="ccj-profit" data-title="炒菜机报损加回展示毛利" data-detail="为兼容 v1.5 报表，所有汇总层级的门店毛利和全链路毛利加回同额炒菜机报损；库存和成本不变。"><rect class="node green" x="1185" y="2535" width="390" height="190" rx="18"/><text class="mega-title" x="1380" y="2575">炒菜机报损展示调整</text><text class="mega-body" x="1380" y="2607"><tspan x="1380">各层毛利加回炒菜机报损</tspan><tspan x="1380" dy="24">只改报表展示</tspan><tspan x="1380" dy="24">不改库存和商品转换</tspan><tspan x="1380" dy="24">最终门店毛利 25,611.95 元</tspan></text></g>
             <g class="mega-node" data-key="ssls-profit" data-title="生熟联动报损的大分类调整" data-detail="只在大分类层调整：原料所属大分类加回自身生熟联动报损，熟食类扣除门店当日全部生熟联动报损；SKU、SPU 和门店合计不调整。"><rect class="node green" x="1645" y="2535" width="500" height="190" rx="18"/><text class="mega-title" x="1895" y="2575">生熟联动的大分类调整</text><text class="mega-body" x="1895" y="2607"><tspan x="1895">原料大类加回自身报损</tspan><tspan x="1895" dy="24">熟食类扣除门店当日总额</tspan><tspan x="1895" dy="24">SKU、SPU、门店合计不调整</tspan><tspan x="1895" dy="24">本周 2,749.33 元</tspan></text></g>
-            <g class="mega-node" data-key="loss-double-risk" data-title="生熟联动与加工不能重复扣原料" data-detail="配方中任一原料当天有生熟联动报损时，整组加工不计算；不做部分抵扣。最终检查确认两条路径的原料日交集为 0。"><rect class="node green" x="2225" y="2535" width="440" height="190" rx="18"/><text class="mega-title" x="2445" y="2575">生熟联动优先</text><text class="mega-body" x="2445" y="2607"><tspan x="2445">原料命中生熟联动 → 整组不加工</tspan><tspan x="2445" dy="24">17 个成品日 / 12 个成品</tspan><tspan x="2445" dy="24">两条路径重叠：0</tspan><tspan x="2445" dy="24">最终检查通过</tspan></text><circle class="ok-badge" cx="2638" cy="2539" r="22"/><text class="mega-risk-label" x="2638" y="2539">OK</text></g>
+            <g class="mega-node" data-key="loss-double-risk" data-title="生熟联动与加工不能重复扣原料" data-detail="配方中任一原料当天有生熟联动报损时，整组加工不计算；不做部分抵扣。最终检查确认两条路径的原料日交集为 0。"><rect class="node green" x="2225" y="2535" width="440" height="190" rx="18"/><text class="mega-title" x="2445" y="2575">生熟联动优先</text><text class="mega-body" x="2445" y="2607"><tspan x="2445">原料符合生熟联动 → 整组不加工</tspan><tspan x="2445" dy="24">17 个成品日 / 12 个成品</tspan><tspan x="2445" dy="24">两条路径重叠：0</tspan><tspan x="2445" dy="24">最终检查通过</tspan></text><circle class="ok-badge" cx="2638" cy="2539" r="22"/><text class="mega-risk-label" x="2638" y="2539">OK</text></g>
             <g class="mega-node" data-key="levels" data-title="七个汇总层级和 125 个字段" data-detail="依次输出门店、大分类、中分类、小分类、SPU、SKU 和商品集；分别保留日清、非日清和合计。前 123 个字段兼容 v1.5，新增 2 个商品集字段。"><rect class="node violet" x="2750" y="2055" width="400" height="210" rx="18"/><text class="mega-title" x="2950" y="2095">7 个层级 / 125 个字段</text><text class="mega-body" x="2950" y="2129"><tspan x="2950">门店 → 大 / 中 / 小分类</tspan><tspan x="2950" dy="24">→ SPU → SKU → 商品集</tspan><tspan x="2950" dy="24">日清 / 非日清 / 合计</tspan><tspan x="2950" dy="24">88,996 行</tspan></text></g>
-            <g class="mega-node" data-key="gates" data-title="账目检查和发布条件" data-detail="10 项账目检查和最新分类来源检查通过；193 个缺成本商品日使正式发布条件未通过。"><rect class="node red" x="3215" y="2055" width="330" height="210" rx="18"/><text class="mega-title" x="3380" y="2095">检查结果</text><text class="mega-body" x="3380" y="2129"><tspan x="3380">10 项账目检查：通过</tspan><tspan x="3380" dy="24">08-12 最新分类：通过</tspan><tspan x="3380" dy="24">193 个商品日缺成本</tspan><tspan x="3380" dy="24">正式发布条件未通过</tspan></text><circle class="mega-risk-badge" cx="3515" cy="2057" r="22"/><text class="mega-risk-label" x="3515" y="2057">R6</text></g>
+            <g class="mega-node" data-key="gates" data-title="账目检查和发布条件" data-detail="10 项账目检查和最新分类来源检查通过；193 条商品×日期记录缺成本，因此正式发布条件未通过。"><rect class="node red" x="3215" y="2055" width="330" height="210" rx="18"/><text class="mega-title" x="3380" y="2095">检查结果</text><text class="mega-body" x="3380" y="2129"><tspan x="3380">10 项账目检查：通过</tspan><tspan x="3380" dy="24">08-12 最新分类：通过</tspan><tspan x="3380" dy="24">193 条商品×日期记录缺成本</tspan><tspan x="3380" dy="24">正式发布条件未通过</tspan></text><circle class="mega-risk-badge" cx="3515" cy="2057" r="22"/><text class="mega-risk-label" x="3515" y="2057">R6</text></g>
             <g class="mega-node" data-key="processing-state-risk" data-title="仍需业务决定" data-detail="代码无法判断 4 个多关系成品是共同原料还是替代配方，也无法自行决定缺成本时最多向前取多少天的历史成本。"><rect class="node red" x="2750" y="2535" width="400" height="190" rx="18"/><text class="mega-title" x="2950" y="2575">仍需业务决定</text><text class="mega-body" x="2950" y="2607"><tspan x="2950">4 个多关系成品</tspan><tspan x="2950" dy="24">共同原料或替代配方未确认</tspan><tspan x="2950" dy="24">历史成本是否可用未确认</tspan><tspan x="2950" dy="24">最大向前取数天数未确认</tspan></text><circle class="mega-risk-badge" cx="3123" cy="2539" r="22"/><text class="mega-risk-label" x="3123" y="2539">R7</text></g>
 
             <!-- 三类报损事实分别进入，不在分区标题上汇成一束 -->
@@ -501,7 +501,7 @@
             <path class="mega-edge stock" d="M1280 1510H1340V1960H680V2050"/>
             <path class="mega-edge loss" d="M2585 1828V1970H1105V2050"/>
 
-            <!-- 三个输入以独立端口汇入账本报损；数量和金额语义不混线 -->
+            <!-- 三类报损分别进入库存计算；数量和金额不会混用 -->
             <path class="mega-edge loss" d="M255 2160V2190H520V2230"/>
             <path class="mega-edge stock" d="M680 2160V2230"/>
             <path class="mega-edge loss" d="M1105 2160V2190H850V2230"/>
@@ -515,7 +515,7 @@
             <path class="mega-edge output" d="M210 2725V2760H1380V2725"/>
             <path class="mega-edge output" d="M290 2725V2790H1895V2725"/>
             <path class="mega-edge risk" d="M370 2725V2820H2445V2725"/>
-            <text class="mega-edge-label" x="1830" y="2515">特殊展示规则（不改库存账本）</text>
+            <text class="mega-edge-label" x="1830" y="2515">特殊报表规则（不改库存数量和金额）</text>
 
             <!-- 加工相关风险从上游加工节点独立绕行，不穿过毛利节点 -->
             <path class="mega-edge risk" d="M780 1123V1250H45V2480H2445V2535"/>
@@ -539,24 +539,24 @@
           <filter id="softShadow2" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#7690a8" flood-opacity=".14"/></filter>
         </defs>
         <rect class="lane" x="20" y="30" width="1420" height="218" rx="18"/><text class="lane-label" x="42" y="58">A. 远端源 → 本地不可变缓存</text>
-        <rect class="lane" x="20" y="270" width="1420" height="284" rx="18"/><text class="lane-label" x="42" y="298">B. 将各源表整理为统一的商品日活动表</text>
+        <rect class="lane" x="20" y="270" width="1420" height="284" rx="18"/><text class="lane-label" x="42" y="298">B. 将各源表整理为统一的商品每日活动表</text>
         <rect class="lane" x="20" y="576" width="1420" height="315" rx="18"/><text class="lane-label" x="42" y="604">C. 判定商品关系；不能计算的关系单独记录</text>
         <rect class="lane" x="20" y="913" width="1420" height="257" rx="18"/><text class="lane-label" x="42" y="941">D. 生成商品间转出和转入，再计算每日库存和成本</text>
         <rect class="lane" x="20" y="1192" width="1420" height="348" rx="18"/><text class="lane-label" x="42" y="1220">E. 生成结果、执行发布检查、对比 v1.5</text>
 
         <!-- A -->
         <rect class="node blue" x="70" y="86" width="250" height="116" rx="15"/>
-        <text class="title" x="195" y="119">QDM StarRocks 镜像</text>
-        <text class="body" x="195" y="145"><tspan x="195">25 个必需数据源</tspan><tspan x="195" dy="20">只读查询；服务器写入 0</tspan><tspan x="195" dy="20">按业务日期或快照日期读取</tspan></text>
+        <text class="title" x="195" y="119">QDM StarRocks 源数据副本</text>
+        <text class="body" x="195" y="145"><tspan x="195">25 个必需数据源</tspan><tspan x="195" dy="20">只读查询；服务器写入 0</tspan><tspan x="195" dy="20">按业务日期或数据版本日期读取</tspan></text>
         <rect class="node amber" x="415" y="86" width="250" height="116" rx="15"/>
         <text class="title" x="540" y="119">提取前完整性检查</text>
-        <text class="body" x="540" y="145"><tspan x="540">先统计每个日期分片的应有行数</tspan><tspan x="540" dy="20">单页可能截断时立即停止</tspan><tspan x="540" dy="20">拉取后逐片核对实际行数</tspan></text>
+        <text class="body" x="540" y="145"><tspan x="540">先统计每个日期批次应有的行数</tspan><tspan x="540" dy="20">单页可能缺行时立即停止</tspan><tspan x="540" dy="20">读取后逐批核对实际行数</tspan></text>
         <rect class="node green" x="760" y="86" width="250" height="116" rx="15"/>
         <text class="title" x="885" y="119">删除完全重复行，检查每行含义</text>
-        <text class="body" x="885" y="145"><tspan x="885">只删除整行完全相同的重复记录</tspan><tspan x="885" dy="20">主键重复、缺日或断档时停止</tspan><tspan x="885" dy="20">保存每个数据源的检查结果</tspan></text>
+        <text class="body" x="885" y="145"><tspan x="885">只删除整行完全相同的重复记录</tspan><tspan x="885" dy="20">主键重复、缺少日期或日期不连续时停止</tspan><tspan x="885" dy="20">保存每个数据源的检查结果</tspan></text>
         <rect class="node blue" x="1105" y="86" width="250" height="116" rx="15"/>
         <text class="title" x="1230" y="119">本地原始数据缓存</text>
-        <text class="body" x="1230" y="145"><tspan x="1230">源/日期级即时提交</tspan><tspan x="1230" dy="20">失败可断点续跑</tspan><tspan x="1230" dy="20">本次基于生产只读数据</tspan></text>
+        <text class="body" x="1230" y="145"><tspan x="1230">每张表每天读取后立即保存</tspan><tspan x="1230" dy="20">失败后从未完成日期继续</tspan><tspan x="1230" dy="20">本次基于生产只读数据</tspan></text>
         <path class="edge" d="M320 144H415"/><path class="edge" d="M665 144H760"/><path class="edge" d="M1010 144H1105"/>
         <circle class="risk-badge" cx="1335" cy="82" r="17"/><text class="risk-text" x="1335" y="82">R1</text>
 
@@ -572,10 +572,10 @@
         <rect class="node blue" x="970" y="332" width="202" height="92" rx="14"/>
         <text class="title" x="1071" y="362">商品、门店和分类</text><text class="body" x="1071" y="386"><tspan x="1071">商品信息 / 日清标记</tspan><tspan x="1071" dy="18">门店 / 分类</tspan></text>
         <rect class="node amber" x="1198" y="332" width="202" height="92" rx="14"/>
-        <text class="title" x="1299" y="362">业务特殊规则</text><text class="body" x="1299" y="386"><tspan x="1299">CCJ / SSLS</tspan><tspan x="1299" dy="18">分类规则快照</tspan></text>
+        <text class="title" x="1299" y="362">业务特殊规则</text><text class="body" x="1299" y="386"><tspan x="1299">CCJ / SSLS</tspan><tspan x="1299" dy="18">本次使用的分类副本</tspan></text>
         <path class="edge" d="M1230 202V280H159V332"/><path class="edge" d="M1230 280H387V332"/><path class="edge" d="M1230 280H615V332"/><path class="edge" d="M1230 280H843V332"/><path class="edge" d="M1230 280H1071V332"/><path class="edge" d="M1230 280H1299V332"/>
         <rect class="node green" x="372" y="462" width="716" height="64" rx="14"/>
-        <text class="title" x="730" y="488">统一商品日活动表（Stage）：门店 × 日期 × 商品 × 日清标记</text>
+        <text class="title" x="730" y="488">统一商品每日活动表：门店 × 日期 × 商品 × 日清标记</text>
         <text class="body" x="730" y="511">本次 3,229 个商品、7 天、22,603 行；下游直接使用这里整理后的源数据</text>
         <path class="edge" d="M159 424V446H730V462"/><path class="edge" d="M387 424V446"/><path class="edge" d="M615 424V446"/><path class="edge" d="M843 424V446"/><path class="edge" d="M1071 424V446"/><path class="edge" d="M1299 424V446H730"/>
         <circle class="risk-badge" cx="1058" cy="459" r="17"/><text class="risk-text" x="1058" y="459">R2</text>
@@ -585,22 +585,22 @@
         <polygon class="node amber" points="730,625 865,687 730,749 595,687"/>
         <text class="title" x="730" y="674">来源与目标是同一商品吗？</text><text class="body" x="730" y="699">先比较商品代码</text>
         <rect class="node gray" x="170" y="635" width="250" height="103" rx="14"/>
-        <text class="title" x="295" y="668">来源与目标是同一商品</text><text class="body" x="295" y="694"><tspan x="295">2,129 个关系日</tspan><tspan x="295" dy="20">不生成商品间转入或转出</tspan></text>
+        <text class="title" x="295" y="668">来源与目标是同一商品</text><text class="body" x="295" y="694"><tspan x="295">2,129 条关系×日期记录</tspan><tspan x="295" dy="20">不生成商品间转入或转出</tspan></text>
         <path class="edge" d="M595 687H420"/><text class="edge-label" x="500" y="678">是</text>
         <polygon class="node amber" points="1040,625 1182,687 1040,749 898,687"/>
-        <text class="title" x="1040" y="674">命中几种可计算关系？</text><text class="body" x="1040" y="699">拆分 / 加工 / 已分配验收 / 固定换码</text>
+        <text class="title" x="1040" y="674">符合几种可计算关系？</text><text class="body" x="1040" y="699">拆分 / 加工 / 已分配验收 / 固定换码</text>
         <path class="edge" d="M865 687H898"/><text class="edge-label" x="881" y="678">否</text>
         <rect class="node green" x="914" y="786" width="252" height="76" rx="14"/>
-        <text class="title" x="1040" y="816">只命中一种且资料完整</text><text class="body" x="1040" y="841">进入当日计算</text>
+        <text class="title" x="1040" y="816">只符合一种且资料完整</text><text class="body" x="1040" y="841">进入当日计算</text>
         <path class="edge" d="M1040 749V786"/><text class="edge-label" x="1087" y="774">1 类</text>
         <rect class="node red" x="1190" y="786" width="210" height="76" rx="14"/>
         <text class="title" x="1295" y="816">关系冲突或资料不全</text><text class="body" x="1295" y="841">不计算并记录具体原因</text>
         <path class="edge-risk" d="M1182 687H1295V786"/><text class="edge-label" x="1270" y="674">多类或不完整</text>
         <rect class="node violet" x="550" y="786" width="310" height="76" rx="14"/>
-        <text class="title" x="705" y="816">跨码收货已给 B 数量和金额</text><text class="body" x="705" y="841">59 个关系日；直接把 B 记为收货</text>
+        <text class="title" x="705" y="816">跨码收货已给 B 数量和金额</text><text class="body" x="705" y="841">59 条关系×日期记录；直接把 B 记为收货</text>
         <path class="edge-dashed" d="M1040 749V766H705V786"/><text class="edge-label" x="872" y="759">0 类</text>
         <rect class="node red" x="238" y="786" width="260" height="76" rx="14"/>
-        <text class="title" x="368" y="816">未命中可计算关系</text><text class="body" x="368" y="841">不计算；保留为待确认记录</text>
+        <text class="title" x="368" y="816">未符合可计算关系</text><text class="body" x="368" y="841">不计算；保留为待确认记录</text>
         <path class="edge-risk" d="M550 824H498"/>
         <circle class="risk-badge" cx="1378" cy="782" r="17"/><text class="risk-text" x="1378" y="782">R3</text>
 
@@ -609,7 +609,7 @@
         <rect class="node green" x="110" y="972" width="260" height="112" rx="15"/>
         <text class="title" x="240" y="1004">拆分：父品转出，子品转入</text><text class="body" x="240" y="1030"><tspan x="240">476 次子品转入；31 次父品转出</tspan><tspan x="240" dy="20">转出与转入金额各 20,523.54 元</tspan><tspan x="240" dy="20">同一笔成本只转移一次</tspan></text>
         <rect class="node amber" x="400" y="960" width="300" height="136" rx="15"/>
-        <text class="title" x="550" y="992">加工：按成品消耗推算原料消耗</text><text class="body" x="550" y="1018"><tspan x="550">成品消耗 = 销售量 + 普通报损量</tspan><tspan x="550" dy="20">命中生熟联动报损时整组不加工</tspan><tspan x="550" dy="20">188 次；原料转出与成品转入各 188 条</tspan><tspan x="550" dy="20">转出与转入金额各 6,519.06 元</tspan></text>
+        <text class="title" x="550" y="992">加工：按成品消耗推算原料消耗</text><text class="body" x="550" y="1018"><tspan x="550">成品消耗 = 销售量 + 普通报损量</tspan><tspan x="550" dy="20">符合生熟联动报损时整组不加工</tspan><tspan x="550" dy="20">188 次；原料转出与成品转入各 188 条</tspan><tspan x="550" dy="20">转出与转入金额各 6,519.06 元</tspan></text>
         <rect class="node gray" x="730" y="972" width="260" height="112" rx="15"/>
         <text class="title" x="860" y="1004">固定换码：A 转为 B</text><text class="body" x="860" y="1030"><tspan x="860">验收已记为 B：直接收 B</tspan><tspan x="860" dy="20">仍记为 A：A 数量 × 固定比例</tspan><tspan x="860" dy="20">46 次 / 10 对商品</tspan></text>
         <rect class="node gray" x="1040" y="972" width="260" height="112" rx="15"/>
@@ -632,9 +632,9 @@
         <text class="title" x="1134" y="1283">10 项会计结构检查</text><text class="body" x="1134" y="1308"><tspan x="1134">检查数量、金额和跨日衔接</tspan><tspan x="1134" dy="19">检查生熟联动与加工不重复</tspan></text>
         <path class="edge" d="M730 1218H213V1244"/><path class="edge" d="M338 1296H396"/><path class="edge" d="M646 1296H704"/><path class="edge" d="M954 1296H988"/>
         <polygon class="node amber" points="829,1383 975,1447 829,1511 683,1447"/>
-        <text class="title" x="829" y="1435">正式发布条件</text><text class="body" x="829" y="1460"><tspan x="829">分类来源通过</tspan><tspan x="829" dy="19">193 个商品日缺少成本</tspan></text>
+        <text class="title" x="829" y="1435">正式发布条件</text><text class="body" x="829" y="1460"><tspan x="829">分类来源通过</tspan><tspan x="829" dy="19">193 条商品×日期记录缺少成本</tspan></text>
         <rect class="node red" x="1030" y="1400" width="338" height="96" rx="15"/>
-        <text class="title" x="1199" y="1431">不发布；保留本地检查结果</text><text class="body" x="1199" y="1457"><tspan x="1199">193 个商品日缺成本；分类来源已通过</tspan><tspan x="1199" dy="20">服务器生产写入为 0</tspan></text>
+        <text class="title" x="1199" y="1431">不发布；保留本地检查结果</text><text class="body" x="1199" y="1457"><tspan x="1199">193 条商品×日期记录缺成本；分类来源已通过</tspan><tspan x="1199" dy="20">服务器生产写入为 0</tspan></text>
         <rect class="node blue" x="285" y="1400" width="338" height="96" rx="15"/>
         <text class="title" x="454" y="1431">只读对比 v1.5</text><text class="body" x="454" y="1457"><tspan x="454">销售、验收、SCM 完全一致</tspan><tspan x="454" dy="20">门店毛利低 6.343%</tspan></text>
         <path class="edge" d="M1134 1360V1375H829V1383"/><path class="edge" d="M683 1447H623"/>
@@ -646,7 +646,7 @@
   </section>
 
   <section id="relation" class="legacy-diagram">
-    <div class="section-head"><div><h2>2B. 独立图：关系判定树</h2><p>先确认来源商品、目标商品和关系类型。只能命中一种可计算关系；关系冲突或资料不全时不计算。</p></div></div>
+    <div class="section-head"><div><h2>2B. 独立图：关系判定树</h2><p>先确认来源商品、目标商品和关系类型。只能符合一种可计算关系；关系冲突或资料不全时不计算。</p></div></div>
     <div class="diagram-wrap">
       <svg class="diagram" viewBox="0 0 1420 950" role="img" aria-label="关系判定树">
         <rect class="node violet" x="535" y="42" width="350" height="76" rx="16"/>
@@ -656,15 +656,15 @@
         <text class="title" x="710" y="216">A 与 B 是同一商品吗？</text><text class="body" x="710" y="241">先比较商品代码</text>
 
         <rect class="node gray" x="100" y="178" width="300" height="96" rx="14"/>
-        <text class="title" x="250" y="209">同一商品</text><text class="body" x="250" y="235"><tspan x="250">2,129 个关系日 / 833 对</tspan><tspan x="250" dy="20">不生成商品间转入或转出</tspan></text>
+        <text class="title" x="250" y="209">同一商品</text><text class="body" x="250" y="235"><tspan x="250">2,129 条关系×日期 / 833 对</tspan><tspan x="250" dy="20">不生成商品间转入或转出</tspan></text>
         <path class="edge" d="M568 226H400"/><text class="edge-label" x="484" y="216">是</text>
 
         <polygon class="node amber" points="1035,164 1195,226 1035,288 875,226"/>
-        <text class="title" x="1035" y="216">命中几种可计算关系？</text><text class="body" x="1035" y="241">拆分 / 加工 / 已分配验收 / 固定换码</text>
+        <text class="title" x="1035" y="216">符合几种可计算关系？</text><text class="body" x="1035" y="241">拆分 / 加工 / 已分配验收 / 固定换码</text>
         <path class="edge" d="M852 226H875"/><text class="edge-label" x="864" y="216">否</text>
 
         <polygon class="node amber" points="520,360 662,422 520,484 378,422"/>
-        <text class="title" x="520" y="412">未命中：是否属于同一商品集？</text><text class="body" x="520" y="437">商品重量可用于检查比例</text>
+        <text class="title" x="520" y="412">未符合：是否属于同一商品集？</text><text class="body" x="520" y="437">商品重量可用于检查比例</text>
         <path class="edge-dashed" d="M1035 288V323H520V360"/><text class="edge-label" x="778" y="314">0 类</text>
         <rect class="node violet" x="138" y="538" width="310" height="96" rx="14"/>
         <text class="title" x="293" y="569">同商品集，关系待确认</text><text class="body" x="293" y="595"><tspan x="293">保留商品重量和计算比例</tspan><tspan x="293" dy="20">未确认关系类型前不改库存和成本</tspan></text>
@@ -674,22 +674,22 @@
         <path class="edge-risk" d="M592 452L615 538"/><text class="edge-label" x="621" y="492">否</text>
 
         <polygon class="node amber" points="1035,360 1195,422 1035,484 875,422"/>
-        <text class="title" x="1035" y="412">只命中一种：资料足够计算吗？</text><text class="body" x="1035" y="437">检查日期、数量、金额和关系比例</text>
+        <text class="title" x="1035" y="412">只符合一种：资料足够计算吗？</text><text class="body" x="1035" y="437">检查日期、数量、金额和关系比例</text>
         <path class="edge" d="M1035 288V360"/><text class="edge-label" x="1078" y="326">1 类</text>
         <rect class="node green" x="823" y="538" width="310" height="96" rx="14"/>
-        <text class="title" x="978" y="569">进入当日计算</text><text class="body" x="978" y="595"><tspan x="978">拆分 476 / 加工 414 / 已分配验收 59</tspan><tspan x="978" dy="20">固定换码 46 个关系日</tspan></text>
+        <text class="title" x="978" y="569">进入当日计算</text><text class="body" x="978" y="595"><tspan x="978">拆分 476 / 加工 414 / 已分配验收 59</tspan><tspan x="978" dy="20">固定换码实际发生 46 次</tspan></text>
         <rect class="node red" x="1160" y="538" width="228" height="96" rx="14"/>
         <text class="title" x="1274" y="569">资料不足</text><text class="body" x="1274" y="595"><tspan x="1274">关系存在，但无法完整计算</tspan><tspan x="1274" dy="20">不计算并记录缺少的字段</tspan></text>
         <path class="edge" d="M970 456L978 538"/><text class="edge-label" x="950" y="493">是</text>
         <path class="edge-risk" d="M1100 456L1274 538"/><text class="edge-label" x="1191" y="493">否</text>
 
         <rect class="node red" x="1120" y="48" width="265" height="96" rx="14"/>
-        <text class="title" x="1253" y="79">关系类型冲突</text><text class="body" x="1253" y="105"><tspan x="1253">同时命中多种可计算关系</tspan><tspan x="1253" dy="20">不自动选择；不改库存和成本</tspan></text>
+        <text class="title" x="1253" y="79">关系类型冲突</text><text class="body" x="1253" y="105"><tspan x="1253">同时符合多种可计算关系</tspan><tspan x="1253" dy="20">不自动选择；不改库存和成本</tspan></text>
         <path class="edge-risk" d="M1195 226H1360V144"/><text class="edge-label" x="1322" y="216">≥2 类</text>
 
         <rect class="node green" x="165" y="720" width="1090" height="146" rx="18"/>
         <text class="title" x="710" y="753">四类关系各自使用以下当日数据</text>
-        <text class="body" x="710" y="780"><tspan x="710">拆分：父品数量、子品数量或比例、可分配的父品金额</tspan><tspan x="710" dy="22">加工：成品销售量 + 普通报损量；命中生熟联动报损时整组不加工</tspan><tspan x="710" dy="22">已分配验收：源表已写出 B 的数量和金额，直接作为 B 的收货</tspan><tspan x="710" dy="22">固定换码：A 当天只有一个目标 B 时，按固定比例将 A 的收货量换算为 B</tspan></text>
+        <text class="body" x="710" y="780"><tspan x="710">拆分：父品数量、子品数量或比例、可分配的父品金额</tspan><tspan x="710" dy="22">加工：成品销售量 + 普通报损量；符合生熟联动报损时整组不加工</tspan><tspan x="710" dy="22">已分配验收：源表已写出 B 的数量和金额，直接作为 B 的收货</tspan><tspan x="710" dy="22">固定换码：A 当天只有一个目标 B 时，按固定比例将 A 的收货量换算为 B</tspan></text>
         <path class="edge" d="M978 634V720"/>
       </svg>
     </div>
@@ -708,7 +708,7 @@
         <rect class="node green" x="395" y="200" width="270" height="128" rx="15"/>
         <text class="title" x="530" y="233">原料加工为成品</text><text class="body" x="530" y="259"><tspan x="530">按已消耗成品量推算原料用量</tspan><tspan x="530" dy="20">不要求当天有成品盘点</tspan><tspan x="530" dy="20">本周计算 188 次</tspan><tspan x="530" dy="20">生熟联动报损优先</tspan></text>
         <rect class="node gray" x="755" y="200" width="270" height="128" rx="15"/>
-        <text class="title" x="890" y="233">固定换码：A 转为 B</text><text class="body" x="890" y="259"><tspan x="890">验收已记为 B：直接收 B，共 59 个关系日</tspan><tspan x="890" dy="20">仍记为 A：A 收货量 × 固定比例</tspan><tspan x="890" dy="20">后者发生 46 次，涉及 10 对商品</tspan><tspan x="890" dy="20">不要求当日转换明细表</tspan></text>
+        <text class="title" x="890" y="233">固定换码：A 转为 B</text><text class="body" x="890" y="259"><tspan x="890">验收已记为 B：直接收 B，共 59 条关系×日期记录</tspan><tspan x="890" dy="20">仍记为 A：A 收货量 × 固定比例</tspan><tspan x="890" dy="20">后者发生 46 次，涉及 10 对商品</tspan><tspan x="890" dy="20">不要求当日转换明细表</tspan></text>
         <rect class="node gray" x="1105" y="200" width="270" height="128" rx="15"/>
         <text class="title" x="1240" y="233">残余物和门店退货</text><text class="body" x="1240" y="259"><tspan x="1240">分别记录数量和金额</tspan><tspan x="1240" dy="20">不并入拆分关系</tspan><tspan x="1240" dy="20">本周没有主要金额</tspan></text>
 
@@ -722,7 +722,7 @@
         <path class="edge" d="M180 505V555"/><text class="edge-label" x="205" y="536">是</text><path class="edge-risk" d="M315 445H469V555"/><text class="edge-label" x="394" y="435">否</text>
 
         <polygon class="node amber" points="710,385 868,445 710,505 552,445"/>
-        <text class="title" x="710" y="436">原料命中生熟联动报损（SSLS）？</text><text class="body" x="710" y="461">生熟联动与加工二选一</text>
+        <text class="title" x="710" y="436">原料符合生熟联动报损（SSLS）？</text><text class="body" x="710" y="461">生熟联动与加工二选一</text>
         <path class="edge" d="M530 328V352H710V385"/>
         <rect class="node red" x="630" y="555" width="322" height="116" rx="14"/>
         <text class="title" x="791" y="586">是：只走生熟联动报损</text><text class="body" x="791" y="612"><tspan x="791">整组不再计算加工</tspan><tspan x="791" dy="20">不先扣一部分再计算剩余部分</tspan><tspan x="791" dy="20">本周 17 个成品日执行此规则</tspan></text>
@@ -736,7 +736,7 @@
         <rect class="node green" x="550" y="850" width="430" height="126" rx="15"/>
         <text class="title" x="765" y="882">计算成品转入和原料转出</text><text class="body" x="765" y="908"><tspan x="765">成品消耗量 = 净销售量 + 普通报损量</tspan><tspan x="765" dy="20">成品转入量 = 成品消耗量</tspan><tspan x="765" dy="20">原料转出量 = 成品消耗量 × 原料用量 ÷ 成品产量</tspan><tspan x="765" dy="20">本周：188 次；成品 1,017；原料 195.758</tspan></text>
         <rect class="node red" x="1015" y="850" width="330" height="126" rx="15"/>
-        <text class="title" x="1180" y="882">不计算加工</text><text class="body" x="1180" y="908"><tspan x="1180">成品消耗量为 0：无需计算</tspan><tspan x="1180" dy="20">24 个多配方成品日：关系含义未确认</tspan><tspan x="1180" dy="20">6 个成品日已有外部收货：外部收货优先</tspan><tspan x="1180" dy="20">命中生熟联动：已在上一步停止加工</tspan></text>
+        <text class="title" x="1180" y="882">不计算加工</text><text class="body" x="1180" y="908"><tspan x="1180">成品消耗量为 0：无需计算</tspan><tspan x="1180" dy="20">24 个多配方成品日：关系含义未确认</tspan><tspan x="1180" dy="20">6 个成品日已有外部收货：外部收货优先</tspan><tspan x="1180" dy="20">符合生熟联动：已在上一步停止加工</tspan></text>
         <path class="edge" d="M857 770H765V850"/><text class="edge-label" x="804" y="761">是</text>
         <path class="edge-risk" d="M1015 830V850"/><text class="edge-label" x="1042" y="842">否/失败</text>
 
@@ -747,7 +747,7 @@
         <circle class="risk-badge" cx="934" cy="1009" r="17"/><text class="risk-text" x="934" y="1009">R6</text>
 
         <rect class="node red" x="286" y="1150" width="848" height="32" rx="13"/>
-        <text class="body" x="710" y="1171">强制规则：任一配方原料在当天命中生熟联动报损，该成品当天只走生熟联动，不再计算加工；最终重叠数必须为 0。</text>
+        <text class="body" x="710" y="1171">强制规则：任一配方原料在当天符合生熟联动报损，该成品当天只走生熟联动，不再计算加工；最终重叠数必须为 0。</text>
       </svg>
     </div>
   </section>
@@ -757,7 +757,7 @@
     <div class="diagram-wrap">
       <svg class="diagram" viewBox="0 0 1440 1450" role="img" aria-label="库存计算分支流程图">
         <rect class="node blue" x="35" y="45" width="215" height="116" rx="14"/>
-        <text class="title" x="143" y="78">期初库存</text><text class="body" x="143" y="104"><tspan x="143">优先使用前一日期末</tspan><tspan x="143" dy="20">首次运行使用盘点或库存快照</tspan><tspan x="143" dy="20">仍无数据时按 0 开始</tspan></text>
+        <text class="title" x="143" y="78">期初库存</text><text class="body" x="143" y="104"><tspan x="143">优先使用前一日期末</tspan><tspan x="143" dy="20">首次运行使用人工盘点或源表库存数量</tspan><tspan x="143" dy="20">仍无数据时按 0 开始</tspan></text>
         <rect class="node blue" x="278" y="45" width="215" height="116" rx="14"/>
         <text class="title" x="386" y="78">外部收货</text><text class="body" x="386" y="104"><tspan x="386">记录收货数量和金额</tspan><tspan x="386" dy="20">供应链金融金额另行保留</tspan><tspan x="386" dy="20">只有金额没有数量时不参与成本计算</tspan></text>
         <rect class="node green" x="521" y="45" width="215" height="116" rx="14"/>
@@ -798,13 +798,13 @@
         <path class="edge" d="M720 989V1040"/>
 
         <rect class="node blue" x="30" y="1240" width="270" height="126" rx="15"/>
-        <text class="title" x="165" y="1272">① 有人工盘点</text><text class="body" x="165" y="1298"><tspan x="165">期末 = 盘点数量</tspan><tspan x="165" dy="20">未知差异 = 理论期末 − 盘点数量</tspan><tspan x="165" dy="20">本周 1,924 个商品日</tspan><tspan x="165" dy="20">盘盈记为负的未知差异</tspan></text>
+        <text class="title" x="165" y="1272">① 有人工盘点</text><text class="body" x="165" y="1298"><tspan x="165">期末 = 盘点数量</tspan><tspan x="165" dy="20">未知差异 = 理论期末 − 盘点数量</tspan><tspan x="165" dy="20">本周 1,924 条商品×日期记录</tspan><tspan x="165" dy="20">盘盈记为负的未知差异</tspan></text>
         <rect class="node red" x="388" y="1240" width="270" height="126" rx="15"/>
-        <text class="title" x="523" y="1272">② 理论期末小于 0</text><text class="body" x="523" y="1298"><tspan x="523">期末数量设为 0</tspan><tspan x="523" dy="20">超出库存成本 = 短缺数量 × 单位成本</tspan><tspan x="523" dy="20">本周 638 个商品日 / 15,663.61 元</tspan><tspan x="523" dy="20">该成本单独从毛利扣除</tspan></text>
+        <text class="title" x="523" y="1272">② 理论期末小于 0</text><text class="body" x="523" y="1298"><tspan x="523">期末数量设为 0</tspan><tspan x="523" dy="20">超出库存成本 = 短缺数量 × 单位成本</tspan><tspan x="523" dy="20">本周 638 条商品×日期记录 / 15,663.61 元</tspan><tspan x="523" dy="20">该成本单独从毛利扣除</tspan></text>
         <rect class="node green" x="746" y="1240" width="270" height="126" rx="15"/>
-        <text class="title" x="881" y="1272">③ 有已知报损</text><text class="body" x="881" y="1298"><tspan x="881">期末 = 理论期末</tspan><tspan x="881" dy="20">未知差异 = 0</tspan><tspan x="881" dy="20">本周 658 个商品日</tspan><tspan x="881" dy="20">已知报损已从期末扣除</tspan></text>
+        <text class="title" x="881" y="1272">③ 有已知报损</text><text class="body" x="881" y="1298"><tspan x="881">期末 = 理论期末</tspan><tspan x="881" dy="20">未知差异 = 0</tspan><tspan x="881" dy="20">本周 658 条商品×日期记录</tspan><tspan x="881" dy="20">已知报损已从期末扣除</tspan></text>
         <rect class="node green" x="1104" y="1240" width="270" height="126" rx="15"/>
-        <text class="title" x="1239" y="1272">④ 其他正常情况</text><text class="body" x="1239" y="1298"><tspan x="1239">期末 = 理论期末</tspan><tspan x="1239" dy="20">未知差异 = 0</tspan><tspan x="1239" dy="20">本周 16,154 个商品日</tspan><tspan x="1239" dy="20">不作额外库存调整</tspan></text>
+        <text class="title" x="1239" y="1272">④ 其他正常情况</text><text class="body" x="1239" y="1298"><tspan x="1239">期末 = 理论期末</tspan><tspan x="1239" dy="20">未知差异 = 0</tspan><tspan x="1239" dy="20">本周 16,154 条商品×日期记录</tspan><tspan x="1239" dy="20">不作额外库存调整</tspan></text>
         <path class="edge" d="M550 1110H165V1240"/><path class="edge-risk" d="M624 1160L523 1240"/><path class="edge" d="M816 1160L881 1240"/><path class="edge" d="M890 1110H1239V1240"/>
         <text class="edge-label" x="360" y="1099">有人工盘点</text><text class="edge-label" x="540" y="1202">理论期末小于 0</text><text class="edge-label" x="878" y="1202">有已知报损</text><text class="edge-label" x="1055" y="1099">其他</text>
 
@@ -814,19 +814,19 @@
       </svg>
     </div>
     <div class="callout-grid">
-      <div class="callout risk"><strong>R7 已确认</strong>193 个商品日有销售、报损或商品转出，但单位成本为 0，涉及数量 691.425；因此不满足正式发布条件。</div>
-      <div class="callout risk"><strong>R8 待业务确认</strong><code>day_clear</code> 只作为输出字段，不改变库存计算；18,990/19,374 个商品日被标为日清，占 98.02%。</div>
-      <div class="callout warn"><strong>期初来源不一</strong>1,277 行空快照按 0 开始，251 行完全没有来源按 0 开始，另有 8 行有数量但金额为 0。</div>
+      <div class="callout risk"><strong>R7 已确认</strong>193 条商品×日期记录有销售、报损或商品转出，但单位成本为 0，涉及数量 691.425；因此不满足正式发布条件。</div>
+      <div class="callout risk"><strong>R8 待业务确认</strong><code>day_clear</code> 只作为输出字段，不改变库存计算；19,374 条记录中有 18,990 条被标为日清，占 98.02%。</div>
+      <div class="callout warn"><strong>期初来源不一</strong>1,277 行源表库存为空，期初按 0；251 行没有任何期初来源，期初也按 0；另有 8 行有数量但金额为 0。</div>
       <div class="callout ok"><strong>10 项结构检查通过</strong>期末非负、数量方程、金额方程、源数据不变、跨日衔接、内部金额和拆分父品转出均通过。</div>
     </div>
   </section>
 
   <section id="profit" class="legacy-diagram">
-    <div class="section-head"><div><h2>2E. 独立图：毛利与 7 层输出树</h2><p>毛利由同一份库存账本直接取值；下游只聚合，不再次推导成本。CCJ 与 SSLS 是报表层的特殊重分类。</p></div></div>
+    <div class="section-head"><div><h2>2E. 独立图：毛利与 7 层输出树</h2><p>毛利直接使用每日库存和成本计算结果；下游只汇总，不重新计算单位成本。炒菜机和生熟联动报损只调整报表展示。</p></div></div>
     <div class="diagram-wrap">
       <svg class="diagram" viewBox="0 0 1420 1000" role="img" aria-label="毛利与输出树">
         <rect class="node green" x="480" y="42" width="460" height="110" rx="16"/>
-        <text class="title" x="710" y="74">商品日基础毛利</text>
+        <text class="title" x="710" y="74">商品每日基础毛利</text>
         <text class="body" x="710" y="100"><tspan x="710">净销售额 − 外部收货额 − 商品转入额 + 商品转出额</tspan><tspan x="710" dy="21">+ 期末库存额 − 期初库存额 − 超出账面库存的成本</tspan><tspan x="710" dy="21">报损已降低期末库存，不再重复扣减</tspan></text>
 
         <path class="edge" d="M710 152V210H270V250"/><path class="edge" d="M710 210V250"/><path class="edge" d="M710 210H1150V250"/>
@@ -856,7 +856,7 @@
         <text class="title" x="935" y="852">正式发布条件</text><text class="body" x="935" y="877">检查分类来源和成本来源</text>
         <path class="edge" d="M710 732V770H485V802"/><path class="edge" d="M710 770H935V802"/>
         <rect class="node green" x="153" y="940" width="332" height="45" rx="12"/><text class="body" x="319" y="968">本周 10 项全部通过</text>
-        <rect class="node red" x="935" y="940" width="332" height="45" rx="12"/><text class="body" x="1101" y="968">缺成本 193 个商品日，本周不发布</text>
+        <rect class="node red" x="935" y="940" width="332" height="45" rx="12"/><text class="body" x="1101" y="968">缺成本 193 条商品×日期记录，本周不发布</text>
         <path class="edge" d="M485 922V940"/><path class="edge-risk" d="M935 922V940"/>
       </svg>
     </div>
@@ -867,13 +867,13 @@
     <div class="diagram-wrap">
       <svg class="diagram" viewBox="0 0 1440 1080" role="img" aria-label="报损对库存和毛利的完整处理流程">
         <rect class="lane" x="24" y="28" width="1392" height="242" rx="18"/><text class="lane-label" x="48" y="58">A. 上游报损字段标准化</text>
-        <rect class="lane" x="24" y="292" width="1392" height="358" rx="18"/><text class="lane-label" x="48" y="322">B. 物理库存账本与基础会计毛利</text>
+        <rect class="lane" x="24" y="292" width="1392" height="358" rx="18"/><text class="lane-label" x="48" y="322">B. 每日库存和成本计算出的毛利</text>
         <rect class="lane" x="24" y="672" width="1392" height="380" rx="18"/><text class="lane-label" x="48" y="702">C. 炒菜机报损（CCJ）和生熟联动报损（SSLS）的报表调整</text>
 
         <rect class="node blue" x="62" y="92" width="280" height="126" rx="15"/>
         <text class="title" x="202" y="125">上游报损表</text><text class="body" x="202" y="151"><tspan x="202">已知报损数量和源表金额</tspan><tspan x="202" dy="20">上游未知报损数量和金额</tspan><tspan x="202" dy="20">每门店 × 日期 × 商品一行</tspan></text>
         <polygon class="node amber" points="505,80 655,155 505,230 355,155"/>
-        <text class="title" x="505" y="145">校验已知报损</text><text class="body" x="505" y="171"><tspan x="505">报损数量是否大于等于 0？</tspan><tspan x="505" dy="20">同一商品日是否只有一条？</tspan></text>
+        <text class="title" x="505" y="145">校验已知报损</text><text class="body" x="505" y="171"><tspan x="505">报损数量是否大于等于 0？</tspan><tspan x="505" dy="20">同一商品同一天是否只有一条？</tspan></text>
         <rect class="node green" x="700" y="92" width="300" height="126" rx="15"/>
         <text class="title" x="850" y="125">计入库存的已知报损数量</text><text class="body" x="850" y="151"><tspan x="850">字段：known_lost_qty</tspan><tspan x="850" dy="20">只有该数量进入库存方程</tspan><tspan x="850" dy="20">本周 2,359.922</tspan></text>
         <rect class="node gray" x="1045" y="92" width="310" height="126" rx="15"/>
@@ -893,7 +893,7 @@
         <text class="body" x="720" y="589"><tspan x="720">报损已降低期末库存，因此已经影响毛利；若再减一次报损金额，会重复扣减。</tspan><tspan x="720" dy="19">源表中的未知报损字段只保留检查；正式未知差异只由人工盘点差额计算。</tspan></text>
 
         <rect class="node violet" x="60" y="750" width="280" height="144" rx="15"/>
-        <text class="title" x="200" y="783">特殊报损明细</text><text class="body" x="200" y="809"><tspan x="200">使用最新快照；按记录创建时间确定业务日</tspan><tspan x="200" dy="20">保留原始记录编号</tspan><tspan x="200" dy="20">不改变库存和商品转换明细</tspan><tspan x="200" dy="20">CCJ 8,190.84 / SSLS 2,749.33 元</tspan></text>
+        <text class="title" x="200" y="783">特殊报损明细</text><text class="body" x="200" y="809"><tspan x="200">表中只保留最新数据；按记录创建时间确定业务日</tspan><tspan x="200" dy="20">保留原始记录编号</tspan><tspan x="200" dy="20">不改变库存和商品转换明细</tspan><tspan x="200" dy="20">CCJ 8,190.84 / SSLS 2,749.33 元</tspan></text>
         <rect class="node amber" x="395" y="750" width="300" height="144" rx="15"/>
         <text class="title" x="545" y="783">报表损耗金额</text><text class="body" x="545" y="809"><tspan x="545">会计损耗 − CCJ − SSLS</tspan><tspan x="545" dy="20">已知报损同步扣除</tspan><tspan x="545" dy="20">未知差异保持不变</tspan><tspan x="545" dy="20">20,397.94 → 9,457.77 元</tspan></text>
         <rect class="node green" x="750" y="750" width="280" height="144" rx="15"/>
@@ -902,7 +902,7 @@
         <text class="title" x="1235" y="783">生熟联动报损只在大类间转移</text><text class="body" x="1235" y="809"><tspan x="1235">原料所属大类加回自身 SSLS 金额</tspan><tspan x="1235" dy="20">熟食类扣除当日全部 SSLS 金额</tspan><tspan x="1235" dy="20">商品、SPU 和门店总额不调整</tspan><tspan x="1235" dy="20">只改变大类分布，不改变门店总额</tspan></text>
         <path class="edge-dashed" d="M200 894V942H545V894"/><path class="edge" d="M340 822H395"/><path class="edge" d="M695 822H750"/><path class="edge" d="M1030 822H1085"/><path class="edge-dashed" d="M1235 530V716H890V750"/>
         <rect class="node red" x="388" y="952" width="664" height="66" rx="13"/>
-        <text class="body" x="720" y="978"><tspan x="720">二选一规则：配方任一原料在当天命中生熟联动报损，该成品当天不再计算加工。</tspan><tspan x="720" dy="20">本周 17 个成品日走生熟联动；加工原料转出与生熟联动原料日重叠数为 0。</tspan></text>
+        <text class="body" x="720" y="978"><tspan x="720">二选一规则：配方任一原料在当天符合生熟联动报损，该成品当天不再计算加工。</tspan><tspan x="720" dy="20">本周 17 个成品日走生熟联动；加工原料转出与生熟联动原料日重叠数为 0。</tspan></text>
       </svg>
     </div>
   </section>
@@ -912,7 +912,7 @@
     <div class="diagram-wrap">
       <svg class="diagram" viewBox="0 0 1440 1180" role="img" aria-label="问题因果树">
         <rect class="node red" x="455" y="35" width="530" height="90" rx="18"/>
-        <text class="title" x="720" y="70">结论：10 项会计结构检查通过，但 193 个商品日缺成本，因此不发布</text>
+        <text class="title" x="720" y="70">结论：10 项会计结构检查通过，但 193 条商品×日期记录缺成本，因此不发布</text>
         <text class="body" x="720" y="98">方程能够闭合，只说明计算结构一致；不能证明每个成本来源和业务关系都完整</text>
         <path class="edge-risk" d="M720 125V174H350V210"/><path class="edge-risk" d="M720 174H1090V210"/>
         <rect class="node red" x="145" y="210" width="410" height="76" rx="15"/>
@@ -922,38 +922,38 @@
 
         <path class="edge-risk" d="M350 286V340H120V380"/><path class="edge-risk" d="M350 340H350V380"/><path class="edge-risk" d="M350 340H580V380"/>
         <rect class="node red" x="25" y="380" width="190" height="150" rx="14"/>
-        <text class="title" x="120" y="411">A1 有流出但无成本</text><text class="body" x="120" y="438"><tspan x="120">193 个商品日</tspan><tspan x="120" dy="20">涉及数量 691.425</tspan><tspan x="120" dy="20">正式发布条件未通过</tspan><tspan x="120" dy="20">对应成本当前按 0 计算</tspan></text>
+        <text class="title" x="120" y="411">A1 有流出但无成本</text><text class="body" x="120" y="438"><tspan x="120">193 条商品×日期记录</tspan><tspan x="120" dy="20">涉及数量 691.425</tspan><tspan x="120" dy="20">正式发布条件未通过</tspan><tspan x="120" dy="20">对应成本当前按 0 计算</tspan></text>
         <rect class="node red" x="255" y="380" width="190" height="150" rx="14"/>
-        <text class="title" x="350" y="411">A2 分类按最新日期统一映射</text><text class="body" x="350" y="438"><tspan x="350">使用监控平台 08-12 分类</tspan><tspan x="350" dy="20">08-06 至 08-11 使用同一映射</tspan><tspan x="350" dy="20">1,449 个商品直接命中</tspan><tspan x="350" dy="20">11 个商品使用最新商品维表</tspan></text>
+        <text class="title" x="350" y="411">A2 分类按最新日期统一映射</text><text class="body" x="350" y="438"><tspan x="350">使用监控平台 08-12 分类</tspan><tspan x="350" dy="20">08-06 至 08-11 使用同一映射</tspan><tspan x="350" dy="20">1,449 个商品直接符合</tspan><tspan x="350" dy="20">11 个商品使用最新商品维表</tspan></text>
         <rect class="node red" x="485" y="380" width="190" height="150" rx="14"/>
-        <text class="title" x="580" y="411">A3 加工与固定换码已计算</text><text class="body" x="580" y="438"><tspan x="580">加工 188 次</tspan><tspan x="580" dy="20">生熟联动优先 17 个成品日</tspan><tspan x="580" dy="20">源表已写 B：59 个关系日</tspan><tspan x="580" dy="20">A 按比例转 B：46 次</tspan></text>
+        <text class="title" x="580" y="411">A3 加工与固定换码已计算</text><text class="body" x="580" y="438"><tspan x="580">加工 188 次</tspan><tspan x="580" dy="20">生熟联动优先 17 个成品日</tspan><tspan x="580" dy="20">源表已写 B：59 条关系×日期</tspan><tspan x="580" dy="20">A 按比例转 B：46 次</tspan></text>
 
         <path class="edge" d="M1090 286V340H810V380"/><path class="edge" d="M1090 340H1040V380"/><path class="edge" d="M1090 340H1270V380"/>
         <rect class="node amber" x="715" y="380" width="190" height="150" rx="14"/>
-        <text class="title" x="810" y="411">B1 日清标记是否只用于分类</text><text class="body" x="810" y="438"><tspan x="810">98.02% 商品日标为日清</tspan><tspan x="810" dy="20">当前不改变库存计算</tspan><tspan x="810" dy="20">只作为输出字段</tspan><tspan x="810" dy="20">与 v0.11 的软日清不同</tspan></text>
+        <text class="title" x="810" y="411">B1 日清标记是否只用于分类</text><text class="body" x="810" y="438"><tspan x="810">98.02% 的记录标为日清</tspan><tspan x="810" dy="20">当前不改变库存计算</tspan><tspan x="810" dy="20">只作为输出字段</tspan><tspan x="810" dy="20">与 v0.11 的只清当天新增数量并保留期初库存不同</tspan></text>
         <rect class="node amber" x="945" y="380" width="190" height="150" rx="14"/>
         <text class="title" x="1040" y="411">B2 加工数量的计算边界</text><text class="body" x="1040" y="438"><tspan x="1040">只根据已消耗成品计算原料用量</tspan><tspan x="1040" dy="20">不计算当天实际总产量</tspan><tspan x="1040" dy="20">不推算未销售成品库存</tspan><tspan x="1040" dy="20">成品盘点仍单独处理</tspan></text>
         <rect class="node amber" x="1175" y="380" width="190" height="150" rx="14"/>
-        <text class="title" x="1270" y="411">B3 生熟联动与加工二选一</text><text class="body" x="1270" y="438"><tspan x="1270">命中生熟联动时整组不加工</tspan><tspan x="1270" dy="20">不先扣数量再算剩余部分</tspan><tspan x="1270" dy="20">列入会计结构检查</tspan><tspan x="1270" dy="20">本周重复计算为 0</tspan></text>
+        <text class="title" x="1270" y="411">B3 生熟联动与加工二选一</text><text class="body" x="1270" y="438"><tspan x="1270">符合生熟联动时整组不加工</tspan><tspan x="1270" dy="20">不先扣数量再算剩余部分</tspan><tspan x="1270" dy="20">列入会计结构检查</tspan><tspan x="1270" dy="20">本周重复计算为 0</tspan></text>
 
         <rect class="node amber" x="35" y="618" width="605" height="120" rx="16"/>
         <text class="title" x="338" y="649">A4 销售和收货已与 v1.5 一致</text>
-        <text class="body" x="338" y="676"><tspan x="338">同码收货缺数量但金额一致时，只从独立收货销售表补数量，不改金额</tspan><tspan x="338" dy="21">商品日销售额和销售量完全一致；门店日收货金额 6 天全部一致</tspan><tspan x="338" dy="21">源表已写出 B 数量和金额的 59 个关系日直接收 B，不再从 A 重复转换</tspan></text>
+        <text class="body" x="338" y="676"><tspan x="338">同码收货缺数量但金额一致时，只从独立收货销售表补数量，不改金额</tspan><tspan x="338" dy="21">商品每日销售额和销售量完全一致；门店日收货金额 6 天全部一致</tspan><tspan x="338" dy="21">源表已写出 B 数量和金额的 59 条关系×日期记录直接收 B，不再从 A 重复转换</tspan></text>
         <path class="edge-risk" d="M350 530V580H338V618"/>
 
         <rect class="node amber" x="800" y="618" width="605" height="120" rx="16"/>
-        <text class="title" x="1103" y="649">B4 最新快照如何用于历史日期</text>
-        <text class="body" x="1103" y="676"><tspan x="1103">商品维表和库存成本池只提供最新快照，不保证每个历史日都有当日版本</tspan><tspan x="1103" dy="21">分类按用户要求统一使用 08-12；其他属性可能使用最新值解释 08-06 至 08-11</tspan><tspan x="1103" dy="21">会计结构检查只能核对方程，不能判断最新属性是否适用于历史日期</tspan></text>
+        <text class="title" x="1103" y="649">B4 最新数据如何用于历史日期</text>
+        <text class="body" x="1103" y="676"><tspan x="1103">商品维表和库存成本参考表只保留最新一份数据，不保证每个历史日都有当日版本</tspan><tspan x="1103" dy="21">分类按用户要求统一使用 08-12；其他属性可能使用最新值解释 08-06 至 08-11</tspan><tspan x="1103" dy="21">会计结构检查只能核对方程，不能判断最新属性是否适用于历史日期</tspan></text>
         <path class="edge" d="M1090 530V618"/>
 
         <rect class="node red" x="222" y="830" width="996" height="112" rx="17"/>
         <text class="title" x="720" y="861">结果差异：FM 门店毛利比 v1.5 低 6.343%</text>
-        <text class="body" x="720" y="888"><tspan x="720">FM 25,611.95 元，v1.5 27,346.50 元，差额 -1,734.55 元；全链路毛利低 4.908%</tspan><tspan x="720" dy="21">销售、收货和 SCM 7,450.93 元完全一致；差异来自成本、库存、盘点或商品转换。</tspan><tspan x="720" dy="21">193 个缺成本商品日仍未解决；不得通过删除已有成本项缩小差异。</tspan></text>
+        <text class="body" x="720" y="888"><tspan x="720">FM 25,611.95 元，v1.5 27,346.50 元，差额 -1,734.55 元；全链路毛利低 4.908%</tspan><tspan x="720" dy="21">销售、收货和 SCM 7,450.93 元完全一致；差异来自成本、库存、盘点或商品转换。</tspan><tspan x="720" dy="21">193 条商品×日期记录仍缺成本；不得通过删除已有成本项缩小差异。</tspan></text>
         <path class="edge-risk" d="M338 738V785H720V830"/><path class="edge" d="M1103 738V785H720"/>
 
         <rect class="node green" x="335" y="1018" width="770" height="112" rx="17"/>
-        <text class="title" x="720" y="1049">人工判断分为两个问题</text>
-        <text class="body" x="720" y="1076"><tspan x="720">① 数量、金额和跨日方程是否一致？是，10 项会计结构检查全部通过。</tspan><tspan x="720" dy="21">② 使用的成本、分类和商品关系是否完整？否，仍有 193 个商品日缺成本。</tspan><tspan x="720" dy="21">因此本周结果可用于检查规则，不满足正式发布条件。</tspan></text>
+        <text class="title" x="720" y="1049">审核结果时要回答两个问题</text>
+        <text class="body" x="720" y="1076"><tspan x="720">① 数量、金额和跨日方程是否一致？是，10 项会计结构检查全部通过。</tspan><tspan x="720" dy="21">② 使用的成本、分类和商品关系是否完整？否，仍有 193 条商品×日期记录缺成本。</tspan><tspan x="720" dy="21">因此本周结果可用于检查规则，不满足正式发布条件。</tspan></text>
         <path class="edge" d="M720 942V1018"/>
       </svg>
     </div>
@@ -986,7 +986,7 @@
         <rect class="node green" x="72" y="378" width="382" height="156" rx="17"/>
         <text class="title" x="263" y="411">本次运行规模</text><text class="body" x="263" y="438"><tspan x="263">08-05 准备期初 + 6 天结果</tspan><tspan x="263" dy="21">输出：88,996 行 × 125 字段</tspan><tspan x="263" dy="21">问题记录：402 条，按各自原因处理</tspan><tspan x="263" dy="21">10 项会计结构检查全部通过</tspan><tspan x="263" dy="21">服务器生产写入：0</tspan></text>
         <rect class="node amber" x="519" y="378" width="382" height="156" rx="17"/>
-        <text class="title" x="710" y="411">与 v1.5 完全一致的项目</text><text class="body" x="710" y="438"><tspan x="710">商品日销售额和销售量</tspan><tspan x="710" dy="21">门店日收货金额：6 天全部一致</tspan><tspan x="710" dy="21">供应链金融金额：7,450.9309 元</tspan><tspan x="710" dy="21">分类统一使用监控平台 08-12 最新映射</tspan><tspan x="710" dy="21">10 项会计结构检查全部通过</tspan></text>
+        <text class="title" x="710" y="411">与 v1.5 完全一致的项目</text><text class="body" x="710" y="438"><tspan x="710">商品每日销售额和销售量</tspan><tspan x="710" dy="21">门店日收货金额：6 天全部一致</tspan><tspan x="710" dy="21">供应链金融金额：7,450.9309 元</tspan><tspan x="710" dy="21">分类统一使用监控平台 08-12 最新映射</tspan><tspan x="710" dy="21">10 项会计结构检查全部通过</tspan></text>
         <rect class="node red" x="966" y="378" width="382" height="156" rx="17"/>
         <text class="title" x="1157" y="411">与 v1.5 不一致的项目</text><text class="body" x="1157" y="438"><tspan x="1157">FM 门店毛利：25,611.9472 元</tspan><tspan x="1157" dy="21">v1.5：27,346.4972 元</tspan><tspan x="1157" dy="21">差额：-1,734.5500 元</tspan><tspan x="1157" dy="21">FM 比 v1.5 低 6.343%</tspan><tspan x="1157" dy="21">超过当前允许的 ±2%</tspan></text>
       </svg>
@@ -1002,13 +1002,13 @@
         <table>
           <thead><tr><th>项目</th><th>数量</th><th>结论</th></tr></thead>
           <tbody>
-            <tr><td>商品有流出但缺成本（ISSUE_COST_EVIDENCE）</td><td>193 个商品日 / 52 个商品</td><td class="bad">未通过；因此不正式发布</td></tr>
+            <tr><td>商品有流出但缺成本（ISSUE_COST_EVIDENCE）</td><td>193 条商品×日期记录 / 52 个商品</td><td class="bad">未通过；因此不正式发布</td></tr>
             <tr><td>分类来源（CATEGORY_SNAPSHOT_EVIDENCE）</td><td>监控平台 2026-08-12</td><td class="good">通过</td></tr>
-            <tr><td>加工关系的来源和目标相同</td><td>162 个关系日</td><td>27 对同码关系，不做商品转换</td></tr>
+            <tr><td>加工关系的来源和目标相同</td><td>162 条关系×日期记录</td><td>27 对同码关系，不做商品转换</td></tr>
             <tr><td>同一成品存在多个有效配方</td><td>24 个成品日</td><td>涉及 4 个成品；关系含义待确认，暂不计算</td></tr>
-            <tr><td>加工原料命中生熟联动报损</td><td>17 个成品日</td><td>只走生熟联动，不计算加工</td></tr>
+            <tr><td>加工原料符合生熟联动报损</td><td>17 个成品日</td><td>只走生熟联动，不计算加工</td></tr>
             <tr><td>加工成品已有外部收货</td><td>6 个成品日</td><td>使用外部收货，不重复计算加工转入</td></tr>
-            <tr><td>源表已将收货分配到 B</td><td>59 个关系日 / 15 对商品</td><td>直接将 B 的数量和金额记为收货</td></tr>
+            <tr><td>源表已将收货分配到 B</td><td>59 条关系×日期记录 / 15 对商品</td><td>直接将 B 的数量和金额记为收货</td></tr>
           </tbody>
         </table>
       </div>
@@ -1022,8 +1022,8 @@
           <tbody>
             <tr><td>NO_NEGATIVE_END_QTY</td><td>期末数量不小于 0</td><td class="good">通过</td></tr>
             <tr><td>NO_NEGATIVE_END_AMT</td><td>期末金额不小于 0</td><td class="good">通过</td></tr>
-            <tr><td>SKU_QTY_BALANCE</td><td>每个商品日的数量方程一致</td><td class="good">通过</td></tr>
-            <tr><td>SKU_AMOUNT_BALANCE</td><td>每个商品日的金额方程一致</td><td class="good">通过</td></tr>
+            <tr><td>SKU_QTY_BALANCE</td><td>每个商品每天的数量方程一致</td><td class="good">通过</td></tr>
+            <tr><td>SKU_AMOUNT_BALANCE</td><td>每个商品每天的金额方程一致</td><td class="good">通过</td></tr>
             <tr><td>EXTERNAL_OBSERVATION_CONSERVATION</td><td>销售、退货、收货和已知报损与源数据一致</td><td class="good">通过</td></tr>
             <tr><td>D1_EXACT_ROLL_FORWARD</td><td>下一日期初严格等于前一日期末</td><td class="good">通过</td></tr>
             <tr><td>INTERNAL_AMOUNT_CONSERVATION</td><td>每次商品转换的转出金额等于转入金额</td><td class="good">通过</td></tr>
@@ -1058,8 +1058,8 @@
         <div class="panel">
           <h3>期初来源</h3>
           <table><tbody>
-            <tr><td>正常 D-1 / 快照来源</td><td>1,516 行 / qty 15,647.568 / amt 174,137.21</td></tr>
-            <tr><td>库存快照为空，期初按 0</td><td>1,277 行</td></tr>
+            <tr><td>前一日期末 / 源表库存来源</td><td>1,516 行 / qty 15,647.568 / amt 174,137.21</td></tr>
+            <tr><td>源表库存数量为空，期初按 0</td><td>1,277 行</td></tr>
             <tr><td>没有任何期初来源，期初按 0</td><td>251 行</td></tr>
             <tr><td>明确零库存</td><td>144 行</td></tr>
             <tr><td>负数期初库存改为 0</td><td>33 行</td></tr>
@@ -1096,7 +1096,7 @@
           </tbody>
         </table>
         <div class="formula">会计损耗 = 已知报损 19,638.7522 元 + 未知差异 759.1845 元 = 20,397.9367 元<br>报表损耗 = 会计损耗 − CCJ 8,190.8348 元 − SSLS 2,749.3345 元 = 9,457.7674 元</div>
-        <p>特殊报损表 <code>purchase_wastage</code> 使用最新快照，但按每条记录的创建时间确定业务日。CCJ 和 SSLS 只改变报表字段，不改变每日库存、单位成本或商品转换。CCJ 在所有汇总层级加回毛利；SSLS 只调整大分类之间的分布，不改变门店总毛利。</p>
+        <p>特殊报损表 <code>purchase_wastage</code> 只保留最新一份数据，但每条记录仍按创建时间确定业务日。CCJ 和 SSLS 只改变报表字段，不改变每日库存、单位成本或商品转换。CCJ 在所有汇总层级加回毛利；SSLS 只调整大分类之间的分布，不改变门店总毛利。</p>
       </div>
     </details>
 
@@ -1106,12 +1106,12 @@
         <p><strong>代码版本：</strong>v0.17；<strong>实际 DuckDB 表名：</strong>主要仍以 <code>v014_*</code> 命名。保留旧表名是为了兼容现有读取程序，实际计算版本是 v0.17。</p>
         <p><strong>生产只读：</strong>QDM/StarRocks 源与 v1.5 基准；<strong>本地写入：</strong>本地 DuckDB 试跑与 HTML 报告；<strong>服务器/生产写入：</strong>0。</p>
         <p><strong>分类来源：</strong>经营监控平台 <code>2026-08-12 / MONITORING_PLATFORM_LATEST</code>，全部日期统一映射；1,449 SKU 直接匹配，11 SKU 改用同次运行最新 dim_goods。</p>
-        <p><strong>只有最新快照的数据源：</strong>商品、库存池等部分表只有最新可用日数据，因此不能当作历史当日属性。</p>
+        <p><strong>只保留最新一份的数据源：</strong>商品资料和库存成本参考表等只保存最新可用日，因此不能当作历史业务日的原始属性。</p>
       </div>
     </details>
   </section>
 
-  <footer class="footer">数据截止：2026-08-11｜分类快照：2026-08-12｜文档复核：2026-08-14｜范围：本地试算和生产只读对照；服务器生产写入为 0。</footer>
+  <footer class="footer">数据截止：2026-08-11｜带日期且不可修改的分类副本：2026-08-12｜文档复核：2026-08-14｜范围：本地试算和生产只读对照；服务器生产写入为 0。</footer>
 </div>
 <script>
 (() => {

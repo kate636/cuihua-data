@@ -208,7 +208,7 @@
 
 > 注：上述实时返回集合中出现了重复列名（例如 `sp_master_area`、`sp_rsv_status`、
 > `store_service_range`、`franchisee_id`），说明 API 返回的 JSON 列映射可能存在同名覆盖或
-> 源表/镜像列重复；正式使用前必须以 `SHOW FULL COLUMNS` 的序号结果确认。
+> 源表/源数据副本列重复；正式使用前必须以 `SHOW FULL COLUMNS` 的序号结果确认。
 
 #### `strategy_fm_purchase_order_tmp`（52）
 
@@ -246,7 +246,7 @@
 `order_unit_id`, `blackwhite_pig_name`, `category_level3_id`, `package_attribute`,
 `old_category_level1_description`, `resent_use_date`, `old_article_name`, `onlineshop_flag`。
 
-### 2.4 BOM、库存、全链路
+### 2.4 BOM、库存、全链路指标
 
 #### `strategy_fm_receive_sale_di`（20）
 
@@ -488,5 +488,4 @@
 2. `strategy_fm_order_receive_di` 的最大 `inc_day` 是 2025-11-17，说明该桥表没有跟随其他表更新到 2026-07-21。
 3. `strategy_fm_purchase_order_tmp` 实时 52 列，且下游读取的 `strategy_fm_dim_order_saleable` 是另一张实时 26 列的表；同步目标问题仍然存在。
 4. `strategy_fm_dim_store_profile` API 返回的列名集合出现重复字段名，必须通过 `SHOW FULL COLUMNS` 的序号确认目标表是否真的存在重复列或 API 做了列名覆盖。
-5. 以上结果来自 StarRocks QDM API 实时镜像，不是本地 DuckDB，也不是服务器 `/opt/fm/data/fm.duckdb` 的计算结果。
-
+5. 以上结果来自 StarRocks QDM API 实时源数据副本，不是本地 DuckDB，也不是服务器 `/opt/fm/data/fm.duckdb` 的计算结果。

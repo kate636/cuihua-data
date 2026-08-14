@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 **fmetl** — 翠花当家 (Cuihua Dangjia) 零售数据分析 ETL 管道。当前开发主干为
-**v0.17**，源码直接位于 `fmetl/`；当前只运行 A3XV 本地影子库，服务器生产任务仍是
-v0.11，没有切换。v0.17 从字段手册登记的 Hive→StarRocks 镜像和正式关系证据独立计算
+**v0.17**，源码直接位于 `fmetl/`；当前只运行 A3XV 本地试算库，服务器生产任务仍是
+v0.11，没有切换。v0.17 从字段手册登记的 Hive→StarRocks 源数据副本和已确认关系依据独立计算
 关系、库存、成本、损耗和毛利；v1.5 只提供输出合同与只读诊断。完整边界见
 `fmetl/README.md`、DESIGN-008 和 v0.17 发布审核；`v014_*` 是兼容物理名。
 
@@ -30,7 +30,7 @@ v0.11，没有切换。v0.17 从字段手册登记的 Hive→StarRocks 镜像和
 
 ### 品类分类规则
 
-**以 `.cursor/skills/master-data/SKILL.md` 为唯一权威来源。** ETL `sku_dim.py` 中的分类重映射是旧版（v1），仅用于 FM 底表的历史兼容。做品类分析、对比验证、报表时，一律用 master-data 的中分类映射规则。
+**以 `.cursor/skills/master-data/SKILL.md` 为唯一权威来源。** ETL `sku_dim.py` 中的分类重映射是旧版（v1），仅用于 FM 输出表的历史兼容。做品类分析、对比验证、报表时，一律用 master-data 的中分类映射规则。
 
 ## Key Commands
 
@@ -62,7 +62,7 @@ python -m unittest discover -s fmetl/tests -p 'test_*.py'
 
 ### Production Legacy v0.11 Pipeline
 
-以下 `fmetl.executor` 命令只属于尚未切换的服务器生产链，不能用于解释 v0.17 影子结果。
+以下 `fmetl.executor` 命令只属于尚未切换的服务器生产流程，不能用于解释 v0.17 本地试算结果。
 ```bash
 # 单日执行
 python -m fmetl.executor 2026-04-23 2026-04-23
@@ -73,7 +73,7 @@ python -m fmetl.executor 2026-04-01 2026-04-30
 # 分阶段执行（调试用）
 python -m fmetl.executor 2026-04-23 2026-04-23 --atomic-only  # 提取+合并
 python -m fmetl.executor 2026-04-23 2026-04-23 --calc-only    # 仅计算层
-python -m fmetl.executor 2026-04-23 2026-04-23 --fm-only      # 仅FM底表
+python -m fmetl.executor 2026-04-23 2026-04-23 --fm-only      # 仅生成FM输出表
 ```
 
 ### 验证
@@ -85,9 +85,9 @@ conn = duckdb.connect('data/fm.duckdb', read_only=True)
 print(conn.execute('SELECT COUNT(*) FROM t_calc_stock WHERE end_stock_qty < 0').fetchone())
 "
 
-# 检查 BOM 对称：bom_in - bom_out 应 = Σstock_transfer_in_amt（不是 0！）
-# stock_transfer 把父品残余库存转成 sub 的 bom_in 但不补父品 bom_out（FIX-004 已回滚），
-# 故 bom_diff = transfer_in。真正的残差 = bom_diff - transfer_in，应 ≈ 0。
+# 检查 BOM 金额：bom_in - bom_out 应等于 Σstock_transfer_in_amt，而不是 0。
+# stock_transfer 把父品剩余库存转成子品的 bom_in，但不增加父品 bom_out（FIX-004 已撤销）。
+# 因此最终检查值为 bom_diff - transfer_in，结果应接近 0。
 python3 -c "
 import duckdb
 conn = duckdb.connect('data/fm.duckdb', read_only=True)
@@ -108,7 +108,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 本项目的改动遵循 **设计 → 编码 → 审查** 三段式流程，每阶段由一个独立 agent 负责。用户可单独调用任一 agent，也可串联执行。
 
 ### 项目目标
-- **目的**: 用 fmetl 替换现有 QDM ETL 链路
+- **目的**: 用 fmetl 替换现有 QDM ETL 过程
 - **验收标准**: 门店 + 大分类维度的门店毛利额与 QDM 数据基本一致（SKU 级允许差异，因计算方式不同）
 - **新 ETL 核心价值**: BOM 正确性、重刷数据便捷性、指标灵活性
 - **QDM 基准表**: `default_catalog.ads_business_analysis.strategy_fm_levels_result` (SKU级: `level_description='sku'`)
@@ -128,7 +128,7 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 **约束**:
 - 遵循现有设计原则（简单SQL复杂Python、每个数字只算一次、四流分离）
 - BOM 分摊必须尊重共享组语义和单位归一化规则
-- 存量模块修改时必须说明对跨日滚动的影响
+- 存量模块修改时必须说明对前一天期末库存转为当天期初库存的影响
 
 **触发方式**: `用设计agent分析XX` / `先出方案再写代码`
 
@@ -162,13 +162,13 @@ print(conn.execute(\"SELECT * FROM t_fm_levels_result WHERE 分类等级 = 'SKU'
 - [ ] 实现是否完整覆盖设计文档中的所有公式和分支
 - [ ] BOM 字段引用是否正确（`bom_alloc_qty` vs `bom_alloc_qty_sub` 不可混用）
 - [ ] 日清覆盖逻辑是否正确应用
-- [ ] 是否有断裂的跨日依赖链
+- [ ] 前一天期末库存是否正确成为下一天期初库存
 
 **B. 内部一致性校验**（跑 DuckDB）
 - [ ] 负库存检查: `SELECT COUNT(*) FROM t_calc_stock WHERE end_stock_qty < 0`
 - [ ] BOM 对称: `SUM(bom_in_amt) - SUM(bom_out_amt)` 全局 ≈ 0
 - [ ] 库存方程平衡: `init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_lost - end - unknow` = 0
-- [ ] 毛利自洽: 毛利公式各分量符号正确，全链路 profit 与拆解加总一致
+- [ ] 毛利自洽: 各分量符号正确，门店毛利、供应链毛利和全链路毛利均与明细加总一致
 - [ ] 父品 profit = 0（BOM 父品不应产生独立毛利）
 
 **C. QDM 对比校验**（核心验收）
@@ -199,7 +199,7 @@ GROUP BY article_id
 **输出**:
 - 审查报告（通过/阻塞/需澄清）
 - 差异明细表（门店、分类、差异额、差异率、原因分析）
-- 对设计或编码的回退建议
+- 是否应撤销设计或代码改动的建议
 
 **触发方式**: `审查代码` / `校对数据` / `验证agent`
 
@@ -207,7 +207,7 @@ GROUP BY article_id
 
 ## Production Legacy Reference: 3-Layer ETL (v0.11)
 
-以下内容记录尚未切换的 v0.11 生产链路，仅供兼容和回归参考，不代表 v0.17 当前实现。
+以下内容记录尚未切换的 v0.11 生产处理流程，仅供兼容和回归参考，不代表 v0.17 当前实现。
 
 ### 设计原则
 - **简单SQL，复杂逻辑Python**: SQL 仅做 SELECT/JOIN/GROUP BY/WHERE。计算、分支、窗口函数在 Python（pandas + NumPy）完成
@@ -217,8 +217,8 @@ GROUP BY article_id
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ Layer -2: atomic_* (原子层) — 不可分解的独立观测量              │
-│   13张活跃 + 2张骨架表，从 strategy_fm_* 源表 API 拉取          │
+│ Layer -2: atomic_* (源数据层) — 从源表直接读取、尚未计算的数据值  │
+│   13张有数据的表 + 2张只有结构的空表，从 strategy_fm_* API 读取 │
 │   粒度: store_id × business_date × article_id × day_clear       │
 └──────────────────────────────────────────────────────────────────┘
                               ↓ merge → t_atomic_wide (82字段)
@@ -226,12 +226,12 @@ GROUP BY article_id
 │ Layer -1: t_calc_* (计算层) — Python 推导的指标                 │
 │   t_calc_bom_alloc  → BOM分摊 (Σ总权重 + 共享组 + 单位归一化)   │
 │   t_calc_sku_cost   → 有效单位成本 (加权平均含期初库存)         │
-│   t_calc_stock      → 库存与金额 (四流合一 + 跨日滚动, 中枢)    │
+│   t_calc_stock      → 库存与金额 (四流合一 + 前一天期末库存转为当天期初库存, 中枢)    │
 │   t_calc_profit     → 门店毛利 (含BOM + SCM + 全链路)           │
 └──────────────────────────────────────────────────────────────────┘
                               ↓ build
 ┌──────────────────────────────────────────────────────────────────┐
-│ Layer 0: t_fm_* (FM底表) — 最终产出                             │
+│ Layer 0: t_fm_* (FM输出表) — 最终产出                             │
 │   t_fm_sku_dim       → SKU级完整宽表 (~80字段)                  │
 │   t_fm_cust          → 客数聚合                                  │
 │   t_fm_levels_sum    → 7级分类汇总 (数量/金额)                   │
@@ -252,13 +252,13 @@ GROUP BY article_id
 
 | Step | Module | Output |
 |---|---|---|
-| 1 | `DimsExtractor` | 7张 `dim_*` 全量替换 |
-| 2 | 15个 `*Extractor` | 13张 `atomic_*` 分区追加 + 2张空骨架 |
+| 1 | `DimsExtractor` | 7张 `dim_*` 整表替换 |
+| 2 | 15个 `*Extractor` | 13张 `atomic_*` 分区追加 + 2张只有结构的空表 |
 | 3 | `AtomicMerger` | `t_atomic_wide` (82字段, 含父品补全 + 日清覆盖) |
 | 4 | `BomAllocCalculator` | `t_calc_bom_alloc` (Σ总权重+共享组分拆+单位归一化) |
 | 5 | `SkuCostCalculator` | `t_calc_sku_cost` (加权平均含期初库存) |
-| 6 | `StockCalculator` | `t_calc_stock` (四流合一+跨日滚动, 中枢模块) |
-| 7 | `ProfitCalculator` | `t_calc_profit` (含BOM+SCM+全链路) |
+| 6 | `StockCalculator` | `t_calc_stock` (四流合一+前一天期末库存转为当天期初库存, 中枢模块) |
+| 7 | `ProfitCalculator` | `t_calc_profit` (计算门店、供应链和全链路毛利) |
 | 8 | `SkuDimBuilder` | `t_fm_sku_dim` |
 | 9 | `CustBuilder` | `t_fm_cust` (Python端JOIN dim_goods过滤品类70-77) |
 | 10 | `LevelsSumBuilder` | `t_fm_levels_sum` |
@@ -283,7 +283,7 @@ Step 2 (atomic) ──→ Step 3 (merge) ──→ Step 4 (bom_alloc) ──┐ 
                                       Step 7 (profit)         │ │
                                            │                  │ │
                                            ↓                  ▼ ▼
-                                      Step 8-13 (fm_tables, 6张底表)
+                                      Step 8-13 (fm_tables, 6张输出表)
 
 Step 4 (bom_alloc) ────────────────────→ Step 12 (bom_breakdown)
 Step 6 (stock) ────────────────────────→ Step 13 (stock_roll)
@@ -318,13 +318,13 @@ eq = init + receive + bom_in - bom_out + compose_in - compose_out - sale - know_
 分支 (优先级从高到低):
   1. is_counted (人工盘点, created_by != '系统')
      → end=actual_stock_qty, unknow=eq-actual (允许负值=盘盈)
-  2. day_clear='0' (软日清)
+  2. day_clear='0' (只清当天新增数量并保留期初库存)
      → 新供给 = receive + bom_in - bom_out + compose_in - compose_out
      → end = max(0, init - max(0, (sale+klost) - 新供给))
      → unknow = 新供给 - sale - klost (允许负值=消耗期初库存)
  3. eq < 0 (负库存保护)
- → end=0, unknow=eq (FIX-020 口径B: 负值=盘盈, 库存方程精确平衡)
- → neg_clamp_cost_amt=-eq×euc (透支成本, 仅此分支非0, profit.py 扣回)
+ → end=0, unknow=eq (FIX-020 计算规则B: 负值=盘盈, 库存方程精确平衡)
+ → neg_clamp_cost_amt=-eq×euc (库存不足但已发出商品的成本, 仅此分支非0, profit.py 扣回)
   4. know_lost_qty > 0 (有已知损耗)
      → end=eq, unknow=0
   5. actual_stock_qty > eq + 0.001 (系统快照盘盈检测)
@@ -344,10 +344,13 @@ profit = sale - receive - bom_in + bom_out - compose_in + compose_out
 注: 损耗已通过库存方程反映在 end_stock 中，不再额外扣减 lost_amt（A20）。
 ```
 
-**FIX-019/020 负库存钉零透支成本**: eq<0 时 stock.py 钉 end=0，利润公式用 end=0 会虚高 `(-eq)×euc`。profit.py 扣回 stock.py 算出的 `neg_clamp_cost_amt`（仅 eq<0 分支非0）。FIX-020 把该分支 unknow 改记盘盈（负值，库存方程精确平衡），利润扣减解耦走独立列。利润/QDM矩阵不受口径B影响，仅损耗率KPI下降（未知损耗转净盘盈）。
+**FIX-019/020：期末库存强制设为 0 时补扣缺失成本。** 当 `eq<0` 时，`stock.py` 把
+`end` 设为 0。若利润公式直接使用这个值，毛利会虚高 `(-eq)×euc`。因此 `profit.py`
+单独扣除 `neg_clamp_cost_amt`；该字段只在 `eq<0` 时有值。FIX-020 同时把 `unknow`
+记为负数盘盈，保持库存数量公式平衡。该调整不改变毛利对比，只改变损耗率中未知损耗与盘盈的归类。
 
-**FIX-019 (v0.11)**：非日清品 `eq<0` 时 stock.py 把 end 钉零、透支量转 unknow_lost，
-但毛利公式不含 unknow_lost、end 又被钉高到 0 → 透支成本凭空消失 → 利润虚高。profit.py 对
+**FIX-019 (v0.11)**：非日清品 `eq<0` 时 stock.py 把 end 强制设为0、透支量转 unknow_lost，
+但毛利公式不含 unknow_lost、end 又被钉高到 0 → 库存不足但已发出商品的成本凭空消失 → 利润虚高。profit.py 对
 `day_clear='1' & eq_end_qty<0 & end_stock_qty≈0 & unknow_lost_qty>0` 扣回 unknow_lost_amt
 （不碰日清 dc='0'）。6/18–22 总毛利 FM−QDM +18.9%→+6.3%。
 
@@ -369,7 +372,7 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 ### day_clear 字段语义
 | 值 | 含义 | 库存规则 |
 |---|---|---|
-| `'0'` | 日清 (生鲜) | 软日清: 只清新供给, init 存量可部分消耗 |
+| `'0'` | 日清 (生鲜) | 只清当天新增数量并保留期初库存: 只清新供给, init 存量可部分消耗 |
 | `'1'` | 非日清 (标品) | 正常库存方程 |
 | `'2'` | 合计 (ETL UNION生成) | 查询全天合计必须 `WHERE day_clear='2'` |
 
@@ -381,7 +384,7 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 
 ## Data Source Tables
 
-### 原子域表 (13张活跃 + 2张骨架)
+### 源数据表（13 张有数据 + 2 张只有结构）
 | DuckDB 表 | QDM 商分表 | 域 |
 |---|---|---|
 | `atomic_sales` | `strategy_fm_sales_di` | ①销售 |
@@ -393,12 +396,12 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 | `atomic_compose` | `strategy_fm_compose_di` | ⑤加工 |
 | `atomic_allowance` | `strategy_fm_allowance_di` | ⑥补贴 |
 | `atomic_promo` | `strategy_fm_promo_di` | ⑦促销 |
-| `atomic_cost_price` | `strategy_fm_inventory_pool_di` | ⑧成本价(观测) |
+| `atomic_cost_price` | `strategy_fm_inventory_pool_di` | ⑧成本参考值（只读） |
 | `atomic_price` | `strategy_fm_price_da` | ⑨价格 |
-| `atomic_bom_relation` | `strategy_dim_store_article_bom_relation` | BOM关系(观测) |
+| `atomic_bom_relation` | `strategy_dim_store_article_bom_relation` | BOM关系（只读） |
 | `atomic_receive_sale` | `strategy_fm_receive_sale_di` | BOM核心源 |
-| `atomic_order_receive` | (空骨架) | — |
-| `atomic_article_convert` | (空骨架) | — |
+| `atomic_order_receive` | 只有表结构，当前无数据 | — |
+| `atomic_article_convert` | 只有表结构，当前无数据 | — |
 
 ### 维度表 (7张)
 | DuckDB 表 | QDM 源表 |
@@ -413,7 +416,7 @@ BOM 父品剩余库存（sale=0, bom_out>0, end>0）通过 `stock_transfer_out` 
 
 ### dim_goods 注意事项
 
-`strategy_fm_dim_goods` 在 StarRocks 中**只存最新一天数据**（从 `hive.dim.dim_goods_information_have_pt` 每日全量覆盖）。补数据 SQL：
+`strategy_fm_dim_goods` 在 StarRocks 中**只存最新一天数据**（从 `hive.dim.dim_goods_information_have_pt` 每日全部覆盖）。补数据 SQL：
 ```sql
 DELETE FROM default_catalog.ads_business_analysis.strategy_fm_dim_goods;
 INSERT INTO default_catalog.ads_business_analysis.strategy_fm_dim_goods
@@ -421,7 +424,7 @@ SELECT * FROM hive.dim.dim_goods_information_have_pt
 WHERE inc_day = '${date}';
 ```
 
-DuckDB 端 `dim_goods` 每次从最新 `inc_day` 全量替换，**表中没有 inc_day 列**。所有历史日期的数据在 FM 底表层（sku_dim.py）统一 JOIN 最新 dim_goods，下游只需 `ON article_id`。
+DuckDB 端 `dim_goods` 每次从最新 `inc_day` 全部替换，**表中没有 inc_day 列**。所有历史日期的数据在 FM 输出表层（sku_dim.py）统一 JOIN 最新 dim_goods，下游只需 `ON article_id`。
 
 ### 计算层表 (5张)
 | DuckDB 表 | 算法 |
@@ -429,10 +432,10 @@ DuckDB 端 `dim_goods` 每次从最新 `inc_day` 全量替换，**表中没有 i
 | `t_atomic_wide` | FULL OUTER JOIN + 父品补全 + 日清覆盖 (82字段) |
 | `t_calc_bom_alloc` | Σ总权重 + Python共享组识别 + 单位归一化 |
 | `t_calc_sku_cost` | 加权平均含期初库存 |
-| `t_calc_stock` | 四流合一 + 跨日滚动 (中枢, 合并了inventory/avg_price/amounts) |
+| `t_calc_stock` | 四流合一 + 前一天期末库存转为当天期初库存 (中枢, 合并了inventory/avg_price/amounts) |
 | `t_calc_profit` | 含BOM + SCM金融 + 全链路毛利 |
 
-### FM 底表 (6张)
+### FM 输出表 (6张)
 | DuckDB 表 | 粒度 | 说明 |
 |---|---|---|
 | `t_fm_sku_dim` | store×date×article_id×day_clear | SKU级完整宽表，含分类重映射、7日均量 |
@@ -507,7 +510,7 @@ v0.11 中所有复杂计算在 Python 完成，SQL 仅做数据拉取和 JOIN。
 │   ├── connectors/          # ApiConnector + DuckDBStore
 │   ├── atomic/              # Step 1-2: 原子域提取 (16个extractor文件)
 │   ├── calculated/          # Step 3-7: 计算层 (5个模块, Python核心)
-│   ├── fm_tables/           # Step 8-13: FM底表 (6张)
+│   ├── fm_tables/           # Step 8-13: FM输出表 (6张)
 │   ├── utils/               # 日志/日期/重试工具
 │   ├── docs/                # 架构/参考/审查/修复 (4个子目录)
 │   └── fm_etl_v3/           # 旧版 v3.0 (历史版本, 保留参考)
@@ -631,7 +634,7 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 
 ```
 成品 compose_in_amt = compose_in_qty × Σ(raw_qty / yield_qty × raw_base_euc)
-原料 compose_out_amt = compose_out_qty × base_euc (价值守恒)
+原料 compose_out_amt = compose_out_qty × base_euc (价值前后总额相等)
 ```
 
 - `raw_qty`: 原料用量
@@ -654,7 +657,7 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 ### 加工关系修改后
 
 需在服务器上重启 ETL 或等次日自动跑。本地修改 JSON 不影响服务器 ETL——
-服务器 ETL 优先读服务器上的 JSON 缓存，回退到 API。
+服务器 ETL 优先读服务器上的 JSON 缓存，本地文件读取失败时调用 API。
 
 ---
 
@@ -678,7 +681,7 @@ proc-rel.service    # 加工关系管理 API (端口 5003)
 ### 问题
 
 QDM 的 `lost_amt` 可以为负（盘盈/inventory gain），FM 的库存方程在"正常"分支
-不产生负损耗。QDM 盘盈是运营记录（净库存调整），FM 损耗是方程残差。
+不产生负损耗。QDM 盘盈是运营记录（净库存调整），FM 损耗是方程平衡差。
 
 ### v0.11 修复
 
@@ -743,7 +746,7 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 
 - **CLAUDE.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
 - **当前公式单一信源**: v0.17 以 `fmetl/README.md` + DESIGN-008 为准；本文件后续 v0.11 公式只约束生产遗留流程，不能覆盖当前本地试算规则。改公式时同步当前 README、设计、FIX 和发布审核。
-- **面向人的文字**: 要求是直接、准确、简洁、按因果顺序表达、不使用情绪词，不是追求口语化。先写条件，再写系统动作和计算结果，最后在括号中写表名、字段名或状态码。不能只写“反冲、过账、门禁、隔离、守恒、成本池”等内部术语；必须说明实际扣了什么、加了什么、为什么不计算，以及对库存和毛利的影响。
+- **面向人的文字**: 要求是直接、准确、简洁、按因果顺序表达、不使用情绪词，不是追求口语化。先写条件，再写系统动作和计算结果，最后在括号中写表名、字段名或状态码。不能只写 `反冲`、`过账`、`门禁`、`隔离`、`守恒`、`成本池` 等内部术语；必须说明实际扣了什么、加了什么、为什么不计算，以及对库存和毛利的影响。
 - **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
 - **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
 - **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本

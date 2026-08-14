@@ -5,13 +5,13 @@
 
 | 编号 | 标题 | 状态 | 影响模块 |
 |---|---|---|---|
-| [FIX-021](FIX-021-mirror-exact-duplicate-dedup.md) | 镜像提取层完全重复行去重 | ✅已实现 / ✅07-24～30 本地试算通过 | `mirror/extract.py` |
+| [FIX-021](FIX-021-mirror-exact-duplicate-dedup.md) | 源数据副本提取层完全重复行去重 | ✅已实现 / ✅07-24～30 本地试算通过 | `mirror/extract.py` |
 | [FIX-022](FIX-022-explicit-operator-count-gate.md) | 只有能确认由人工操作的盘点才覆盖期末 | ✅已实现 / ✅07-27～08-04 本地运行通过 | `facts/sku_day.py`、每日库存账 |
 | [FIX-023](FIX-023-explicit-window-and-safe-rates.md) | 连续区间重刷与聚合比率安全除法 | ✅已实现 / ✅07-27～08-04 本地试算通过 | `cli.py`、`validation/run_v014.py`、`outputs/levels_result.py` |
 | [FIX-024](FIX-024-v015-evidence-led-release-gates.md) | 明确哪些检查决定结果能否发布，并统一对比规则 | ✅代码与测试通过 / ⛔仍有零成本 | 输出、检查、v1.5 对比 |
 | [FIX-025](FIX-025-v016-category-lineage-and-comparison.md) | 记录分类来源，并分开显示原分类和统一分类结果 | ✅代码与定向测试通过 / ⛔当时历史分类方式未确认 | 主数据、运行清单、v1.5 对比 |
 | [FIX-026](FIX-026-empty-pool-issue-cost-fallback.md) | 当天没有可用成本时，只使用已经存在的成本来源 | ✅完整重跑 / ✅9 项账目检查 / ⛔236 行仍缺成本 | 标准化数据、每日成本账、发布检查 |
-| [FIX-027](FIX-027-v017-processing-backflush-and-receipt-bridge.md) | 根据成品消耗计算原料；收货、加工和生熟联动避免重复扣减 | ✅完整重跑 / ✅10 项账目检查 / ⛔193 个商品日缺成本 | 加工、验收、每日库存账、对比 |
+| [FIX-027](FIX-027-v017-processing-backflush-and-receipt-bridge.md) | 根据成品消耗计算原料；收货、加工和生熟联动避免重复扣减 | ✅完整重跑 / ✅10 项账目检查 / ⛔193 条商品×日期记录缺成本 | 加工、验收、每日库存和成本、对比 |
 
 ## 版本迭代说明
 

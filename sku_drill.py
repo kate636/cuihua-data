@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SKU 级下钻 — 用本地 DuckDB 数据追踪根因（QDM API 限流后备用方案）"""
+"""按 SKU 查看差异明细，并用本地 DuckDB 查找原因；QDM API 限流时使用。"""
 import duckdb
 import pandas as pd
 import numpy as np

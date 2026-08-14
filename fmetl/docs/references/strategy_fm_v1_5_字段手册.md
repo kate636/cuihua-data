@@ -5,18 +5,18 @@
 > 依据：`翠花数据诊断/huajia_yonghong_etl/versions/v1_5/sync_strategy_fm.sh`、当前仓库
 > `fmetl/mirror/registry.py`、相邻项目保存的 Hive 建表元数据、v1.5 的
 > `step1_flag_sku_di.sql` 与 `step2_cust.sql`，以及 2026-07-22 通过 QDM API 对 28 张
-> StarRocks 镜像表逐表执行的实时查询。
+> StarRocks 源数据副本表逐表执行的实时查询。
 >
 > 数据边界：字段名、实时列数、最新分区和行数已通过 StarRocks 只读 API 核对；QDM API
 > 不返回 `DESC/SHOW FULL COLUMNS` 的类型和 COMMENT，因此字段类型/注释仍以 Hive DDL 或
-> 公司 IDE 的 schema 查询为准。StarRocks 镜像表是 `SELECT *` 同步，正式变更前仍需执行
+> 公司 IDE 的 schema 查询为准。StarRocks 源数据副本表是 `SELECT *` 同步，正式变更前仍需执行
 > 文末 schema 校验 SQL。
 >
 > 完整实时列名集合见：[2026-07-22 实时列名快照](strategy_fm_v1_5_实时列名快照_2026-07-22.md)。
 
 ## 1. 先看结论
 
-### 1.1 v1.5 同步脚本实际涉及 28 张镜像表
+### 1.1 v1.5 同步脚本实际涉及 28 张源数据副本表
 
 脚本中的日志序号仍写着 `1/21`、`22/31` 等历史编号，不能用来判断表总数。按实际
 `DELETE/INSERT` 目标表统计，当前是 28 张：
@@ -38,7 +38,7 @@
 `strategy_fm_dim_order_saleable.saleable` 为准；是否可订读取同表的 `is_order`。采购临时表
 只能说明下单参数和采购状态，不能替代可订可售维度。
 
-### 1.3 v1.5 新增的用户链路
+### 1.3 v1.5 新增的用户过程
 
 ```text
 strategy_fm_trade_user
@@ -54,7 +54,7 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 
 ### 1.4 2026-07-22 实时核验快照
 
-以下是通过 QDM API 对镜像表执行聚合查询得到的结果。行数是整张 StarRocks 镜像表行数，
+以下是通过 QDM API 对源数据副本表执行聚合查询得到的结果。行数是整张 StarRocks 源数据副本表行数，
 不是只筛选 `A3XV` 后的行数；`max_inc_day` 是表内最大增量日。
 
 | 表 | 实时列数 | 行数 | max_inc_day |
@@ -97,60 +97,60 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 |---|---|---|
 | `business_date` | 业务发生/营业日期 | 销售、库存、SCM 等业务分析主日期；不要用入库日期替代业务日期 |
 | `inc_day` | 数据增量/分区日期 | 同步脚本按此字段删除和写入；维度快照也可能只保留最新分区 |
-| `store_id` | 门店编码 | 主要事实表使用；当前范围是 `A3XV` |
+| `store_id` | 门店编码 | 主要业务记录表使用；当前范围是 `A3XV` |
 | `shop_id` | 门店编码的另一套命名 | 促销、成本价、价格、库存明细、采购临时表使用；进入 ETL 通常映射为 `store_id` |
 | `article_id` | 商品/SKU 编码 | 通常是销售分析主键；BOM 表中还可能指 parent |
 | `abi_article_id` | 销售订单中的 ABI 商品编码 | 映射为下游 `article_id` |
 | `sku_code` | 商品编码的另一套命名 | 促销、成本价、价格、订单可售、库存明细使用；通常映射为 `article_id` |
 | `article_id` / `sale_article_id` | 验收商品 / 销售商品 | `article_id != sale_article_id` 表示存在 BOM/拆分关系 |
 | `order_article_id` / `receive_article_id` | 订购商品 / 验收商品 | 订验桥表和让利表使用，不应直接当作销售 SKU |
-| `day_clear` | 日清标识 | `0` 日清，`1` 非日清，`2` 通常表示合计层；源事实表不应随意把空值当 `1` |
+| `day_clear` | 日清标识 | `0` 日清，`1` 非日清，`2` 通常表示合计层；源业务表的空值不能直接改成 `1` |
 | `qty` | 销售/订购单位数量 | 可能是件、盒、份，不一定是 kg |
 | `qty_spec` | 规格归一化数量 | 销售成本和重量分析常用；通常由 `qty × spec_num` 得到 |
 | `*_qty` | 数量 | 先确认单位，再做跨表相加；BOM parent 单位和 sub 单位不能混用 |
 | `*_amt` | 金额 | 默认人民币金额；含税/不含税必须看字段后缀或字段名 |
 | `*_price` | 单价/价格 | 需要配套确认计量单位；不可直接跨表比较 |
-| `p_*` / `f_*` | 商品本金 / 运费 | `p` 是 principal，`f` 是 freight；销售额口径通常用商品金额，不要把运费重复计入 |
+| `p_*` / `f_*` | 商品本金 / 运费 | `p` 是 principal，`f` 是 freight；销售额计算规则通常用商品金额，不要把运费重复计入 |
 | `original_*` | 原价/原价出库 | 与促销、赠品出库分开 |
 | `promotion_*` | 促销出库或促销金额 | 需区分销售促销、供应链让利、优惠券和成本中心 |
 | `return_*` | 退货/退仓 | 很多源表已带正负号；不要全表统一翻转符号 |
 | `init_stock_*` / `end_stock_*` | 期初/期末库存 | 期末库存是余额，不是当日流量 |
-| `created_by` | 记录创建人 | 库存明细中用于区分系统快照和人工盘点证据 |
+| `created_by` | 记录创建人 | 库存明细中用于区分系统快照和人工盘点依据 |
 
 ## 3. 同步目标、源表、粒度和 ETL 用途
 
-| # | StarRocks 镜像表 | Hive 源表 | 主要粒度 | 同步方式 | 当前用途 |
+| # | StarRocks 源数据副本表 | Hive 源表 | 主要粒度 | 同步方式 | 当前用途 |
 |---:|---|---|---|---|---|
 | 1 | `strategy_fm_sales_di` | `hive.dsl.dsl_transaction_non_daily_store_order_details_di` | 订单行×商品×日清 | 按门店/分区替换 | 销售数量、销售额、客数基础 |
 | 2 | `strategy_fm_purchase_di` | `hive.dsl.dsl_transaction_non_daily_store_article_purchase_di` | 门店×日×验收品×销售品×日清 | 按门店/分区替换 | 期初期末库存、预拆进货 |
 | 3 | `strategy_fm_scm_di` | `hive.dal_full_link.dal_manage_full_link_dc_store_article_scm_di` | 门店×日×商品 | 按门店/分区替换 | 出库、退仓、采购价、SCM让利 |
 | 4 | `strategy_fm_scm_adjust_di` | `hive.dal_bi_rpt.dal_debit_store_dc_difference_adjustment_di` | 门店×日×仓×物料×商品 | 按门店/分区替换 | 差异调整审计，当前常为空 |
-| 5 | `strategy_fm_loss_di` | `hive.dal.dal_transaction_store_article_lost_di` | 门店×日×商品 | 按门店/分区替换 | 已知/未知损耗观测 |
-| 6 | `strategy_fm_compose_di` | `hive.dsl.dsl_transaction_sotre_article_compose_info_di` | 门店×日×商品 | 按门店/分区替换 | 加工进出数量金额观测 |
+| 5 | `strategy_fm_loss_di` | `hive.dal.dal_transaction_store_article_lost_di` | 门店×日×商品 | 按门店/分区替换 | 源表记录的已知/未知损耗 |
+| 6 | `strategy_fm_compose_di` | `hive.dsl.dsl_transaction_sotre_article_compose_info_di` | 门店×日×商品 | 按门店/分区替换 | 源表记录的加工进出数量和金额 |
 | 7 | `strategy_fm_allowance_di` | `hive.dal.dal_activity_article_order_sale_info_di` | 门店×日×订购商品/活动 | 按门店/分区替换 | 补贴及让利输出 |
 | 8 | `strategy_fm_promo_di` | `hive.dsl.dsl_promotion_order_item_article_sale_info_di` | 订单×门店×SKU×促销 | 按门店/分区替换 | 促销费用拆解 |
-| 9 | `strategy_fm_inventory_pool_di` | `hive.ods_sc_db.t_shop_inventory_sku_pool` | 门店×SKU×库存日期 | 门店全量快照替换 | 成本价观测 |
-| 10 | `strategy_fm_price_da` | `hive.dim.dim_store_article_price_info_da` | 价格观测行（实时镜像可重复） | 按门店/分区替换 | 售价、出库价审计观测 |
+| 9 | `strategy_fm_inventory_pool_di` | `hive.ods_sc_db.t_shop_inventory_sku_pool` | 门店×SKU×库存日期 | 每次用门店最新完整数据替换 | 成本参考值 |
+| 10 | `strategy_fm_price_da` | `hive.dim.dim_store_article_price_info_da` | 价格记录（实时源数据副本可能重复） | 按门店/分区替换 | 用于核对售价和出库价 |
 | 11 | `strategy_fm_dim_day_clear` | `hive.dim.dim_day_clear_article_list_di` | 门店×业务日×商品 | 按门店/分区替换 | 日清标签输入 |
-| 12 | `strategy_fm_dim_store_profile` | `hive.dim.dim_store_profile` | 门店×快照日 | 门店全量替换 | 门店、区域、城市属性 |
-| 13 | `strategy_fm_purchase_order_tmp` | `hive.ods_sc_db.t_purchase_order_item_tmp` | 门店×SKU快照 | 门店全量替换 | 采购下单参数和结果快照 |
+| 12 | `strategy_fm_dim_store_profile` | `hive.dim.dim_store_profile` | 门店×快照日 | 门店全部替换 | 门店、区域、城市属性 |
+| 13 | `strategy_fm_purchase_order_tmp` | `hive.ods_sc_db.t_purchase_order_item_tmp` | 门店×SKU快照 | 门店全部替换 | 采购下单参数和结果快照 |
 | 14 | `strategy_fm_dim_goods` | `hive.dim.dim_goods_information_have_pt` | 商品×快照日 | 按日期清理后写入 | 品类、物料码、SPU分析维度、单位和商品主数据 |
 | 15 | `strategy_fm_receive_sale_di` | `hive.dal.dal_receive_sale_di` | 门店×日×parent×sub | 按门店/分区替换 | BOM验收销售桥、进货主源 |
 | 16 | `strategy_fm_order_receive_di` | `hive.dal.dal_store_order_receive_di` | 门店×日×订购品×验收品 | 按门店/分区替换 | 订验桥，当前可能无数据 |
-| 17 | `strategy_fm_dim_article_convert` | `hive.dim.dim_store_article_convert_info_da` | 门店×parent×sub | 按门店/分区替换 | 父子方向与单位比例辅助证据 |
-| 18 | `strategy_dim_store_article_bom_relation` | `hive.dim.dim_store_article_bom_relation` | 门店×日×parent×sub | 按门店/分区替换 | BOM关系边 |
+| 17 | `strategy_fm_dim_article_convert` | `hive.dim.dim_store_article_convert_info_da` | 门店×parent×sub | 按门店/分区替换 | 父子方向与单位比例辅助依据 |
+| 18 | `strategy_dim_store_article_bom_relation` | `hive.dim.dim_store_article_bom_relation` | 门店×日×parent×sub | 按门店/分区替换 | BOM关系条数 |
 | 19 | `strategy_fm_store_article_inventory_detail_di` | `hive.ddl.ddl_transaction_store_article_inventory_detail_di` | 门店×库存日×SKU | 按门店/分区替换 | 系统库存与人工盘点快照 |
-| 20 | `strategy_fm_full_link_article_di` | `hive.dal_full_link.dal_manage_full_link_store_dc_article_info_di` | 门店×日×商品 | 按门店/分区替换 | v1.5 商品维度底表主事实 |
+| 20 | `strategy_fm_full_link_article_di` | `hive.dal_full_link.dal_manage_full_link_store_dc_article_info_di` | 门店×日×商品 | 按门店/分区替换 | v1.5 商品维度输出表主事实 |
 | 21 | `strategy_fm_store_daily_di` | `hive.dal.dal_transaction_sale_store_daily_di` | 门店×日 | 按门店/分区替换 | 有效营业日筛选 |
 | 22 | `strategy_fm_article_sale_di` | `hive.dal.dal_transaction_store_article_sale_info_di` | 门店×日×商品 | 按门店/分区替换 | 销售件数、19点前件数 |
-| 23 | `strategy_fm_chdj_article_di` | `hive.dal.dal_transaction_chdj_store_sale_article_sale_info_di` | 门店×日×商品×日清 | 按门店/分区替换 | 翠花口径利润、库存、日清 |
+| 23 | `strategy_fm_chdj_article_di` | `hive.dal.dal_transaction_chdj_store_sale_article_sale_info_di` | 门店×日×商品×日清 | 按门店/分区替换 | 翠花计算规则利润、库存、日清 |
 | 24 | `strategy_fm_dim_order_saleable` | `hive.dim.dim_store_article_order_sale_info_di` | 门店×日×商品 | 同步脚本第 26 步按门店/分区替换 | v1.5 `saleable`/`is_order` 权威输入 |
-| 25 | `strategy_fm_dim_calendar` | `hive.dim.dim_calendar` | 日期 | 仅首次全量导入 | 周、月、年维度 |
+| 25 | `strategy_fm_dim_calendar` | `hive.dim.dim_calendar` | 日期 | 仅首次全部导入 | 周、月、年维度 |
 | 26 | `strategy_fm_order_offline_di` | `hive.dsl.dsl_transaction_sotre_order_offline_details_di` + `hive.ods_pay_db.t_trade` | 线下订单行 | 按门店/分区替换 | 客数、渠道、新老客 |
 | 27 | `strategy_fm_order_online_di` | `hive.dsl.dsl_transaction_sotre_order_online_details_di` + `hive.ods_pay_db.t_trade` | 线上订单行 | 按门店/分区替换 | 客数、渠道、新老客 |
 | 28 | `strategy_fm_trade_user` | `hive.ods_pay_db.t_trade` | 订单×支付用户 | 按分区替换 | `thirdparty_user_identity` 映射 |
 
-## 4. 核心事实表字段手册
+## 4. 核心业务表字段
 
 ### 4.1 销售事实 `strategy_fm_sales_di`（源字段 119 列）
 
@@ -174,7 +174,7 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 | 配送/其他 | `logistics_status`, `courier_company`, `courier_name`, `courier_name_reverse`, `courier_phone`, `postage_shop`, `postage_platform`, `gift_gmv`, `promotion_amt_platform_gs`, `promotion_amt_platform_gys`, `activity_code`, `is_promotion_article` | 物流、邮费、赠品GMV、平台/公司/供应商承担和活动编号 |
 | 日清 | `day_clear` | 源销售行的日清标签；不要与 v1.5 `chdj_article` 的日清标签混淆 |
 
-**下游锚点**：`abi_article_id → article_id`，`qty_spec → sale_qty`，`sales_amt → sale_amt`。
+**下游起始依据**：`abi_article_id → article_id`，`qty_spec → sale_qty`，`sales_amt → sale_amt`。
 退货字段保留源符号，不能在 ETL 再统一取负。
 
 ### 4.2 进货验收 `strategy_fm_purchase_di`（16 列）
@@ -187,8 +187,8 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 | `sale_article_qty`, `sale_article_purchase_amt` | 拆分后销售品数量和进货额 |
 | `init_stock_qty`, `init_stock_amt` | 期初库存数量和金额 |
 | `end_stock_qty`, `end_stock_amt` | 上游期末库存数量和金额 |
-| `inventory_cost` | 库存成本单价，观测字段 |
-| `avg_inbound_price` | parent 进货平均价，EUC 兜底参考 |
+| `inventory_cost` | 源表提供的库存成本单价，仅用于核对 |
+| `avg_inbound_price` | parent 进货平均价，EUC 无其他依据时采用参考 |
 
 `article_id = sale_article_id` 通常是标品；不相等表示预拆 BOM 行。`sale_article_qty` 是
 销售品单位，不能拿去代替 parent 单位的 BOM 数量。
@@ -207,7 +207,7 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 | QDM承担 | `qdm_bear_negative_amt_total`, `qdm_bear_positive_amt_total`, `qdm_bear_gift_qty`, `qdm_bear_gift_amt`, `qdm_bear_nogift_negative_amt`, `qdm_bear_nogift_positive_amt`, `qdm_bear_promotion_fee` | 公司承担的正负让利、赠品和促销费用 |
 | 少货 | `miss_stock_qty`, `miss_stock_amt` | 到货不足数量和金额 |
 
-当前 ETL 主要把 SCM 作为采购价/供应链指标观测，不能把 `out_stock_amt_cb` 再重复记为门店
+当前 ETL 只用 SCM 核对采购价和供应链指标，不能把 `out_stock_amt_cb` 再重复记为门店
 `receive`。
 
 ### 4.4 损耗 `strategy_fm_loss_di`（10 列）
@@ -215,15 +215,15 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 `store_id`, `article_id`, `article_name`, `category_level1_id`, `category_level1_description`,
 `know_lost_qty`, `know_lost_amt`, `unknow_lost_qty`, `unknow_lost_amt`, `inc_day`。
 
-`know_lost_*` 是上游登记的已知损耗；`unknow_lost_*` 是上游口径的未知损耗，仅作审计参考。
-当前 FM 以自己的库存方程反推未知损耗，不直接覆盖计算层结果。
+`know_lost_*` 是上游登记的已知损耗；`unknow_lost_*` 是上游计算规则的未知损耗，仅作审计参考。
+当前 FM 用自己的库存方程计算未知损耗，不用源表未知损耗覆盖计算结果。
 
 ### 4.5 加工 `strategy_fm_compose_di`（11 列）
 
 `business_date`, `store_id`, `store_name`, `article_id`, `article_name`, `compose_in_qty`,
 `compose_in_amt`, `compose_out_qty`, `compose_out_amt`, `update_time`, `inc_day`。
 
-`compose_in` 表示加工流入原料，`compose_out` 表示加工流出/产出；金额是源表观测，不能默认
+`compose_in` 表示加工流入原料，`compose_out` 表示加工流出或产出；金额来自源表，不能默认
 等同于 v1.5 配方计算的金额。
 
 ### 4.6 活动让利 `strategy_fm_allowance_di`（76 列）
@@ -276,9 +276,9 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 `sale_recev_rate`, `inc_day`。
 
 这是 v1.5 计算中 parent×sub 的事实桥。`spilit_sale_article_amt` 的拼写是源表固有字段，不能
-自行改成 `split_*` 后再用 `SELECT *` 写入镜像。
+自行改成 `split_*` 后再用 `SELECT *` 写入源数据副本。
 
-### 5.2 BOM 关系边 `strategy_dim_store_article_bom_relation`（17 列）
+### 5.2 BOM 关系条数 `strategy_dim_store_article_bom_relation`（17 列）
 
 `store_id`, `category_level3_id`, `category_level3_description`, `category_level2_id`,
 `category_level2_description`, `category_level1_id`, `category_level1_description`,
@@ -286,7 +286,7 @@ strategy_fm_user_first_order（v1.5 ETL 运行时生成，非本同步脚本目�
 `dressing_rate`, `cost_rate`, `bom_type`, `split_mode`, `sp_level`, `inc_day`。
 
 `dressing_rate` 是出成率，`cost_rate` 是成本分摊比例；当 `cost_rate` 为空或无效时，不能
-直接当 0，而应执行设计中约定的反推/兜底规则。`bom_type`、`split_mode`、`sp_level` 是关系
+直接当 0，而应执行设计中约定的计算规则；只有设计明确允许时才能采用替代依据。`bom_type`、`split_mode`、`sp_level` 是关系
 类型，不是数量比例。
 
 ### 5.3 父子比例辅助 `strategy_fm_dim_article_convert`（9 列）
@@ -299,7 +299,7 @@ SPU 转换`、`3=混合`。这里的“SPU 转换”不能直接解释为按 `sp
 主数据应先核对 `matnr`，再用本表的精确 parent/sub 行补充方向和比例。
 
 该表不是 BOM、物料码关系之外的第三种业务关系。BOM 表定义一父多子拆分边，商品主数据
-的同 `matnr` 定义同物料成员；本表只在存在精确父子行时提供换算证据。没有行不代表没有
+的同 `matnr` 定义同物料成员；本表只在存在精确父子行时提供换算依据。没有行不代表没有
 BOM 或物料码关系。
 
 ### 5.4 订验关系 `strategy_fm_order_receive_di`（17 列）
@@ -319,11 +319,11 @@ BOM 或物料码关系。
 `last_updated_at`, `inc_day`。
 
 `sale_stock_qty` 是系统库存，`actual_stock_qty` 是实盘数量，`profit_loss_qty = actual - sale`。
-`created_by` 是盘点证据强度字段，不是商品主数据的创建人。
+`created_by` 是盘点依据强度字段，不是商品主数据的创建人。
 
 ### 5.6 商品主数据 `strategy_fm_dim_goods`
 
-源表是商品全量快照，当前镜像保留最新 `inc_day`。关键字段：
+源表是商品全部快照，当前源数据副本保留最新 `inc_day`。关键字段：
 
 | 字段 | 含义 |
 |---|---|
@@ -344,10 +344,10 @@ BOM 或物料码关系。
 
 ### 5.7 日清 `strategy_fm_dim_day_clear`
 
-2026-07-30 对实时镜像执行零行字段投影确认：该表没有 `day_clear` 列。实际字段为
+2026-07-30 对实时源数据副本执行零行字段投影确认：该表没有 `day_clear` 列。实际字段为
 `business_date`, `store_id`, `article_id`, `article_name`、三级分类字段和 `inc_day`。
-它是日清商品清单：命中行表示 `day_clear=0`；未命中不能直接证明非日清，v0.14 先回退到
-当日销售事实的 `day_clear` 标签，再默认 `day_clear=1`。不得从 v1.5 商品经营结果表回填。
+它是日清商品清单：在表中的商品记为 `day_clear=0`；不在表中不能直接证明该商品不是日清，v0.14 接着检查
+当日销售记录的 `day_clear` 标签；仍缺失时再默认 `day_clear=1`。不得把 v1.5 商品经营结果写入该字段。
 
 ### 5.8 门店画像 `strategy_fm_dim_store_profile`
 
@@ -365,7 +365,7 @@ BOM 或物料码关系。
 `sub_category_id`, `spec`, `sub_category_name`, `sku_name`, `created_at`, `created_by`, `inc_day`,
 `sales_unit`, `weight_flag`, `seven_days_avg_sale`, `id`, `shop_id`, `sku_code`, `updated_at`。
 
-`cost_price` 是外部成本价观测，不是当前加权平均 EUC 的唯一来源；`inventory_date` 是库存日期，
+`cost_price` 是外部成本参考值，不是当前加权平均 EUC 的唯一来源；`inventory_date` 是库存日期，
 `inc_day` 是快照/增量日期，二者不能混用。
 
 ### 5.10 价格 `strategy_fm_price_da`
@@ -381,10 +381,10 @@ BOM 或物料码关系。
 价格表是 SKU×门店×日期快照。`current_price` 是售价，`dc_price` 是出库价，`original_price`
 是销售原价，不能把三者当成同一成本字段。
 
-2026-07-30 对 A3XV 2026-07-17 镜像实查：11,345 行只有 5,673 个不同
+2026-07-30 对 A3XV 2026-07-17 源数据副本实查：11,345 行只有 5,673 个不同
 `id`/`sku_code`，存在完全重复的价格行。因此不得直接当作“门店×SKU×分区日唯一”
-快照 JOIN 或汇总。v0.14 当前仅保留为审计证据；未有确定性有效记录规则前，
-报表售价和原价金额使用销售事实已聚合字段，不从本表追加过账。
+快照 JOIN 或汇总。v0.14 当前仅保留为审计依据；未有确定性有效记录规则前，
+报表售价和原价金额使用销售事实已聚合字段，不从本表追加计入每日库存和成本。
 
 ### 5.11 SCM 差异调整 `strategy_fm_scm_adjust_di`
 
@@ -414,7 +414,7 @@ BOM 或物料码关系。
 此表和 `strategy_fm_dim_order_saleable` 不能因为都含“可订”语义就视为同一结构。前者描述
 采购下单过程，后者描述商品是否可订、是否可售；判断销售 SKU 必须查后者。
 
-## 6. v1.5 新增镜像表字段手册
+## 6. v1.5 新增源数据副本表字段手册
 
 ### 6.1 全链路商品 `strategy_fm_full_link_article_di`（实时 202 列）
 
@@ -432,7 +432,7 @@ BOM 或物料码关系。
 | SCM/促销 | `out_stock_amt_cb`, `out_stock_pay_amt`, `out_stock_pay_amt_notax`, `return_stock_pay_amt`, `return_stock_amt_cb`, `scm_promotion_amt_total`, `scm_promotion_amt`, `scm_bear_amt`, `vendor_bear_amt`, `business_bear_amt`, `market_bear_amt`, `allowance_amt` | 出库、退仓、让利和补贴 |
 | 其他指标 | `expect_outstock_amt`, `pre_sale_amt`, `pre_inbound_amount`, `pre_lost_qty`, `pre_lost_amt`, `adjustment_amt`, `purchase_weight`, `sales_weight`, `business_flag`, `update_time`, `last_sysdate` | 理论指标、调整、营业标记和更新时间 |
 
-此表是 v1.5 `flag_sku` 的主事实，字段多于当前脚本之外的底表。读取时应以实际 Hive DDL
+此表是 v1.5 `flag_sku` 的主事实，字段多于当前脚本之外的输出表。读取时应以实际 Hive DDL
 为最终列顺序，不能手工猜测 `SELECT *` 的列序。
 
 ### 6.2 门店日销售 `strategy_fm_store_daily_di`（实时 75 列）
@@ -442,14 +442,14 @@ BOM 或物料码关系。
 `offline_sale_amt`, `online_cust_num`, `offline_cust_num`, `cust_num`, `business_flag`。
 
 v1.5 使用 `bf19_sale_amt >= 500` 选择有效营业日；该表的 `business_flag` 也描述营业状态，
-两种口径不能不加说明地混用。
+两种计算规则不能不加说明地混用。
 
 ### 6.3 SKU 销售件数 `strategy_fm_article_sale_di`（实时 92 列）
 
 核心字段：`business_date`, `store_id`, `article_id`, `bf19_sale_piece_qty`, `sale_piece_qty`,
 `sale_qty`, `sale_amt`, `online_sale_qty`, `offline_sale_qty`, `inc_day`。
 
-它补充的是销售件数口径，不能用 `qty_spec` 替代。`bf19_sale_piece_qty` 是 19 点前件数，
+它补充的是销售件数计算规则，不能用 `qty_spec` 替代。`bf19_sale_piece_qty` 是 19 点前件数，
 `sale_piece_qty` 是全天件数。
 
 ### 6.4 翠花商品经营 `strategy_fm_chdj_article_di`（实时 75 列）
@@ -528,7 +528,7 @@ v1.5 使用 `bf19_sale_amt >= 500` 选择有效营业日；该表的 `business_f
 
 ## 7. 字段使用与计算边界
 
-### 7.1 销售链路
+### 7.1 销售过程
 
 ```text
 sales_di.qty_spec  → 销售规格量
@@ -538,7 +538,7 @@ article_sale_di.sale_piece_qty → 销售件数
 order_offline/online + trade_user → 客数、渠道、新老客
 ```
 
-### 7.2 BOM 链路
+### 7.2 BOM 过程
 
 ```text
 receive_sale_di              → parent×sub 的进货事实
@@ -553,12 +553,12 @@ EUC 计算中互换。
 ### 7.3 成本价边界
 
 `inventory_pool_di.cost_price`、`purchase_di.inventory_cost`、`purchase_di.avg_inbound_price`、
-`scm_di.out_stock_amt_cb / total_outstock_qty`、`price_da.dc_price` 都是不同业务口径：
+`scm_di.out_stock_amt_cb / total_outstock_qty`、`price_da.dc_price` 都是不同业务定义：
 
-- 成本价池：SKU成本价快照/观测。
-- 进货平均价：进货或 parent 口径平均价。
-- SCM成本单价：仓出库成本口径。
-- 价格表出库价：价格策略口径。
+- 库存成本参考表：提供某日保存的 SKU 成本参考值。
+- 进货平均价：进货或 parent 计算规则平均价。
+- SCM成本单价：仓出库成本计算规则。
+- 价格表出库价：价格策略计算规则。
 - FM 加权 EUC：计算层按期初、self receive、加工、BOM 流量得到的有效单位成本。
 
 ## 8. 推荐的在线 schema 校验 SQL
@@ -597,7 +597,7 @@ DESCRIBE hive.dal_full_link.dal_manage_full_link_store_dc_article_info_di;
 ## 9. 维护规则
 
 1. `sync_strategy_fm.sh` 新增、删除或替换 `INSERT ... SELECT *` 时，先更新第 3 节表清单，再更新对应字段章节。
-2. 任何 `SELECT *` 镜像表都必须同时核对 Hive 源表列顺序和 StarRocks 目标列顺序；追加字段要记录版本和日期。
+2. 任何 `SELECT *` 源数据副本表都必须同时核对 Hive 源表列顺序和 StarRocks 目标列顺序；追加字段要记录版本和日期。
 3. 新增字段必须注明：源字段、业务含义、单位、符号约定、下游使用者、是否参与计算。
-4. Hive 表的中文 COMMENT 是字段语义的第一证据；若 COMMENT 为空，必须标记为“代码/样本推导”，不能写成已确认业务定义。
-5. 查询结果或对比结果必须注明来自本地数据、StarRocks 镜像还是服务器生产 DuckDB；三者不能混写。
+4. Hive 表的中文 COMMENT 是字段语义的第一依据；若 COMMENT 为空，必须标记为“代码/样本推导”，不能写成已确认业务定义。
+5. 查询结果或对比结果必须注明来自本地数据、StarRocks 源数据副本还是服务器生产 DuckDB；三者不能混写。
