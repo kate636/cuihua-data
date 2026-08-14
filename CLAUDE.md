@@ -730,19 +730,20 @@ FM 输出表 `t_fm_levels_result` 中的"采购价"字段：
 ## Key Documents
 
 - [fmetl/README.md](fmetl/README.md) — v0.17 当前架构、公式、运行与验证单一入口
-- [DESIGN-008](fmetl/docs/designs/DESIGN-008-v0.17-processing-evidence-and-profit-correction.md) — 当前加工、A进B出与毛利设计
+- [DESIGN-008](fmetl/docs/designs/DESIGN-008-v0.17-processing-evidence-and-profit-correction.md) — 当前商品转换、加工原料和毛利计算规则
 - [v0.17 发布审核](fmetl/docs/reviews/V0.17_RELEASE_REVIEW.md) — 2026-08-06～11 完整重跑与阻塞项
-- `fmetl/docs/architecture/ETL_v0.11_完整处理逻辑.md` — 生产遗留 v0.11 参考
-- [fmetl/docs/references/strategy_fm_字段手册_完整版.md](fmetl/docs/references/strategy_fm_字段手册_完整版.md) — 唯一权威源表字段手册
-- [fmetl/docs/references/strategy_fm_字段手册_BOM版.md](fmetl/docs/references/strategy_fm_字段手册_BOM版.md) — BOM专用字段手册
-- [fmetl/docs/reviews/差异问题与待办事项_v0.11.md](fmetl/docs/reviews/差异问题与待办事项_v0.11.md) — QDM对比差异分析 + 行动计划
+- [_archived/fmetl_v0_11_20260715/docs/architecture/ETL_v0.11_完整处理逻辑.md](_archived/fmetl_v0_11_20260715/docs/architecture/ETL_v0.11_完整处理逻辑.md) — 生产遗留 v0.11 参考
+- [fmetl/docs/references/strategy_fm_v1_5_字段手册.md](fmetl/docs/references/strategy_fm_v1_5_字段手册.md) — 当前 v1.5 源表字段手册
+- [_archived/fmetl_v0_11_20260715/docs/references/strategy_fm_字段手册_BOM版.md](_archived/fmetl_v0_11_20260715/docs/references/strategy_fm_字段手册_BOM版.md) — 历史 BOM 字段手册
+- [_archived/fmetl_v0_11_20260715/docs/reviews/差异问题与待办事项_v0.10.md](_archived/fmetl_v0_11_20260715/docs/reviews/差异问题与待办事项_v0.10.md) — 历史 QDM 对比差异和行动记录
 - [fmetl/docs/fixes/README.md](fmetl/docs/fixes/README.md) — 修复记录索引 + 依赖关系图
 - [fmetl/docs/README.md](fmetl/docs/README.md) — 文档导航索引
 
 ## Documentation Conventions
 
 - **CLAUDE.md** (this file): AI 操作手册 — 核心规则、快速索引、代码模式
-- **当前公式单一信源**: v0.17 以 `fmetl/README.md` + DESIGN-008 为准；本文件后续 v0.11 公式只约束生产遗留链，不能反向覆盖当前影子逻辑。改公式时同步当前 README、设计、FIX 和发布审核。
+- **当前公式单一信源**: v0.17 以 `fmetl/README.md` + DESIGN-008 为准；本文件后续 v0.11 公式只约束生产遗留流程，不能覆盖当前本地试算规则。改公式时同步当前 README、设计、FIX 和发布审核。
+- **面向人的文字**: 要求是直接、准确、简洁、按因果顺序表达、不使用情绪词，不是追求口语化。先写条件，再写系统动作和计算结果，最后在括号中写表名、字段名或状态码。不能只写“反冲、过账、门禁、隔离、守恒、成本池”等内部术语；必须说明实际扣了什么、加了什么、为什么不计算，以及对库存和毛利的影响。
 - **子目录 README.md**: 给人看的详细文档 — 保留所有细节，方便同事理解每个模块
 - **docs/**: 按类型分目录 — `architecture/` (架构) / `references/` (参考手册) / `reviews/` (审查) / `fixes/` (修复记录)
 - **字段手册**: `references/strategy_fm_字段手册_完整版.md` 是唯一权威，不建多版本

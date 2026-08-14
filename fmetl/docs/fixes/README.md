@@ -5,22 +5,22 @@
 
 | 编号 | 标题 | 状态 | 影响模块 |
 |---|---|---|---|
-| [FIX-021](FIX-021-mirror-exact-duplicate-dedup.md) | 镜像提取层完全重复行去重 | ✅已实现 / ✅07-24～30 影子运行通过 | `mirror/extract.py` |
-| [FIX-022](FIX-022-explicit-operator-count-gate.md) | 人工盘点账号证据门禁 | ✅已实现 / ✅07-27～08-04 影子运行通过 | `facts/sku_day.py`、库存日账 |
-| [FIX-023](FIX-023-explicit-window-and-safe-rates.md) | 连续区间重刷与聚合比率安全除法 | ✅已实现 / ✅07-27～08-04 影子运行通过 | `cli.py`、`validation/run_v014.py`、`outputs/levels_result.py` |
-| [FIX-024](FIX-024-v015-evidence-led-release-gates.md) | 证据驱动发布门禁与同口径对比 | ✅代码与测试通过 / ⛔零成本门禁未通过 | 输出层、验证层、v1.5 对比层 |
-| [FIX-025](FIX-025-v016-category-lineage-and-comparison.md) | 分类血缘、双视图对比和发布门禁 | ✅代码与定向测试通过 / ⛔历史生效方式待确认 | 主数据、运行清单、v1.5 对比层 |
-| [FIX-026](FIX-026-empty-pool-issue-cost-fallback.md) | 空成本池出流的证据化成本回退 | ✅完整重跑 / ✅9项硬门禁 / ⛔236行仍缺成本 | 标准层、成本账本、发布门禁 |
-| [FIX-027](FIX-027-v017-processing-backflush-and-receipt-bridge.md) | 加工反冲、外部验收优先与数量桥接 | ✅完整重跑 / ✅10项硬门禁 / ⛔193个 SKU 日缺成本 | 加工、验收、日账、对比层 |
+| [FIX-021](FIX-021-mirror-exact-duplicate-dedup.md) | 镜像提取层完全重复行去重 | ✅已实现 / ✅07-24～30 本地试算通过 | `mirror/extract.py` |
+| [FIX-022](FIX-022-explicit-operator-count-gate.md) | 只有能确认由人工操作的盘点才覆盖期末 | ✅已实现 / ✅07-27～08-04 本地运行通过 | `facts/sku_day.py`、每日库存账 |
+| [FIX-023](FIX-023-explicit-window-and-safe-rates.md) | 连续区间重刷与聚合比率安全除法 | ✅已实现 / ✅07-27～08-04 本地试算通过 | `cli.py`、`validation/run_v014.py`、`outputs/levels_result.py` |
+| [FIX-024](FIX-024-v015-evidence-led-release-gates.md) | 明确哪些检查决定结果能否发布，并统一对比规则 | ✅代码与测试通过 / ⛔仍有零成本 | 输出、检查、v1.5 对比 |
+| [FIX-025](FIX-025-v016-category-lineage-and-comparison.md) | 记录分类来源，并分开显示原分类和统一分类结果 | ✅代码与定向测试通过 / ⛔当时历史分类方式未确认 | 主数据、运行清单、v1.5 对比 |
+| [FIX-026](FIX-026-empty-pool-issue-cost-fallback.md) | 当天没有可用成本时，只使用已经存在的成本来源 | ✅完整重跑 / ✅9 项账目检查 / ⛔236 行仍缺成本 | 标准化数据、每日成本账、发布检查 |
+| [FIX-027](FIX-027-v017-processing-backflush-and-receipt-bridge.md) | 根据成品消耗计算原料；收货、加工和生熟联动避免重复扣减 | ✅完整重跑 / ✅10 项账目检查 / ⛔193 个商品日缺成本 | 加工、验收、每日库存账、对比 |
 
 ## 版本迭代说明
 
-- [v0.14 相比 v0.13 的实际迭代](V0.14_FROM_V0.13.md)：按当前代码说明新增能力、核心口径变化、已通过校验和发布阻塞项。
+- [v0.14 相比 v0.13 的实际迭代](V0.14_FROM_V0.13.md)：按当时代码说明新增能力、核心计算规则变化、已通过检查和未通过的发布条件。
 
 ## 依赖关系
 
-FIX-021 与 FIX-022 独立；FIX-023 在 FIX-022 盘点口径上完成连续区间重刷；FIX-024
-使用两日固定样本审核层级展示、成本证据和对比口径；FIX-025 在分类来源未闭合时
-保留诊断能力并阻止发布；FIX-026 只给空成本池出流补已有成本证据，不生成库存数量；
-FIX-027 用销售/普通报损确认加工消耗，生熟联动优先；同一 A→B 已由外部验收入账时外部
-路径优先，并只允许加工透支进入明确成本。
+FIX-021 与 FIX-022 互不依赖。FIX-023 在人工盘点规则确定后支持连续多天重算。FIX-024
+明确了发布检查和 v1.5 对比方式。FIX-025 在分类来源不完整时保留本地结果，但禁止发布。
+FIX-026 在当天没有可用成本时，只寻找已经存在的成本，不新增没有来源的库存数量。FIX-027 根据成品
+销售和普通报损计算原料用量；生熟联动优先；同一 A→B 已经收成品 B 时，不再重复扣 A；
+只有加工原料允许被扣到账面余额以下；超出可用库存的成本必须从毛利中扣除。
