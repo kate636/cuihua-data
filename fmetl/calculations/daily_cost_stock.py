@@ -16,6 +16,7 @@ class DailyFlow:
     bom_in_amt: float = 0.0
     bom_out_qty: float = 0.0
     bom_out_amt: float = 0.0
+    bom_out_fixed_amt: float | None = None
     pack_in_qty: float = 0.0
     pack_in_amt: float = 0.0
     pack_out_qty: float = 0.0
@@ -31,8 +32,6 @@ class DailyFlow:
     store_return_qty: float = 0.0
     sale_return_qty: float = 0.0
     sale_return_amt: float = 0.0
-    inventory_gain_qty: float = 0.0
-    inventory_gain_amt: float = 0.0
     sale_qty: float = 0.0
     known_lost_qty: float = 0.0
     actual_stock_qty: float | None = None
@@ -75,12 +74,14 @@ _NUMERIC_FLOW_FIELDS = (
     "residual_transfer_in_qty", "residual_transfer_in_amt",
     "residual_transfer_out_qty", "residual_transfer_out_amt",
     "store_return_qty", "sale_return_qty", "sale_return_amt",
-    "inventory_gain_qty", "inventory_gain_amt", "sale_qty", "known_lost_qty",
+    "sale_qty", "known_lost_qty",
     "fallback_cost",
 )
 _NONNEGATIVE_FLOW_FIELDS = frozenset(
     name for name in _NUMERIC_FLOW_FIELDS
-    if name not in {"store_receive_qty", "store_receive_amt"}
+    if name not in {
+        "init_qty", "init_amt", "store_receive_qty", "store_receive_amt",
+    }
 )
 
 
@@ -125,45 +126,65 @@ def transition_day(flow: DailyFlow) -> DailyState:
         raise ValueError("store receipt quantity and amount signs must match")
     if abs(flow.store_receive_qty) <= 0.000001 and abs(flow.store_receive_amt) > 0.01:
         raise ValueError("store receipt amount requires nonzero quantity")
-    if actual is not None and (flow.inventory_gain_qty > 0 or flow.inventory_gain_amt > 0):
-        raise ValueError("actual stock and inventory_gain cannot both adjust the same day")
+    fixed_bom_amt = (
+        None
+        if flow.bom_out_fixed_amt is None
+        else _finite(flow.bom_out_fixed_amt, "bom_out_fixed_amt")
+    )
+    if fixed_bom_amt is not None and fixed_bom_amt < -0.01:
+        raise ValueError("bom_out_fixed_amt cannot be negative")
+    if (
+        fixed_bom_amt is not None
+        and flow.bom_out_qty > max(0.0, flow.store_receive_qty) + 0.001
+    ):
+        raise ValueError("fixed BOM output quantity exceeds the same-day actual receipt")
 
     inflow_qty = (
         flow.init_qty + flow.store_receive_qty + flow.bom_in_qty + flow.pack_in_qty
         + flow.compose_in_qty + flow.residual_transfer_in_qty
-        + flow.sale_return_qty + flow.inventory_gain_qty
+        + flow.sale_return_qty
     )
     inflow_amt = (
         flow.init_amt + flow.store_receive_amt + flow.bom_in_amt + flow.pack_in_amt
         + flow.compose_in_amt + flow.residual_transfer_in_amt
-        + flow.sale_return_amt + flow.inventory_gain_amt
+        + flow.sale_return_amt
     )
-    if inflow_qty < -0.001 or inflow_amt < -0.01:
-        raise ValueError("signed store receipt return exceeds the available inventory pool")
+    fixed_bom_qty = flow.bom_out_qty if fixed_bom_amt is not None else 0.0
+    remaining_inflow_qty = inflow_qty - fixed_bom_qty
+    remaining_inflow_amt = inflow_amt - (fixed_bom_amt or 0.0)
     strict_out_qty = (
-        flow.bom_out_qty + flow.pack_out_qty
-        + flow.residual_transfer_out_qty + flow.store_return_qty
+        flow.bom_out_qty + flow.residual_transfer_out_qty + flow.store_return_qty
     )
-    if strict_out_qty > inflow_qty + 0.001:
+    remaining_strict_out_qty = strict_out_qty - fixed_bom_qty
+    if remaining_strict_out_qty > max(0.0, remaining_inflow_qty) + 0.001:
         raise ValueError(
             "non-processing internal out quantity exceeds the available pool"
         )
-    # Processing is a consumption backflush from finished sales/loss, so its
-    # confirmed raw usage may exceed the raw SKU's book balance.  Only this
-    # flow can overdraw; the shortage is priced and exposed as neg_clamp.
-    internal_out_qty = strict_out_qty + flow.compose_out_qty
-    if inflow_qty <= 0.001 and abs(inflow_amt) > 0.01:
-        raise ValueError("inventory pool has amount without quantity")
-    issue_cost = inflow_amt / inflow_qty if inflow_qty > 0 else max(0.0, flow.fallback_cost)
+    # Demand-based processing and code/package conversion can consume more raw
+    # quantity than the current book balance.  The shortage remains posted and
+    # is exposed as neg_clamp.  BOM and residual transfers still require a
+    # confirmed available pool.
+    internal_out_qty = strict_out_qty + flow.pack_out_qty + flow.compose_out_qty
+    pool_cost = (
+        remaining_inflow_amt / remaining_inflow_qty
+        if abs(remaining_inflow_qty) > 0.001
+        and remaining_inflow_qty * remaining_inflow_amt >= 0
+        else 0.0
+    )
+    issue_cost = pool_cost if pool_cost > 0 else max(0.0, flow.fallback_cost)
     priced_out = {
-        "bom_out_amt": flow.bom_out_qty * issue_cost,
+        "bom_out_amt": (
+            fixed_bom_amt
+            if fixed_bom_amt is not None
+            else flow.bom_out_qty * issue_cost
+        ),
         "pack_out_amt": flow.pack_out_qty * issue_cost,
         "compose_out_amt": flow.compose_out_qty * issue_cost,
         "residual_transfer_out_amt": flow.residual_transfer_out_qty * issue_cost,
         "store_return_amt": flow.store_return_qty * issue_cost,
     }
     supplied_out = {
-        "bom_out_amt": flow.bom_out_amt,
+        **({"bom_out_amt": flow.bom_out_amt} if fixed_bom_amt is None else {}),
         "pack_out_amt": flow.pack_out_amt,
         "compose_out_amt": flow.compose_out_amt,
         "residual_transfer_out_amt": flow.residual_transfer_out_amt,
@@ -197,9 +218,22 @@ def transition_day(flow: DailyFlow) -> DailyState:
         end_qty = actual
         unknown_qty = eq_qty - actual
         branch = "counted"
+    elif flow.day_clear == "0":
+        today_delta = eq_qty - flow.init_qty
+        end_qty = max(0.0, flow.init_qty + min(0.0, today_delta))
+        unknown_qty = today_delta
+        neg_clamp_qty = max(0.0, -eq_qty)
+        branch = (
+            "day_clear_positive"
+            if today_delta > 0.000001
+            else "day_clear_negative"
+            if eq_qty >= -0.000001
+            else "day_clear_overdraft"
+        )
     elif eq_qty < 0:
         end_qty = 0.0
         neg_clamp_qty = -eq_qty
+        unknown_qty = eq_qty
         branch = "negative_clamp"
     elif flow.known_lost_qty > 0:
         end_qty = eq_qty
@@ -213,9 +247,12 @@ def transition_day(flow: DailyFlow) -> DailyState:
         unknown_amt = eq_amt - end_amt
     elif branch == "negative_clamp":
         end_amt = 0.0
-        unknown_amt = 0.0
+        unknown_amt = unknown_qty * issue_cost
+    elif branch.startswith("day_clear"):
+        end_amt = end_qty * issue_cost
+        unknown_amt = unknown_qty * issue_cost
     else:
-        end_amt = eq_amt
+        end_amt = eq_amt if end_qty > 0.001 and eq_amt >= -0.01 else end_qty * issue_cost
         unknown_amt = 0.0
     neg_clamp_amt = neg_clamp_qty * issue_cost
     if end_amt < -0.01:
@@ -225,9 +262,8 @@ def transition_day(flow: DailyFlow) -> DailyState:
     ending_cost = end_amt / end_qty if end_qty > 0 else issue_cost
     if issue_cost < 0 or ending_cost < 0:
         raise ValueError("daily state produced a negative unit cost")
-    # Unknown loss is a physical-count difference only.  The independent
-    # balance residual keeps the equation auditable when a negative theoretical
-    # balance is clamped to zero; that overdraft is never re-labelled as loss.
+    # The public unknown-loss field follows the report convention.  The
+    # independent balance field always records the exact equation remainder.
     balance_unknown_qty = eq_qty - end_qty
     balance_unknown_amt = eq_amt - end_amt
     qty_residual = eq_qty - end_qty - balance_unknown_qty
@@ -267,9 +303,7 @@ def roll_forward_days(
     """Carry exact ending quantity/amount into the next daily weighted pool."""
     opening_qty = _finite(initial_qty, "initial_qty")
     opening_amt = _finite(initial_amt, "initial_amt")
-    if opening_qty < 0 or opening_amt < 0:
-        raise ValueError("initial rolling inventory cannot be negative")
-    if opening_qty <= 0.001 and abs(opening_amt) > 0.01:
+    if abs(opening_qty) <= 0.001 and abs(opening_amt) > 0.01:
         raise ValueError("initial rolling inventory has amount without quantity")
     states: list[DailyState] = []
     for activity in activities:

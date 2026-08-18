@@ -5,8 +5,7 @@ import unittest
 
 import pandas as pd
 
-from fmetl.calculations.ledger import run_weighted_ledger
-from fmetl.outputs.shadow_levels import build_shadow_levels_daily
+from fmetl.calculations.ledger import SOURCE_COLUMNS, TARGET_COLUMNS, run_weighted_ledger
 from fmetl.validation.v014 import (
     assert_hard_gates,
     is_publishable,
@@ -14,6 +13,7 @@ from fmetl.validation.v014 import (
     validate_publishability,
     validate_v014_ledger,
 )
+from fmetl.validation.v018 import validate_v018_release_evidence
 from fmetl.master_data.category import load_category_mapper, mapper_from_latest_snapshot
 from fmetl.connectors.category_mapping import _snapshot_from_payload
 
@@ -41,6 +41,126 @@ def _openings(article_ids: list[str]) -> pd.DataFrame:
 
 
 class ShadowLedgerTests(unittest.TestCase):
+    def test_active_sku_missing_platform_category_blocks_publish(self) -> None:
+        validation = validate_v018_release_evidence(
+            relation_registry=pd.DataFrame(columns=[
+                "status", "source_qty_per_target_qty", "target_qty_per_source_qty",
+            ]),
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame([{
+                "sku_id": "A", "active_in_window": True,
+                "category_mapping_source": "LATEST_DIM_GOODS_FALLBACK",
+                "category_level1_description": "旧分类",
+                "category_authoritative_level1_description": "",
+            }]),
+            levels_result=pd.DataFrame(),
+        ).set_index("check_name")
+
+        self.assertFalse(bool(validation.loc["CATEGORY_MAPPING_COVERAGE", "passed"]))
+        self.assertEqual(
+            1, int(validation.loc["CATEGORY_MAPPING_COVERAGE", "failure_count"])
+        )
+
+    def test_dormant_relation_cycle_fails_hard_gate(self) -> None:
+        registry = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-08-05",
+                "source_article_id": source, "target_article_id": target,
+                "status": "ACTIVE", "formal_flow_allowed": True,
+                "source_qty_per_target_qty": 1.0,
+                "target_qty_per_source_qty": 1.0,
+            }
+            for source, target in (("A", "B"), ("B", "A"))
+        ])
+        validation = validate_v018_release_evidence(
+            relation_registry=registry,
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame(),
+            levels_result=pd.DataFrame(),
+        ).set_index("check_name")
+
+        self.assertFalse(bool(validation.loc["RELATION_GRAPH_ACYCLIC", "passed"]))
+
+    def test_system_inventory_snapshot_cannot_cover_ledger_ending(self) -> None:
+        count_audit = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-08-05",
+            "article_id": "A", "actual_stock_qty": None,
+            "is_counted": False, "is_explicit_operator_count": False,
+            "count_status": "SYSTEM_SNAPSHOT_AUDIT_ONLY",
+        }])
+        sku_daily = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-08-05",
+            "article_id": "A", "actual_stock_qty": 5.0,
+            "is_counted": True,
+        }])
+        validation = validate_v018_release_evidence(
+            relation_registry=pd.DataFrame(columns=[
+                "status", "source_qty_per_target_qty", "target_qty_per_source_qty",
+            ]),
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame(),
+            levels_result=pd.DataFrame(),
+            inventory_count_audit=count_audit,
+            sku_daily=sku_daily,
+        ).set_index("check_name")
+
+        self.assertFalse(bool(
+            validation.loc["OPERATOR_COUNT_SOURCE_INTEGRITY", "passed"]
+        ))
+
+        empty_source = count_audit.iloc[0:0].copy()
+        validation_without_source = validate_v018_release_evidence(
+            relation_registry=pd.DataFrame(columns=[
+                "status", "source_qty_per_target_qty", "target_qty_per_source_qty",
+            ]),
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame(),
+            levels_result=pd.DataFrame(),
+            inventory_count_audit=empty_source,
+            sku_daily=sku_daily,
+        ).set_index("check_name")
+        self.assertFalse(bool(
+            validation_without_source.loc[
+                "OPERATOR_COUNT_SOURCE_INTEGRITY", "passed"
+            ]
+        ))
+
+    def test_dormant_official_bom_cycle_also_fails_hard_gate(self) -> None:
+        registry = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-08-05",
+                "source_article_id": source, "target_article_id": target,
+                "relation_type": "BOM", "status": "EVIDENCE_ONLY",
+                "formal_flow_allowed": False,
+                "source_qty_per_target_qty": None,
+                "target_qty_per_source_qty": None,
+            }
+            for source, target in (("A", "B"), ("B", "A"))
+        ])
+        validation = validate_v018_release_evidence(
+            relation_registry=registry,
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame(),
+            levels_result=pd.DataFrame(),
+        ).set_index("check_name")
+
+        self.assertTrue(bool(
+            validation.loc["RELATION_RATIO_RECIPROCAL", "passed"]
+        ))
+        self.assertFalse(bool(
+            validation.loc["RELATION_GRAPH_ACYCLIC", "passed"]
+        ))
+
     def test_legacy_category_snapshot_blocks_publish_for_later_window(self) -> None:
         gate = validate_category_evidence(
             load_category_mapper(),
@@ -71,8 +191,8 @@ class ShadowLedgerTests(unittest.TestCase):
             "version": 1, "stale": False, "sync_error": None,
             "items": [{
                 "article_id": "A",
-                "category_level1_description": "标品类",
-                "category_level2_description": "饮料类",
+                "category_level1_description": "水饮类",
+                "category_level2_description": "冷藏奶制品类",
                 "category_level3_description": "茶饮类",
             }],
         }
@@ -86,12 +206,58 @@ class ShadowLedgerTests(unittest.TestCase):
             "category_level3_description": "旧小类", "sale_unit": "瓶",
         }]))
         self.assertEqual("水饮类", mapped.iloc[0]["report_category_name"])
-        self.assertEqual("饮料类", mapped.iloc[0]["category_level2_description"])
+        self.assertEqual("冷藏奶制品类", mapped.iloc[0]["category_level2_description"])
         self.assertEqual("MONITORING_PLATFORM_LATEST", mapped.iloc[0]["category_mapping_source"])
+        self.assertEqual(
+            "水饮类",
+            mapped.iloc[0]["category_authoritative_level1_description"],
+        )
         gate = validate_category_evidence(
             mapper, start_date="2026-08-06", end_date="2026-08-11"
         )
         self.assertTrue(bool(gate.iloc[0]["passed"]))
+
+    def test_platform_category_cannot_be_changed_by_old_rule(self) -> None:
+        validation = validate_v018_release_evidence(
+            relation_registry=pd.DataFrame(columns=[
+                "status", "source_qty_per_target_qty", "target_qty_per_source_qty",
+            ]),
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame([{
+                "sku_id": "A", "active_in_window": True,
+                "category_mapping_source": "MONITORING_PLATFORM_LATEST",
+                "category_level1_description": "冷藏乳品类",
+                "category_authoritative_level1_description": "水饮类",
+            }]),
+            levels_result=pd.DataFrame(),
+        ).set_index("check_name")
+
+        self.assertFalse(bool(
+            validation.loc["CATEGORY_MAPPING_VALUE_MATCH", "passed"]
+        ))
+
+    def test_uncovered_ssls_target_blocks_even_when_finished_cost_is_positive(self) -> None:
+        validation = validate_v018_release_evidence(
+            relation_registry=pd.DataFrame(columns=[
+                "status", "source_qty_per_target_qty", "target_qty_per_source_qty",
+            ]),
+            quarantine=pd.DataFrame(),
+            category_adjustments=pd.DataFrame(),
+            source_completeness=pd.DataFrame(),
+            category_mapping_audit=pd.DataFrame(),
+            levels_result=pd.DataFrame(),
+            ssls_target_cost_audit=pd.DataFrame([{
+                "store_id": "A3XV", "business_date": "2026-08-08",
+                "article_id": "F", "covered": False,
+                "coverage_reason": "processing recipe is not uniquely determined",
+            }]),
+        ).set_index("check_name")
+
+        self.assertFalse(bool(
+            validation.loc["SSLS_TARGET_COST_COVERAGE", "passed"]
+        ))
 
     def test_zero_cost_outflow_blocks_publish_but_keeps_diagnostic_run(self) -> None:
         activity = _activity(["A"])
@@ -152,7 +318,7 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertEqual(13.0, row.neg_clamp_cost_amt)
         self.assertEqual(7.0, row.accounting_profit)
 
-    def test_last_positive_issue_cost_precedes_later_reference_fallback(self) -> None:
+    def test_previous_day_issue_cost_is_not_reused(self) -> None:
         activity = pd.concat([_activity(["A"]), _activity(["A"])], ignore_index=True)
         activity.loc[0, [
             "store_receive_qty", "store_receive_amt", "gross_sale_qty",
@@ -178,9 +344,9 @@ class ShadowLedgerTests(unittest.TestCase):
         ).sku_daily.set_index("business_date")
 
         self.assertEqual(5.0, rows.loc["2026-07-14", "issue_unit_cost"])
-        self.assertEqual(5.0, rows.loc["2026-07-15", "issue_unit_cost"])
+        self.assertEqual(9.0, rows.loc["2026-07-15", "issue_unit_cost"])
         self.assertEqual(
-            "LAST_POSITIVE_ISSUE_COST",
+            "INVENTORY_POOL_DAILY_COST_PRICE",
             rows.loc["2026-07-15", "issue_cost_source"],
         )
 
@@ -211,6 +377,44 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(26.1, row.end_amt)
         self.assertAlmostEqual(9.6, row.accounting_profit)
 
+    def test_bom_posting_keeps_old_parent_inventory_and_moves_receipt_amount(self) -> None:
+        activity = _activity(["P", "C"])
+        activity.loc[activity["article_id"].eq("P"), [
+            "store_receive_qty", "store_receive_amt",
+        ]] = [10.0, 100.0]
+        opening = _openings(["P", "C"])
+        opening.loc[opening["article_id"].eq("P"), [
+            "opening_qty", "opening_amt",
+        ]] = [10.0, 50.0]
+        sources = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "event_group_id": "B1", "relation_type": "DISASSEMBLY_BOM",
+            "source_article_id": "P", "source_out_qty": 10.0,
+            "quantity_source": "RECEIVE_SALE_ACTUAL_PARENT_CHILD_QTY",
+            "relation_snapshot_id": "r1", "specified_source_out_amt": 100.0,
+            "specified_cost_source": "RECEIVE_SALE_PARENT_RECEIPT_AMOUNT",
+        }])
+        targets = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "event_group_id": "B1", "relation_type": "DISASSEMBLY_BOM",
+            "target_article_id": "C", "target_in_qty": 10.0,
+            "amount_allocation_ratio": 1.0,
+            "quantity_source": "RECEIVE_SALE_ACTUAL_PARENT_CHILD_QTY",
+            "relation_snapshot_id": "r1",
+        }])
+
+        result = run_weighted_ledger(activity, opening, sources, targets)
+        daily = result.sku_daily.set_index("article_id")
+        postings = result.internal_postings.set_index("posting_role")
+
+        self.assertEqual(10.0, daily.loc["P", "end_qty"])
+        self.assertEqual(50.0, daily.loc["P", "end_amt"])
+        self.assertEqual(0.0, daily.loc["P", "accounting_profit"])
+        self.assertEqual(10.0, daily.loc["C", "end_qty"])
+        self.assertEqual(100.0, daily.loc["C", "end_amt"])
+        self.assertEqual(100.0, postings.loc["OUT", "amt"])
+        self.assertEqual(100.0, postings.loc["IN", "amt"])
+
     def test_external_observations_are_preserved_exactly(self) -> None:
         activity = _activity(["A"])
         activity.loc[0, [
@@ -237,6 +441,32 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertTrue(
             bool(validation.loc["EXTERNAL_OBSERVATION_CONSERVATION", "passed"])
         )
+
+    def test_raw_loss_priority_gate_checks_processing_trace(self) -> None:
+        activity = _activity(["R"])
+        empty_source = pd.DataFrame(columns=SOURCE_COLUMNS)
+        empty_target = pd.DataFrame(columns=TARGET_COLUMNS)
+        ledger = run_weighted_ledger(
+            activity, _openings(["R"]), empty_source, empty_target
+        )
+        trace = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "source_article_id": "R", "relation_type": "PROCESSING",
+            "source_out_qty": 1.0,
+        }])
+        reserved = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "article_id": "R", "reserved_loss_qty": 1.0,
+        }])
+
+        validation = validate_v014_ledger(
+            ledger.sku_daily,
+            ledger.internal_postings,
+            reserved_raw_loss=reserved,
+            processing_trace=trace,
+        ).set_index("check_name")
+
+        self.assertFalse(bool(validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "passed"]))
 
     def test_bom_pack_compose_chain_prices_once_and_conserves_internal_amount(self) -> None:
         articles = ["P", "C1", "C2", "K", "R", "F"]
@@ -279,7 +509,7 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(posting["OUT"], posting["IN"])
         self.assertAlmostEqual(sku["accounting_profit"].sum(), 50 - 140 + 40 + 200 / 3)
 
-    def test_return_uses_opening_cost_and_return_without_cost_evidence_is_blocked(self) -> None:
+    def test_return_uses_same_day_cost_and_missing_cost_blocks_publish(self) -> None:
         activity = _activity(["A"])
         activity.loc[0, ["sale_return_qty", "net_sale_qty", "net_sale_amt"]] = [1.0, -1.0, -12.0]
         opening = _openings(["A"])
@@ -296,8 +526,11 @@ class ShadowLedgerTests(unittest.TestCase):
         result = run_weighted_ledger(activity, opening, empty_sources, empty_targets)
         self.assertEqual(result.sku_daily.loc[0, "sale_return_cost_amt"], 10)
         self.assertEqual(result.sku_daily.loc[0, "end_amt"], 30)
-        with self.assertRaises(ValueError):
-            run_weighted_ledger(activity, _openings(["A"]), empty_sources, empty_targets)
+        missing = run_weighted_ledger(
+            activity, _openings(["A"]), empty_sources, empty_targets
+        )
+        publish = validate_publishability(missing.sku_daily).iloc[0]
+        self.assertFalse(bool(publish.passed))
 
         mixed = _activity(["A"])
         mixed.loc[0, ["sale_return_qty", "net_sale_qty", "net_sale_amt"]] = [1.0, -1.0, -12.0]
@@ -307,7 +540,36 @@ class ShadowLedgerTests(unittest.TestCase):
         mixed_result = run_weighted_ledger(mixed, mixed_opening, empty_sources, empty_targets)
         self.assertEqual(mixed_result.sku_daily.loc[0, "sale_return_cost_basis"], 19)
 
-    def test_return_after_zero_stock_uses_last_observed_issue_cost(self) -> None:
+    def test_fixed_amount_bom_does_not_require_daily_issue_unit_cost(self) -> None:
+        activity = _activity(["P", "C"])
+        activity.loc[activity["article_id"].eq("P"), [
+            "store_receive_qty", "store_receive_amt",
+        ]] = [1.0, 10.0]
+        source = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "event_group_id": "B", "relation_type": "DISASSEMBLY_BOM",
+            "source_article_id": "P", "source_out_qty": 1.0,
+            "quantity_source": "RECEIVE_SALE", "relation_snapshot_id": "s",
+            "specified_source_out_amt": 10.0,
+            "specified_cost_source": "RECEIVE_SALE_PARENT_RECEIPT_AMOUNT",
+        }])
+        target = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "event_group_id": "B", "relation_type": "DISASSEMBLY_BOM",
+            "target_article_id": "C", "target_in_qty": 1.0,
+            "amount_allocation_ratio": 1.0, "quantity_source": "RECEIVE_SALE",
+            "relation_snapshot_id": "s",
+        }])
+
+        result = run_weighted_ledger(
+            activity, _openings(["P", "C"]), source, target
+        ).sku_daily
+
+        parent = result.loc[result["article_id"].eq("P")].iloc[0]
+        self.assertEqual(10.0, parent.bom_out_amt)
+        self.assertTrue(bool(validate_publishability(result).iloc[0].passed))
+
+    def test_return_after_zero_stock_does_not_reuse_previous_day_cost(self) -> None:
         activity = pd.concat([_activity(["A"]), _activity(["A"])], ignore_index=True)
         activity.loc[0, ["store_receive_qty", "store_receive_amt", "gross_sale_qty",
                          "net_sale_qty", "net_sale_amt"]] = [1.0, 10.0, 1.0, 1.0, 20.0]
@@ -328,8 +590,44 @@ class ShadowLedgerTests(unittest.TestCase):
             activity, _openings(["A"]), empty_sources, empty_targets
         ).sku_daily.set_index("business_date")
         self.assertEqual(0.0, result.loc["2026-07-14", "end_qty"])
-        self.assertEqual(10.0, result.loc["2026-07-15", "sale_return_cost_basis"])
-        self.assertEqual(10.0, result.loc["2026-07-15", "end_amt"])
+        self.assertEqual(0.0, result.loc["2026-07-15", "sale_return_cost_basis"])
+        self.assertEqual(0.0, result.loc["2026-07-15", "end_amt"])
+        publish = validate_publishability(result.reset_index()).iloc[0]
+        self.assertFalse(bool(publish.passed))
+
+    def test_ssls_raw_loss_covers_finished_sale_but_not_return_valuation(self) -> None:
+        activity = _activity(["F"])
+        activity.loc[0, ["gross_sale_qty", "net_sale_qty", "net_sale_amt"]] = [
+            1.0, 1.0, 20.0,
+        ]
+        empty_sources = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
+        ])
+        empty_targets = pd.DataFrame(columns=[
+            "store_id", "business_date", "event_group_id", "relation_type",
+            "target_article_id", "target_in_qty", "amount_allocation_ratio",
+            "quantity_source", "relation_snapshot_id",
+        ])
+        result = run_weighted_ledger(
+            activity, _openings(["F"]), empty_sources, empty_targets
+        )
+        coverage = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-14",
+            "article_id": "F",
+        }])
+        publish = validate_publishability(
+            result.sku_daily, ssls_covered_targets=coverage
+        ).iloc[0]
+        self.assertTrue(bool(publish.passed))
+
+        returned = result.sku_daily.copy()
+        returned["sale_return_qty"] = 1.0
+        returned["sale_return_cost_basis"] = 0.0
+        publish = validate_publishability(
+            returned, ssls_covered_targets=coverage
+        ).iloc[0]
+        self.assertFalse(bool(publish.passed))
 
     def test_same_day_return_can_net_against_gross_sale_without_inventing_cost(self) -> None:
         activity = _activity(["A"])
@@ -371,12 +669,12 @@ class ShadowLedgerTests(unittest.TestCase):
         activity = _activity(["A", "B"])
         source = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-14", "event_group_id": "AB",
-            "relation_type": "PACK_CONVERT", "source_article_id": "A", "source_out_qty": 1,
+            "relation_type": "RESIDUAL_TRANSFER", "source_article_id": "A", "source_out_qty": 1,
             "quantity_source": "TEST", "relation_snapshot_id": "s",
         }])
         target = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-14", "event_group_id": "AB",
-            "relation_type": "PACK_CONVERT", "target_article_id": "B", "target_in_qty": 1,
+            "relation_type": "RESIDUAL_TRANSFER", "target_article_id": "B", "target_in_qty": 1,
             "amount_allocation_ratio": 1, "quantity_source": "TEST", "relation_snapshot_id": "s",
         }])
 
@@ -429,63 +727,6 @@ class ShadowLedgerTests(unittest.TestCase):
         ])
         with self.assertRaisesRegex(ValueError, "bool/0/1"):
             run_weighted_ledger(activity, _openings(["A"]), empty_source, empty_target)
-
-    def test_full_parent_path_and_day_clear_two_are_reaggregated_from_sku(self) -> None:
-        articles = ["A", "B"]
-        activity = _activity(articles)
-        activity.loc[0, ["net_sale_amt", "gross_sale_qty", "sale_return_qty", "net_sale_qty"]] = [10, 2, 1, 1]
-        activity.loc[0, ["store_receive_qty", "store_receive_amt"]] = [1, 10]
-        activity.loc[1, ["net_sale_amt", "gross_sale_qty", "net_sale_qty", "day_clear"]] = [20, 2, 2, "0"]
-        empty_source = pd.DataFrame(columns=[
-            "store_id", "business_date", "event_group_id", "relation_type", "source_article_id",
-            "source_out_qty", "quantity_source", "relation_snapshot_id",
-        ])
-        empty_target = pd.DataFrame(columns=[
-            "store_id", "business_date", "event_group_id", "relation_type", "target_article_id",
-            "target_in_qty", "amount_allocation_ratio", "quantity_source", "relation_snapshot_id",
-        ])
-        sku = run_weighted_ledger(activity, _openings(articles), empty_source, empty_target).sku_daily
-        sku["store_name"] = "滨江宏岸店"
-        sku["is_reportable"] = [True, True]
-        sku["report_category_code"] = ["蔬菜类", "水果类"]
-        sku["report_category_name"] = ["蔬菜类", "水果类"]
-        sku["category_level2_id"] = "SAME_L2"
-        sku["category_level2_description"] = "同名中类"
-        sku["category_level3_id"] = ["L3A", "L3B"]
-        sku["category_level3_description"] = "同名小类"
-        sku["accounting_full_profit"] = sku["accounting_profit"]
-        sku["ccj_amt"] = [2.0, 0.0]
-        sku["ccj_qty"] = 0.0
-        sku["ssls_amt"] = [3.0, 0.0]
-        sku["ssls_qty"] = 0.0
-        sku["adjusted_lost_amt"] = sku["accounting_lost_amt"] - sku["ccj_amt"] - sku["ssls_amt"]
-        sku["adjusted_lost_qty"] = sku["accounting_lost_qty"]
-        sku["adjusted_known_lost_amt"] = sku["accounting_known_lost_amt"] - sku["ccj_amt"] - sku["ssls_amt"]
-        sku["adjusted_profit_before_ssls"] = sku["accounting_profit"] + sku["ccj_amt"]
-        sku["adjusted_full_profit_before_ssls"] = sku["accounting_full_profit"] + sku["ccj_amt"]
-        levels = build_shadow_levels_daily(sku)
-        store_total = levels.loc[
-            levels["level_description"].eq("门店") & levels["day_clear"].eq("2")
-        ].iloc[0]
-        self.assertEqual(store_total["total_sale_amount"], 30)
-        self.assertEqual(store_total["total_sale_qty"], 3)
-        self.assertEqual(store_total["adjusted_profit"], store_total["accounting_profit"] + 2)
-        middle = levels.loc[
-            levels["level_description"].eq("中分类") & levels["day_clear"].eq("2")
-        ]
-        self.assertEqual(len(middle), 2)
-
-        sku.loc[1, "is_reportable"] = False
-        reportable_only = build_shadow_levels_daily(sku)
-        reportable_store = reportable_only.loc[
-            reportable_only["level_description"].eq("门店")
-            & reportable_only["day_clear"].eq("2")
-        ].iloc[0]
-        self.assertEqual(reportable_store["total_sale_amount"], 10)
-
-        sku.loc[0, "accounting_profit"] = float("nan")
-        with self.assertRaisesRegex(ValueError, "finite"):
-            build_shadow_levels_daily(sku)
 
 
 if __name__ == "__main__":

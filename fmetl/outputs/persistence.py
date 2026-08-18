@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from collections.abc import Mapping
 
 import duckdb
 import pandas as pd
@@ -63,8 +64,9 @@ def persist_v014_shadow(
     validation_result: pd.DataFrame,
     category_snapshot: pd.DataFrame | None = None,
     category_mapping_audit: pd.DataFrame | None = None,
+    audit_tables: Mapping[str, pd.DataFrame] | None = None,
 ) -> None:
-    """Atomically replace only local v0.14 shadow tables."""
+    """Atomically replace local v0.18 results under v014-compatible table names."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     expected = [field.name for field in OUTPUT_CONTRACT]
@@ -103,6 +105,10 @@ def persist_v014_shadow(
             _replace(conn, "v014_category_snapshot", category_snapshot)
         if category_mapping_audit is not None:
             _replace(conn, "v014_category_mapping_audit", category_mapping_audit)
+        for table, frame in (audit_tables or {}).items():
+            if not table.startswith("v018_"):
+                raise ValueError(f"v0.18 audit table must start with v018_: {table}")
+            _replace(conn, table, frame)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")

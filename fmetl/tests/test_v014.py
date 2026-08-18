@@ -15,7 +15,6 @@ from fmetl.facts.inventory_inputs import normalize_inventory_inputs
 from fmetl.outputs.levels_result import ADDITIVE_INPUTS, build_v014_levels_result
 from fmetl.outputs.persistence import persist_v014_shadow
 from fmetl.facts.formal_events import build_formal_event_legs
-from fmetl.facts.processing_inference import infer_processing_postings
 from fmetl.relations.registry import (
     V014RelationError,
     build_product_group_candidates,
@@ -25,8 +24,11 @@ from fmetl.relations.registry import (
 from fmetl.mirror.v014_source import (
     DAILY_SOURCE_KEYS,
     LATEST_SOURCE_KEYS,
+    SOURCE_TIERS,
     MirrorSourceBundle,
+    _latest_snapshot_day_coverage,
     _write_mirror_frame,
+    discover_latest_mirror_day,
     extract_and_persist_v014_mirror_sources,
     extract_v014_mirror_sources,
     persist_mirror_source_bundle,
@@ -34,19 +36,41 @@ from fmetl.mirror.v014_source import (
     shadow_source_days_ending,
 )
 from fmetl.mirror.v014_stage import (
-    _bom_events,
     _build_day_clear_frame,
-    _exclude_bom_backed_explicit_relations,
-    _fixed_relation_convert_events,
-    _mark_receipt_backed_processing,
-    _observed_receipt_relation_pairs,
-    _processing_stage,
     build_v014_stage_bundle,
 )
+from fmetl.mirror.relation_building import (
+    build_bom_events,
+    exclude_bom_backed_explicit_relations,
+)
 from fmetl.mirror.registry import EXTRACTION_CONTRACTS
+from fmetl.validation.run_v014 import (
+    _annotate_relation_audit,
+    _day_clear_evidence_audit,
+    _relation_evidence_version,
+)
 from fmetl.validation.run_v014 import REQUIRED_SOURCE_NAMES, select_complete_window
 from fmetl.validation.run_v014 import run_v014_shadow_week
 from fmetl.validation.v014 import validate_v014_ledger
+
+
+def _bom_unit_evidence(
+    day: str,
+    parent: str,
+    source_qty_per_target: dict[str, float],
+) -> pd.DataFrame:
+    columns = [
+        "store_id", "inc_day", "parent_article_id", "sub_article_id",
+        "parent_rate", "sub_rate", "ctype",
+    ]
+    return pd.DataFrame([
+        {
+            "store_id": "A3XV", "inc_day": day,
+            "parent_article_id": parent, "sub_article_id": child,
+            "parent_rate": 1.0 / ratio, "sub_rate": ratio, "ctype": 1,
+        }
+        for child, ratio in source_qty_per_target.items()
+    ], columns=columns)
 
 
 class V014ContractTests(unittest.TestCase):
@@ -61,6 +85,19 @@ class V014ContractTests(unittest.TestCase):
 class V014MirrorSourceTests(unittest.TestCase):
     class FakeExtractor:
         def extract_day(self, contract, business_day):
+            if contract.name == "strategy_fm_inventory_pool_di":
+                last = date.fromisoformat(str(business_day))
+                rows = []
+                for offset in (1, 0):
+                    row = {column: None for column in contract.projection}
+                    row[contract.partition_column] = str(business_day)
+                    row["inventory_date"] = (last - timedelta(days=offset)).isoformat()
+                    row[contract.store_column] = "A3XV"
+                    row["sku_code"] = f"SKU-{offset}"
+                    rows.append(row)
+                frame = pd.DataFrame(rows, columns=contract.projection)
+                frame.attrs["source_snapshot_day"] = str(business_day)
+                return frame
             row = {column: None for column in contract.projection}
             if contract.partition_column:
                 row[contract.partition_column] = str(business_day)
@@ -69,6 +106,26 @@ class V014MirrorSourceTests(unittest.TestCase):
             frame = pd.DataFrame([row], columns=contract.projection)
             frame.attrs["source_snapshot_day"] = str(business_day)
             return frame
+
+    class FakeLatestDayApi:
+        def query(self, sql):
+            audit_tables = {
+                EXTRACTION_CONTRACTS[key].full_name
+                for key in DAILY_SOURCE_KEYS
+                if key not in REQUIRED_SOURCE_NAMES
+            }
+            source_day = (
+                "2026-08-01"
+                if any(table in sql for table in audit_tables)
+                else "2026-08-11"
+            )
+            return pd.DataFrame([{"source_day": source_day}])
+
+    def test_auto_window_ignores_audit_only_source_lag(self) -> None:
+        latest = discover_latest_mirror_day(
+            self.FakeLatestDayApi(), store_id="A3XV", end="2026-08-11"
+        )
+        self.assertEqual("2026-08-11", latest)
 
     def test_explicit_shadow_end_has_one_warmup_and_seven_publish_days(self) -> None:
         self.assertEqual(
@@ -118,7 +175,7 @@ class V014MirrorSourceTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def test_pork_without_sku_label_uses_day_clear_fallback(self) -> None:
+    def test_missing_chdj_label_defaults_non_day_clear_without_using_sales(self) -> None:
         days = ("2026-07-20", "2026-07-21")
         raw_day_clear = pd.DataFrame([{
             "store_id": "A3XV", "inc_day": days[0], "article_id": "PORK",
@@ -133,31 +190,73 @@ class V014MirrorSourceTests(unittest.TestCase):
             {"article_id": "VEG", "category_level1_description": "蔬菜类"},
         ])
 
-        resolved = _build_day_clear_frame(
+        resolved_frame = _build_day_clear_frame(
             store_id="A3XV",
             days=days,
             universe={"PORK", "VEG"},
             raw_day_clear=raw_day_clear,
             sales=sales,
             goods=goods,
-        ).set_index(["business_date", "article_id"])["day_clear"]
+        ).set_index(["business_date", "article_id"])
+        resolved = resolved_frame["day_clear"]
 
         self.assertEqual("1", resolved.loc[(days[0], "PORK")])
-        self.assertEqual("0", resolved.loc[(days[1], "PORK")])
-        self.assertEqual("0", resolved.loc[(days[0], "VEG")])
+        self.assertEqual("1", resolved.loc[(days[1], "PORK")])
+        self.assertEqual("1", resolved.loc[(days[0], "VEG")])
         self.assertEqual("1", resolved.loc[(days[1], "VEG")])
+        self.assertEqual(
+            "CHDJ_ARTICLE_AUTHORITATIVE",
+            resolved_frame.loc[(days[0], "PORK"), "day_clear_source"],
+        )
+        self.assertEqual(
+            "MISSING_AUTHORITATIVE_DEFAULT_NON_DAY_CLEAR",
+            resolved_frame.loc[(days[1], "PORK"), "day_clear_source"],
+        )
 
-        membership = _build_day_clear_frame(
-            store_id="A3XV",
-            days=(days[0],),
-            universe={"VEG"},
-            raw_day_clear=pd.DataFrame([{
-                "store_id": "A3XV", "inc_day": days[0], "article_id": "VEG",
-            }]),
-            sales=pd.DataFrame(),
-            goods=goods,
-        ).iloc[0]
-        self.assertEqual("0", membership.day_clear)
+        with self.assertRaisesRegex(KeyError, "must contain day_clear"):
+            _build_day_clear_frame(
+                store_id="A3XV",
+                days=(days[0],),
+                universe={"VEG"},
+                raw_day_clear=pd.DataFrame([{
+                    "store_id": "A3XV", "inc_day": days[0], "article_id": "VEG",
+                }]),
+                sales=pd.DataFrame(),
+                goods=goods,
+            )
+
+    def test_active_missing_authoritative_day_clear_is_quarantined(self) -> None:
+        evidence = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-08-05",
+                "article_id": "ACTIVE", "day_clear": "1",
+                "day_clear_source": "MISSING_AUTHORITATIVE_DEFAULT_NON_DAY_CLEAR",
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-08-05",
+                "article_id": "IDLE", "day_clear": "1",
+                "day_clear_source": "MISSING_AUTHORITATIVE_DEFAULT_NON_DAY_CLEAR",
+            },
+        ])
+        flow_columns = [
+            "init_stock_qty", "end_qty", "gross_sale_qty", "sale_return_qty",
+            "known_lost_qty", "store_receive_qty", "bom_in_qty", "bom_out_qty",
+            "pack_in_qty", "pack_out_qty", "compose_in_qty", "compose_out_qty",
+            "residual_transfer_in_qty", "residual_transfer_out_qty",
+        ]
+        sku_daily = evidence[["store_id", "business_date", "article_id"]].copy()
+        for column in flow_columns:
+            sku_daily[column] = 0.0
+        sku_daily.loc[sku_daily["article_id"].eq("ACTIVE"), "init_stock_qty"] = 2.0
+
+        audit, quarantined = _day_clear_evidence_audit(evidence, sku_daily)
+
+        self.assertEqual(1, int(audit["active_in_compute_window"].sum()))
+        self.assertEqual(["ACTIVE"], quarantined["article_id"].tolist())
+        self.assertEqual(
+            ["MISSING_AUTHORITATIVE_DAY_CLEAR"],
+            quarantined["reason_code"].tolist(),
+        )
 
     def test_hive_mirror_bundle_is_complete_and_persisted(self) -> None:
         days = tuple((date(2026, 7, 20) + timedelta(days=index)).isoformat() for index in range(2))
@@ -254,6 +353,33 @@ class V014MirrorSourceTests(unittest.TestCase):
                 len(bundle.completeness),
             )
 
+            refreshed = RecordsCalls()
+            extract_and_persist_v014_mirror_sources(
+                store_id="A3XV", days=days, path=path, extractor=refreshed,
+                reuse_completed=False,
+            )
+            self.assertIn((sales_name, days[0]), refreshed.calls)
+            for source_name in LATEST_SOURCE_KEYS:
+                self.assertIn(
+                    (EXTRACTION_CONTRACTS[source_name].name, days[-1]),
+                    refreshed.calls,
+                )
+
+    def test_stale_or_empty_latest_snapshot_is_incomplete(self) -> None:
+        stale = pd.DataFrame([{"inc_day": "2026-07-23"}])
+        stale.attrs["source_snapshot_day"] = "2026-07-23"
+        coverage = _latest_snapshot_day_coverage(
+            "purchase_wastage", stale, ("2026-07-23", "2026-07-24")
+        )
+        self.assertFalse(any(row[1] for row in coverage))
+        self.assertTrue(all(row[3] == "2026-07-23" for row in coverage))
+
+        empty = pd.DataFrame(columns=["inc_day"])
+        coverage = _latest_snapshot_day_coverage(
+            "goods", empty, ("2026-07-23",)
+        )
+        self.assertFalse(coverage[0][1])
+
     def test_hive_mirrors_programmatically_build_internal_stage(self) -> None:
         day = "2026-07-20"
         frames = {
@@ -286,6 +412,20 @@ class V014MirrorSourceTests(unittest.TestCase):
             "init_stock_amt": 0.0, "end_stock_qty": 9.0,
             "end_stock_amt": 90.0, "inventory_cost": 10.0,
         }]).reindex(columns=EXTRACTION_CONTRACTS["store_receipt"].projection)
+        frames["receive_sale"] = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": day, "article_id": "S1",
+            "article_name": "测试品", "sale_article_id": "S1",
+            "sale_article_name": "测试品", "inbound_qty": 10.0,
+            "inbound_amount": 100.0, "sum_article_qty": 10.0,
+            "sum_sub_article_qty": 10.0, "sale_article_qty": 10.0,
+            "spilit_sale_article_amt": 100.0, "rate": 1.0,
+            "sale_recev_rate": 1.0,
+            "category_level1_description": "蔬菜类",
+        }]).reindex(columns=EXTRACTION_CONTRACTS["receive_sale"].projection)
+        frames["chdj_day_clear"] = pd.DataFrame([{
+            "store_id": "A3XV", "inc_day": day, "article_id": "S1",
+            "day_clear": "1",
+        }]).reindex(columns=EXTRACTION_CONTRACTS["chdj_day_clear"].projection)
         frames["day_clear"] = pd.DataFrame([{
             "business_date": day, "store_id": "A3XV", "article_id": "S1",
             "day_clear": "1", "inc_day": day,
@@ -351,6 +491,7 @@ class V014MirrorSourceTests(unittest.TestCase):
             "order_status": "os.completed", "jielong_flag": 0,
             "sales_amt": 20.0, "qty": 1.0,
             "thirdparty_user_identity": "C1",
+            "first_buy_flag": 1,
         }]).reindex(columns=EXTRACTION_CONTRACTS["order_offline"].projection)
         completeness = pd.DataFrame([
             {"store_id": "A3XV", "business_date": day, "source_name": name,
@@ -383,6 +524,10 @@ class V014MirrorSourceTests(unittest.TestCase):
         self.assertTrue(bool(metric.has_observed_inventory))
         self.assertEqual(10.0, metric.supply_chain_profit_amount)
         self.assertEqual(10.0, metric.purchase_weight_amount)
+        scm_audit = stage.frames["scm_margin_audit"].iloc[0]
+        self.assertEqual(10.0, scm_audit.outbound_margin_amt)
+        self.assertEqual(-1.0, scm_audit.return_margin_amt)
+        self.assertEqual(9.0, scm_audit.return_inclusive_margin_amt)
 
 
 class V014RelationTests(unittest.TestCase):
@@ -396,125 +541,42 @@ class V014RelationTests(unittest.TestCase):
             {"store_id": "A3XV", "business_date": "2026-07-20", "source_article_id": "A", "target_article_id": "B"},
         ])
 
-    def test_only_posted_cross_code_receipt_marks_processing_priority(self) -> None:
-        processing = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "raw_article_id": "A", "finished_article_id": target,
-                "external_finished_receipt_qty": 0.0,
-                "external_finished_receipt_amt": 0.0,
-            }
-            for target in ("B", "C")
-        ])
-        postings = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "source_parent_article_id": "A", "article_id": "B",
-            "receive_qty": 3.0, "receive_amt": 60.0,
-        }])
-
-        marked = _mark_receipt_backed_processing(processing, postings).set_index(
-            "finished_article_id"
-        )
-
-        self.assertEqual(3.0, marked.loc["B", "external_finished_receipt_qty"])
-        self.assertEqual(60.0, marked.loc["B", "external_finished_receipt_amt"])
-        self.assertEqual(0.0, marked.loc["C", "external_finished_receipt_qty"])
-
-    def test_dense_zero_receipt_snapshot_does_not_create_relation_candidate(self) -> None:
-        purchase = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "A", "sale_article_id": "B",
-                "sale_article_qty": 0.0, "sale_article_purchase_amt": 0.0,
-            },
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "C", "sale_article_id": "D",
-                "sale_article_qty": -2.0, "sale_article_purchase_amt": -20.0,
-            },
-        ])
-        observed = _observed_receipt_relation_pairs(purchase)
-        self.assertEqual([("C", "D")], list(observed[["article_id", "sale_article_id"]].itertuples(index=False, name=None)))
-
-    def test_fixed_relation_directly_converts_same_code_receipt(self) -> None:
-        purchase = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "article_id": "A", "sale_article_id": "A",
-            "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
-        }])
-        explicit = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "source_article_id": "A", "target_article_id": "B",
-            "fixed_rule": True, "approved": True, "convert_rate": 0.5,
-        }])
-
-        event = _fixed_relation_convert_events(purchase, explicit).iloc[0]
-
-        self.assertEqual("A", event.source_article_id)
-        self.assertEqual("B", event.target_article_id)
-        self.assertEqual(6.0, event.source_qty)
-        self.assertEqual(3.0, event.target_qty)
-        self.assertEqual(
-            "ARTICLE_CONVERT_FIXED_RELATION_PLUS_A_RECEIPT",
-            event.quantity_source,
-        )
-
-    def test_fixed_relation_skips_ambiguous_or_already_allocated_source(self) -> None:
-        purchase = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "A", "sale_article_id": "A",
-                "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
-            },
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "A", "sale_article_id": "B",
-                "sale_article_qty": 3.0, "sale_article_purchase_amt": 60.0,
-            },
-        ])
-        explicit = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "source_article_id": "A", "target_article_id": target,
-                "fixed_rule": True, "approved": True, "convert_rate": rate,
-            }
-            for target, rate in (("B", 0.5), ("C", 2.0))
-        ])
-
-        self.assertTrue(_fixed_relation_convert_events(purchase, explicit).empty)
-
-    def test_fixed_relation_rejects_conflicting_rates_for_same_pair(self) -> None:
-        purchase = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "article_id": "A", "sale_article_id": "A",
-            "sale_article_qty": 6.0, "sale_article_purchase_amt": 60.0,
-        }])
-        explicit = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "source_article_id": "A", "target_article_id": "B",
-                "fixed_rule": True, "approved": True, "convert_rate": rate,
-            }
-            for rate in (0.5, 0.25)
-        ])
-
-        with self.assertRaisesRegex(ValueError, "conflicting rates"):
-            _fixed_relation_convert_events(purchase, explicit)
-
-    def test_group_identity_is_candidate_not_flow(self) -> None:
-        groups = freeze_product_group_snapshot(self.groups_raw)
+    def test_purchase_direction_and_product_weights_create_conversion_relation(self) -> None:
+        weighted = self.groups_raw.copy()
+        weighted["unit_weight"] = [1.0, 0.25, 1.0]
+        weighted["sale_unit"] = ["袋", "份", "袋"]
+        groups = freeze_product_group_snapshot(weighted)
         pairs = build_product_group_candidates(self.candidates, groups)
         registry, quarantine = resolve_relation_registry(
             self.candidates, product_group_pairs=pairs, relation_version="r1"
         )
-        self.assertEqual("PRODUCT_GROUP_CANDIDATE", registry.iloc[0]["relation_type"])
-        self.assertFalse(bool(registry.iloc[0]["formal_flow_allowed"]))
-        self.assertEqual(
-            "PRODUCT_GROUP_CONVERSION_EVIDENCE_MISSING",
-            quarantine.iloc[0]["reason_code"],
-        )
+        self.assertEqual("PRODUCT_GROUP_CONVERT", registry.iloc[0]["relation_type"])
+        self.assertTrue(bool(registry.iloc[0]["formal_flow_allowed"]))
+        self.assertEqual(0.25, registry.iloc[0]["source_qty_per_target_qty"])
+        self.assertTrue(quarantine.empty)
 
-    def test_allocated_receipt_uses_observed_ratio_and_weight_only_as_audit(self) -> None:
+    def test_relation_version_changes_when_product_weight_changes(self) -> None:
+        candidates = self.candidates.copy()
+        groups = pd.DataFrame([{
+            "business_date": "2026-07-20", "article_id": "A",
+            "article_group_id": "G1", "unit_weight": 1.0,
+        }])
+        first = _relation_evidence_version(
+            bom=pd.DataFrame(), processing=pd.DataFrame(),
+            explicit_convert=pd.DataFrame(),
+            purchase_direction_candidates=candidates,
+            product_group_snapshot=groups,
+        )
+        groups.loc[0, "unit_weight"] = 2.0
+        second = _relation_evidence_version(
+            bom=pd.DataFrame(), processing=pd.DataFrame(),
+            explicit_convert=pd.DataFrame(),
+            purchase_direction_candidates=candidates,
+            product_group_snapshot=groups,
+        )
+        self.assertNotEqual(first, second)
+
+    def test_product_group_uses_weight_ratio_not_purchase_allocated_quantity(self) -> None:
         raw = self.groups_raw.copy()
         raw["unit_weight"] = [1.0, 0.25, 1.0]
         raw["sale_unit"] = ["袋", "份", "袋"]
@@ -531,13 +593,14 @@ class V014RelationTests(unittest.TestCase):
             candidates, product_group_pairs=pairs, relation_version="r1"
         )
         self.assertEqual(4.0, pairs.iloc[0]["product_weight_quantity_rate"])
-        self.assertEqual("ALLOCATED_RECEIPT", registry.iloc[0]["relation_type"])
-        self.assertEqual(4.0, registry.iloc[0]["quantity_rate"])
-        self.assertEqual("EXTERNAL_DIRECT", registry.iloc[0]["posting_mode"])
-        self.assertFalse(bool(registry.iloc[0]["formal_flow_allowed"]))
+        self.assertEqual("PRODUCT_GROUP_CONVERT", registry.iloc[0]["relation_type"])
+        self.assertEqual(0.25, registry.iloc[0]["source_qty_per_target_qty"])
+        self.assertEqual(4.0, registry.iloc[0]["target_qty_per_source_qty"])
+        self.assertEqual("INTERNAL_DEMAND_BACKFLUSH", registry.iloc[0]["posting_mode"])
+        self.assertTrue(bool(registry.iloc[0]["formal_flow_allowed"]))
         self.assertTrue(quarantine.empty)
 
-    def test_article_convert_confirms_allocated_receipt_without_convert_detail(self) -> None:
+    def test_article_convert_relation_is_used_without_daily_convert_detail(self) -> None:
         candidates = self.candidates.assign(
             external_receipt_source_qty=2.0,
             external_receipt_target_qty=8.0,
@@ -555,11 +618,11 @@ class V014RelationTests(unittest.TestCase):
             candidates, explicit_convert=convert, relation_version="r1"
         )
         row = registry.iloc[0]
-        self.assertEqual("ALLOCATED_RECEIPT", row["relation_type"])
-        self.assertEqual(4.0, row["quantity_rate"])
-        self.assertEqual("EXTERNAL_DIRECT", row["posting_mode"])
-        self.assertFalse(bool(row["formal_flow_allowed"]))
-        self.assertIn("article_convert_ratio", row["evidence_source"])
+        self.assertEqual("EXPLICIT_CONVERT", row["relation_type"])
+        self.assertEqual(0.25, row["source_qty_per_target_qty"])
+        self.assertEqual(4.0, row["target_qty_per_source_qty"])
+        self.assertEqual("INTERNAL_DEMAND_BACKFLUSH", row["posting_mode"])
+        self.assertTrue(bool(row["formal_flow_allowed"]))
         self.assertTrue(quarantine.empty)
 
     def test_formal_type_conflict_is_quarantined(self) -> None:
@@ -589,6 +652,70 @@ class V014RelationTests(unittest.TestCase):
         self.assertFalse(bool(registry.iloc[0]["formal_flow_allowed"]))
         self.assertEqual("RELATION_RATIO_MISSING", quarantine.iloc[0]["reason_code"])
 
+    def test_official_bom_without_daily_event_is_evidence_only(self) -> None:
+        bom = pd.DataFrame([{
+            "parent_article_id": "A", "sub_article_id": "B",
+            "effective_from": "2026-07-01", "effective_to": None,
+            "category_level1_description": "猪肉类",
+            "dressing_rate": 0.6, "cost_rate": 0.6, "approved": True,
+        }])
+        registry, quarantine = resolve_relation_registry(
+            self.candidates, bom=bom, relation_version="r1"
+        )
+        row = registry.iloc[0]
+        self.assertEqual("BOM", row["relation_type"])
+        self.assertEqual("EVIDENCE_ONLY", row["status"])
+        self.assertEqual("EVIDENCE_ONLY", row["posting_mode"])
+        self.assertFalse(bool(row["formal_flow_allowed"]))
+        self.assertTrue(quarantine.empty)
+
+    def test_relation_audit_records_posted_and_excluded_reasons(self) -> None:
+        registry = pd.DataFrame([
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "source_article_id": "A", "target_article_id": "B",
+                "relation_type": "PROCESSING", "status": "ACTIVE",
+                "formal_flow_allowed": True, "relation_id": "R1",
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "source_article_id": "C", "target_article_id": "D",
+                "relation_type": "PROCESSING", "status": "ACTIVE",
+                "formal_flow_allowed": True, "relation_id": "R2",
+            },
+            {
+                "store_id": "A3XV", "business_date": "2026-07-20",
+                "source_article_id": "P", "target_article_id": "S",
+                "relation_type": "BOM", "status": "EVIDENCE_ONLY",
+                "formal_flow_allowed": False, "relation_id": "R3",
+            },
+        ])
+        trace = pd.DataFrame([{
+            "relation_id": "R1", "trigger_demand_qty": 2.5,
+        }])
+        excluded = pd.DataFrame([{
+            "store_id": "A3XV", "business_date": "2026-07-20",
+            "article_id": "D", "trigger_demand_qty": 1.5,
+            "reason_code": "PROCESSING_RAW_LOSS_PRIORITY",
+        }])
+        audit = _annotate_relation_audit(
+            registry,
+            processing_trace=trace,
+            demand_quarantine=excluded,
+            bom_events=pd.DataFrame(),
+        ).set_index("relation_id")
+        self.assertEqual(2.5, audit.loc["R1", "trigger_demand_qty"])
+        self.assertEqual("", audit.loc["R1", "exclusion_reason"])
+        self.assertEqual(1.5, audit.loc["R2", "trigger_demand_qty"])
+        self.assertEqual(
+            "PROCESSING_RAW_LOSS_PRIORITY",
+            audit.loc["R2", "exclusion_reason"],
+        )
+        self.assertEqual(
+            "NO_OBSERVED_RECEIVE_SALE_BOM_EVENT",
+            audit.loc["R3", "exclusion_reason"],
+        )
+
     def test_snapshot_rejects_one_article_in_two_groups(self) -> None:
         bad = pd.concat([
             self.groups_raw,
@@ -610,20 +737,22 @@ class V014RelationTests(unittest.TestCase):
             "parent_article_id": "P", "sub_article_id": "C",
             "approved": True,
         }])
-        self.assertTrue(_exclude_bom_backed_explicit_relations(explicit, bom).empty)
+        self.assertTrue(exclude_bom_backed_explicit_relations(explicit, bom).empty)
 
     def test_bom_cost_allocation_uses_split_amount_and_zero_gift_rate_fallback(self) -> None:
         receive_sale = pd.DataFrame([
             {
                 "store_id": "A3XV", "inc_day": "2026-07-20",
                 "article_id": "P", "sale_article_id": "C1",
-                "inbound_qty": 10.0, "sale_article_qty": 6.0,
+                "inbound_qty": 10.0, "inbound_amount": 100.0,
+                "sale_article_qty": 6.0,
                 "spilit_sale_article_amt": 60.0, "sale_recev_rate": 0.6,
             },
             {
                 "store_id": "A3XV", "inc_day": "2026-07-20",
                 "article_id": "P", "sale_article_id": "C2",
-                "inbound_qty": 10.0, "sale_article_qty": 4.0,
+                "inbound_qty": 10.0, "inbound_amount": 100.0,
+                "sale_article_qty": 4.0,
                 "spilit_sale_article_amt": 40.0, "sale_recev_rate": 0.4,
             },
         ])
@@ -635,330 +764,20 @@ class V014RelationTests(unittest.TestCase):
             }
             for child, rate in (("C1", 0.6), ("C2", 0.4))
         ])
-        events = _bom_events(receive_sale, bom)
+        unit = _bom_unit_evidence(
+            "2026-07-20", "P", {"C1": 1.0, "C2": 1.0}
+        )
+        events, quarantine = build_bom_events(receive_sale, bom, unit)
+        self.assertTrue(quarantine.empty)
         self.assertAlmostEqual(1.0, events["amount_allocation_ratio"].sum())
         self.assertAlmostEqual(10.0, events["target_common_qty"].sum())
         gift = receive_sale.copy()
         gift.loc[gift["sale_article_id"].eq("C2"), "spilit_sale_article_amt"] = 0.0
-        gift_events = _bom_events(gift, bom)
+        gift_events, quarantine = build_bom_events(gift, bom, unit)
+        self.assertTrue(quarantine.empty)
         allocation = gift_events.set_index("target_article_id")["amount_allocation_ratio"]
         self.assertAlmostEqual(0.6, allocation["C1"])
         self.assertAlmostEqual(0.4, allocation["C2"])
-
-
-class V014ProcessingTests(unittest.TestCase):
-    def _inputs(self):
-        finished = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20", "article_id": "F",
-            "net_sale_qty": 3, "known_lost_qty": 1,
-        }])
-        recipes = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "relation_id": "P1", "raw_article_id": "R", "finished_article_id": "F",
-            "raw_qty": 2, "yield_qty": 1, "effective_from": "2026-07-01",
-            "effective_to": None, "approved": True,
-        }])
-        registry = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20", "source_article_id": "R",
-            "target_article_id": "F", "relation_type": "PROCESSING", "status": "ACTIVE",
-        }])
-        return finished, recipes, registry
-
-    def test_nonoverlapping_recipe_versions_are_allowed(self) -> None:
-        raw = pd.DataFrame([
-            {
-                "relation_id": "OLD", "raw_article_id": "R",
-                "finished_article_id": "F", "raw_qty": 1, "yield_qty": 1,
-                "effective_from": "2026-07-01", "effective_to": "2026-07-19",
-                "approved": True,
-            },
-            {
-                "relation_id": "NEW", "raw_article_id": "R",
-                "finished_article_id": "F", "raw_qty": 2, "yield_qty": 1,
-                "effective_from": "2026-07-20", "effective_to": None,
-                "approved": True,
-            },
-        ])
-
-        staged, _ = _processing_stage(
-            raw, store_id="A3XV", days=("2026-07-19", "2026-07-20")
-        )
-
-        active = staged.loc[staged["approved"]]
-        self.assertEqual(["OLD", "NEW"], active.sort_values("business_date")["relation_id"].tolist())
-
-    def test_one_undated_recipe_does_not_disable_other_dated_recipes(self) -> None:
-        raw = pd.DataFrame([
-            {
-                "relation_id": "DATED", "raw_article_id": "R1",
-                "finished_article_id": "F1", "raw_qty": 1, "yield_qty": 1,
-                "effective_from": "2026-07-01", "effective_to": None,
-                "approved": True,
-            },
-            {
-                "relation_id": "UNDATED", "raw_article_id": "R2",
-                "finished_article_id": "F2", "raw_qty": 1, "yield_qty": 1,
-                "effective_from": None, "effective_to": None,
-                "approved": True,
-            },
-        ])
-
-        staged, quarantined = _processing_stage(
-            raw, store_id="A3XV", days=("2026-07-20",)
-        )
-
-        active = staged.set_index("relation_id")["approved"]
-        self.assertTrue(bool(active["DATED"]))
-        self.assertFalse(bool(active["UNDATED"]))
-        self.assertEqual(
-            "PROCESSING_RELATION_EFFECTIVE_DATE_MISSING",
-            quarantined.loc[
-                quarantined["article_id"].eq("F2"), "reason_code"
-            ].item(),
-        )
-
-    def test_overlapping_recipe_versions_are_blocked(self) -> None:
-        raw = pd.DataFrame([
-            {
-                "relation_id": relation_id, "raw_article_id": "R",
-                "finished_article_id": "F", "raw_qty": raw_qty,
-                "yield_qty": 1, "effective_from": "2026-07-01",
-                "effective_to": None, "approved": True,
-            }
-            for relation_id, raw_qty in (("A", 1), ("B", 2))
-        ])
-
-        with self.assertRaisesRegex(ValueError, "overlapping active versions"):
-            _processing_stage(raw, store_id="A3XV", days=("2026-07-20",))
-
-    def test_processing_uses_sales_and_ordinary_loss_backflush(self) -> None:
-        plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
-        # consumed finished = net sale 3 + ordinary loss 1 = 4;
-        # raw out = 4 * 2 / 1 = 8. Counts do not inflate consumed quantity.
-        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
-        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
-        self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
-
-    def test_processing_uses_only_the_current_day_recipe_snapshot(self) -> None:
-        finished, recipes, registry = self._inputs()
-        prior = recipes.copy()
-        prior["business_date"] = "2026-07-19"
-        recipes = pd.concat([prior, recipes], ignore_index=True)
-        plan = infer_processing_postings(
-            finished, recipes, registry, relation_snapshot_id="r1"
-        )
-        self.assertEqual(1, len(plan.sources))
-        self.assertEqual(1, len(plan.targets))
-        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
-
-    def test_multiple_relation_ids_need_explicit_recipe_group_evidence(self) -> None:
-        finished, recipes, registry = self._inputs()
-        second = recipes.copy()
-        second["relation_id"] = "P2"
-        second["raw_article_id"] = "R2"
-        second["raw_qty"] = 0.5
-        recipes = pd.concat([recipes, second], ignore_index=True)
-        second_registry = registry.copy()
-        second_registry["source_article_id"] = "R2"
-        registry = pd.concat([registry, second_registry], ignore_index=True)
-
-        plan = infer_processing_postings(
-            finished, recipes, registry, relation_snapshot_id="r1"
-        )
-
-        self.assertTrue(plan.targets.empty)
-        self.assertTrue(plan.sources.empty)
-        self.assertEqual(
-            "MULTIPLE_ACTIVE_PROCESSING_RECIPES",
-            plan.quarantined.iloc[0]["reason_code"],
-        )
-
-    def test_missing_count_uses_sales_and_ordinary_loss_backflush(self) -> None:
-        plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
-        self.assertTrue(plan.quarantined.empty)
-        self.assertAlmostEqual(4.0, plan.targets.iloc[0]["target_in_qty"])
-        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
-        self.assertEqual("FINISHED_USAGE_BACKFLUSH", plan.trace.iloc[0]["quantity_source"])
-
-    def test_missing_count_with_no_consumption_creates_no_event(self) -> None:
-        finished, recipes, registry = self._inputs()
-        finished[["net_sale_qty", "known_lost_qty"]] = 0.0
-        plan = infer_processing_postings(
-            finished, recipes, registry, relation_snapshot_id="r1"
-        )
-        self.assertTrue(plan.sources.empty)
-        self.assertTrue(plan.targets.empty)
-        self.assertTrue(plan.quarantined.empty)
-
-    def test_ssls_raw_loss_has_priority_over_processing_backflush(self) -> None:
-        reserved = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "article_id": "R", "reserved_loss_qty": 1.0,
-        }])
-        plan = infer_processing_postings(
-            *self._inputs(),
-            relation_snapshot_id="r1",
-            reserved_raw_loss=reserved,
-        )
-        self.assertTrue(plan.sources.empty)
-        self.assertTrue(plan.targets.empty)
-        self.assertEqual(
-            "PROCESSING_RAW_LOSS_PRIORITY",
-            plan.quarantined.iloc[0]["reason_code"],
-        )
-
-    def test_external_receipt_has_priority_over_same_processing_pair(self) -> None:
-        finished, recipes, registry = self._inputs()
-        recipes["external_finished_receipt_qty"] = 4.0
-        recipes["external_finished_receipt_amt"] = 80.0
-
-        plan = infer_processing_postings(
-            finished, recipes, registry, relation_snapshot_id="r1"
-        )
-
-        self.assertTrue(plan.sources.empty)
-        self.assertTrue(plan.targets.empty)
-        self.assertEqual(
-            "PROCESSING_EXTERNAL_RECEIPT_PRIORITY",
-            plan.quarantined.iloc[0]["reason_code"],
-        )
-
-    def test_raw_loss_priority_hard_gate_rejects_processing_outflow(self) -> None:
-        plan = infer_processing_postings(
-            *self._inputs(), relation_snapshot_id="r1"
-        )
-        activities = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "R", "day_clear": "1", "gross_sale_qty": 0,
-                "sale_return_qty": 0, "net_sale_qty": 0, "net_sale_amt": 0,
-                "known_lost_qty": 0, "actual_stock_qty": float("nan"),
-                "is_counted": False, "store_receive_qty": 10,
-                "store_receive_amt": 100,
-            },
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": "F", "day_clear": "1", "gross_sale_qty": 3,
-                "sale_return_qty": 0, "net_sale_qty": 3, "net_sale_amt": 60,
-                "known_lost_qty": 1, "actual_stock_qty": 2,
-                "is_counted": True, "store_receive_qty": 0,
-                "store_receive_amt": 0,
-            },
-        ])
-        openings = pd.DataFrame([
-            {
-                "store_id": "A3XV", "article_id": article,
-                "opening_qty": 0, "opening_amt": 0,
-                "opening_source": "OBSERVED_ZERO",
-                "opening_source_day": "2026-07-20",
-            }
-            for article in ("R", "F")
-        ])
-        ledger = run_weighted_ledger(
-            activities, openings, plan.sources, plan.targets
-        )
-        reserved = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "article_id": "R", "reserved_loss_qty": 1.0,
-        }])
-
-        validation = validate_v014_ledger(
-            ledger.sku_daily,
-            ledger.internal_postings,
-            reserved_raw_loss=reserved,
-        ).set_index("check_name")
-
-        self.assertFalse(validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "passed"])
-        self.assertEqual(
-            1,
-            validation.loc["PROCESSING_RAW_LOSS_PRIORITY", "failure_count"],
-        )
-
-    def test_processing_usage_is_not_gated_by_raw_book_balance(self) -> None:
-        plan = infer_processing_postings(
-            *self._inputs(), relation_snapshot_id="r1"
-        )
-        self.assertTrue(plan.quarantined.empty)
-        self.assertAlmostEqual(8.0, plan.sources.iloc[0]["source_out_qty"])
-
-    def test_external_receipt_priority_hard_gate_matches_exact_pair(self) -> None:
-        sku_daily = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "article_id": article_id, "end_qty": 0.0, "end_amt": 0.0,
-                "qty_balance_residual": 0.0, "amount_balance_residual": 0.0,
-                "init_stock_qty": 0.0, "init_stock_amt": 0.0,
-            }
-            for article_id in ("R", "F")
-        ])
-        postings = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20",
-                "event_group_id": "PROCESSING|1", "relation_type": "RECIPE_COMPOSE",
-                "posting_role": role, "article_id": article_id, "amt": 80.0,
-            }
-            for role, article_id in (("OUT", "R"), ("IN", "F"))
-        ])
-        evidence = pd.DataFrame([{
-            "store_id": "A3XV", "business_date": "2026-07-20",
-            "raw_article_id": "R", "finished_article_id": "X",
-            "external_finished_receipt_qty": 4.0,
-            "external_finished_receipt_amt": 80.0,
-        }])
-
-        different_target = validate_v014_ledger(
-            sku_daily, postings, receipt_backed_processing=evidence
-        ).set_index("check_name")
-        self.assertTrue(
-            different_target.loc["PROCESSING_EXTERNAL_RECEIPT_PRIORITY", "passed"]
-        )
-
-        evidence["finished_article_id"] = "F"
-        same_pair = validate_v014_ledger(
-            sku_daily, postings, receipt_backed_processing=evidence
-        ).set_index("check_name")
-        self.assertFalse(
-            same_pair.loc["PROCESSING_EXTERNAL_RECEIPT_PRIORITY", "passed"]
-        )
-
-    def test_processing_plan_prices_through_main_daily_ledger(self) -> None:
-        plan = infer_processing_postings(*self._inputs(), relation_snapshot_id="r1")
-        activities = pd.DataFrame([
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20", "article_id": "R",
-                "day_clear": "1", "gross_sale_qty": 0, "sale_return_qty": 0,
-                "net_sale_qty": 0, "net_sale_amt": 0, "known_lost_qty": 0,
-                "actual_stock_qty": float("nan"), "is_counted": False,
-                "store_receive_qty": 10, "store_receive_amt": 100,
-            },
-            {
-                "store_id": "A3XV", "business_date": "2026-07-20", "article_id": "F",
-                "day_clear": "1", "gross_sale_qty": 3, "sale_return_qty": 0,
-                "net_sale_qty": 3, "net_sale_amt": 60, "known_lost_qty": 1,
-                "actual_stock_qty": 2, "is_counted": True,
-                "store_receive_qty": 0, "store_receive_amt": 0,
-            },
-        ])
-        openings = pd.DataFrame([
-            {
-                "store_id": "A3XV", "article_id": article, "opening_qty": 0,
-                "opening_amt": 0, "opening_source": "OBSERVED_ZERO",
-                "opening_source_day": "2026-07-20",
-            }
-            for article in ("R", "F")
-        ])
-        ledger = run_weighted_ledger(activities, openings, plan.sources, plan.targets)
-        state = ledger.sku_daily.set_index("article_id")
-        self.assertAlmostEqual(0.0, state.loc["R", "accounting_profit"])
-        # The count remains independent evidence. Usage backflush posts only
-        # the four consumed finished units, so the counted two-unit remainder
-        # is an inventory gain instead of inferred production.
-        self.assertAlmostEqual(20.0, state.loc["F", "accounting_profit"])
-        posted = ledger.internal_postings.groupby("posting_role")["amt"].sum()
-        self.assertAlmostEqual(80.0, posted["OUT"])
-        self.assertAlmostEqual(80.0, posted["IN"])
-        validation = validate_v014_ledger(ledger.sku_daily, ledger.internal_postings)
-        self.assertTrue(validation["passed"].all())
 
 
 class V014FormalPostingTests(unittest.TestCase):
@@ -978,14 +797,16 @@ class V014FormalPostingTests(unittest.TestCase):
             {
                 "store_id": "A3XV", "business_date": "2026-07-20", "event_group_id": "E1",
                 "source_article_id": "P",
-                "target_article_id": "C1", "source_qty": 1, "target_qty": 3,
+                "target_article_id": "C1", "source_qty": 1, "source_amount": 10,
+                "target_qty": 3,
                 "source_common_qty": 1, "target_common_qty": 0.6,
                 "amount_allocation_ratio": 0.6, "quantity_source": "RECEIPT_EVENT",
             },
             {
                 "store_id": "A3XV", "business_date": "2026-07-20", "event_group_id": "E1",
                 "source_article_id": "P",
-                "target_article_id": "C2", "source_qty": 1, "target_qty": 2,
+                "target_article_id": "C2", "source_qty": 1, "source_amount": 10,
+                "target_qty": 2,
                 "source_common_qty": 1, "target_common_qty": 0.4,
                 "amount_allocation_ratio": 0.4, "quantity_source": "RECEIPT_EVENT",
             },
@@ -1000,17 +821,18 @@ class V014FormalPostingTests(unittest.TestCase):
         events = pd.DataFrame([{
             "store_id": "A3XV", "business_date": "2026-07-20", "event_group_id": "E2",
             "source_article_id": "P", "target_article_id": "C1",
-            "source_qty": 1, "target_qty": 3, "source_common_qty": 1,
+            "source_qty": 1, "source_amount": 10, "target_qty": 3,
+            "source_common_qty": 1,
             "target_common_qty": 0.6, "amount_allocation_ratio": 1,
             "quantity_source": "RECEIPT_EVENT",
         }])
         plan = build_formal_event_legs(events, self._registry())
         self.assertTrue(plan.sources.empty)
-        self.assertIn("EVENT_COMMON_QUANTITY_NOT_CONSERVED", plan.quarantined.iloc[0]["reason_code"])
+        self.assertIn("EVENT_SOURCE_ALLOCATION_INCOMPLETE", plan.quarantined.iloc[0]["reason_code"])
 
 
 class V014InventoryTests(unittest.TestCase):
-    def test_negative_and_double_count_are_audited(self) -> None:
+    def test_negative_count_is_removed_and_both_codes_are_retained(self) -> None:
         counts = pd.DataFrame([
             {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "A", "actual_stock_qty": -1, "previous_stock_qty": 1, "count_group_id": "H", "code_role": "SALE"},
             {"store_id": "A3XV", "business_date": "2026-07-20", "article_id": "R", "actual_stock_qty": 5, "previous_stock_qty": 5, "count_group_id": "G", "code_role": "RECEIPT"},
@@ -1018,14 +840,13 @@ class V014InventoryTests(unittest.TestCase):
         ])
         result = normalize_inventory_inputs(counts)
         self.assertTrue(pd.isna(result.normalized.iloc[0]["actual_stock_qty"]))
-        self.assertTrue(pd.isna(result.normalized.iloc[1]["actual_stock_qty"]))
+        self.assertEqual(5.0, result.normalized.iloc[1]["actual_stock_qty"])
         self.assertEqual(2.0, result.normalized.iloc[2]["actual_stock_qty"])
         reasons = set(result.quarantined["reason_code"])
         self.assertIn("NEGATIVE_COUNT_INPUT", reasons)
-        self.assertIn("RECEIPT_CODE_COUNT_IGNORED", reasons)
         normalized = result.normalized.set_index("article_id")
         self.assertFalse(bool(normalized.loc["A", "is_counted"]))
-        self.assertFalse(bool(normalized.loc["R", "is_counted"]))
+        self.assertTrue(bool(normalized.loc["R", "is_counted"]))
         self.assertTrue(bool(normalized.loc["B", "is_counted"]))
 
 
@@ -1071,6 +892,7 @@ class V014OutputTests(unittest.TestCase):
             "category_level3_description": "菜心", "spu_id": "P1", "spu_name": "菜心SPU",
             "day_clear": "1", "article_group_id": "G1", "article_group_name": "菜心组",
             "is_processing_raw": False, "is_reportable": True,
+            "issue_unit_cost": 0.0,
             "accounting_profit": 30, "accounting_full_profit": 35,
             "supply_chain_profit_amount": 5, "total_sale_amount": 100, "total_sale_qty": 10,
             "sales_weight": 5, "lp_sale_amt": 120, "active_sku_flag": 1, "stock_sku_flag": 1,
@@ -1154,7 +976,9 @@ class V014OutputTests(unittest.TestCase):
             "sku_id": "SOURCE", "sku_name": "生熟联动来源",
             "category_level1_description": "猪肉类",
             "accounting_profit": 40.0, "accounting_full_profit": 45.0,
-            "ccj_amt": 10.0, "ssls_amt": 3.0,
+            "ccj_amt": 10.0, "ssls_amt": 3.0, "ssls_qty": 0.3,
+            "issue_unit_cost": 10.0, "ssls_ledger_cost_amt": 3.0,
+            "ccj_ledger_cost_amt": 10.0,
         })
         cooked = self._sku_row()
         cooked.update({
@@ -1278,10 +1102,23 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     {
                         "store_id": "A3XV", "business_date": day,
                         "source_name": source_name, "is_complete": True,
+                        "source_tier": SOURCE_TIERS[source_name],
                     }
                     for day in days for source_name in REQUIRED_SOURCE_NAMES
                 ])
                 conn.execute("CREATE TABLE v014_stage_source_completeness AS SELECT * FROM completeness")
+                day_clear_audit = pd.DataFrame([
+                    {
+                        "store_id": "A3XV", "business_date": day,
+                        "article_id": "S1", "day_clear": "1",
+                        "day_clear_source": "CHDJ_ARTICLE_AUTHORITATIVE",
+                    }
+                    for day in days
+                ])
+                conn.execute(
+                    "CREATE TABLE v014_stage_day_clear_audit AS "
+                    "SELECT * FROM day_clear_audit"
+                )
                 groups = pd.DataFrame([
                     {
                         "inc_day": day, "area_name": None, "article_group_id": "G1",
@@ -1311,13 +1148,16 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     "raw_article_id VARCHAR, finished_article_id VARCHAR, raw_qty DOUBLE, "
                     "yield_qty DOUBLE, effective_from VARCHAR, effective_to VARCHAR, approved BOOLEAN, "
                     "relation_source VARCHAR, external_finished_receipt_qty DOUBLE, "
-                    "external_finished_receipt_amt DOUBLE",
+                    "external_finished_receipt_amt DOUBLE, recipe_group_id VARCHAR, "
+                    "recipe_mode VARCHAR, source_qty_per_target_qty DOUBLE, "
+                    "target_qty_per_source_qty DOUBLE",
                 )
                 self._create_empty(
                     conn, "v014_stage_explicit_convert",
                     "store_id VARCHAR, business_date VARCHAR, source_article_id VARCHAR, "
                     "target_article_id VARCHAR, effective_from VARCHAR, effective_to VARCHAR, "
                     "actual_event BOOLEAN, fixed_rule BOOLEAN, convert_rate DOUBLE, "
+                    "source_qty_per_target_qty DOUBLE, target_qty_per_source_qty DOUBLE, "
                     "cost_rate DOUBLE, approved BOOLEAN",
                 )
                 activities = pd.DataFrame([
@@ -1334,17 +1174,36 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     for index, day in enumerate(days)
                 ])
                 conn.execute("CREATE TABLE v014_stage_activities AS SELECT * FROM activities")
+                self._create_empty(
+                    conn, "v014_stage_inventory_count_audit",
+                    "store_id VARCHAR, business_date VARCHAR, article_id VARCHAR, "
+                    "source_actual_stock_qty DOUBLE, actual_stock_qty DOUBLE, "
+                    "source_sale_stock_qty DOUBLE, source_profit_loss_qty DOUBLE, "
+                    "created_by VARCHAR, updated_by VARCHAR, created_at VARCHAR, updated_at VARCHAR, "
+                    "is_counted BOOLEAN, is_explicit_operator_count BOOLEAN, "
+                    "count_status VARCHAR, count_evidence VARCHAR",
+                )
+                self._create_empty(
+                    conn, "v014_stage_special_loss_coverage",
+                    "store_id VARCHAR, business_date VARCHAR, article_id VARCHAR, "
+                    "general_known_lost_qty DOUBLE, ccj_qty DOUBLE, ssls_qty DOUBLE, "
+                    "special_loss_qty DOUBLE, covered_by_general_loss_qty DOUBLE, "
+                    "supplemented_from_special_source_qty DOUBLE, "
+                    "effective_known_lost_qty DOUBLE, coverage_rule VARCHAR",
+                )
                 openings = pd.DataFrame([{
                     "store_id": "A3XV", "article_id": "S1", "opening_qty": 0.0,
                     "opening_amt": 0.0, "opening_source": "OBSERVED_ZERO",
-                    "opening_source_day": days[0],
+                    "opening_source_day": days[0], "opening_warning": "",
+                    "opening_status": "VALID",
                 }])
                 conn.execute("CREATE TABLE v014_stage_openings AS SELECT * FROM openings")
                 self._create_empty(
                     conn, "v014_stage_conversion_events",
                     "store_id VARCHAR, business_date VARCHAR, event_group_id VARCHAR, "
                     "source_article_id VARCHAR, target_article_id VARCHAR, "
-                    "source_qty DOUBLE, target_qty DOUBLE, source_common_qty DOUBLE, "
+                    "source_qty DOUBLE, source_amount DOUBLE, target_qty DOUBLE, "
+                    "source_common_qty DOUBLE, "
                     "target_common_qty DOUBLE, amount_allocation_ratio DOUBLE, quantity_source VARCHAR",
                 )
                 self._create_empty(
@@ -1374,6 +1233,14 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     metric_rows.append(row)
                 reporting = pd.DataFrame(metric_rows)
                 conn.execute("CREATE TABLE v014_stage_reporting_metrics AS SELECT * FROM reporting")
+                self._create_empty(
+                    conn, "v014_stage_scm_margin_audit",
+                    "store_id VARCHAR, business_date VARCHAR, article_id VARCHAR, "
+                    "outbound_margin_amt DOUBLE, return_margin_amt DOUBLE, "
+                    "return_inclusive_margin_amt DOUBLE, "
+                    "return_inclusive_minus_outbound_amt DOUBLE, "
+                    "published_scm_margin_rule VARCHAR",
+                )
                 customer_events = pd.DataFrame([
                     {
                         "store_id": "A3XV", "store_flag": "翠花店", "store_no": "A3XV",
@@ -1430,17 +1297,20 @@ class V014RunnerIntegrationTests(unittest.TestCase):
                     "SELECT engine_version, publish_eligible, "
                     "category_evidence_status FROM v014_run_manifest"
                 ).fetchone()
-                self.assertEqual(("0.17", False, "LEGACY_STATIC_SNAPSHOT"), manifest)
-                for table in (
-                    "t_v014_levels_result",
-                    "v014_sku_daily",
-                    "v014_relation_registry",
-                    "v014_relation_resolution",
-                ):
+                self.assertEqual(("0.18", False, "LEGACY_STATIC_SNAPSHOT"), manifest)
+                for table in ("t_v014_levels_result", "v014_sku_daily"):
                     published_days = read.execute(
                         f'SELECT MIN(business_date), MAX(business_date) FROM "{table}"'
                     ).fetchone()
                     self.assertEqual((days[1], days[-1]), published_days)
+                for table in (
+                    "v014_relation_registry", "v014_relation_resolution",
+                    "v018_day_clear_audit",
+                ):
+                    audited_days = read.execute(
+                        f'SELECT MIN(business_date), MAX(business_date) FROM "{table}"'
+                    ).fetchone()
+                    self.assertEqual((days[0], days[-1]), audited_days)
             finally:
                 read.close()
 

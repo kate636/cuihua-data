@@ -1,0 +1,35 @@
+{
+  "version": "v0.18-20260817",
+  "recipes": [
+    {
+      "finished_article_id": "21282423",
+      "recipe_group_id": "21282423-additive-1",
+      "recipe_mode": "ADDITIVE",
+      "raw_article_ids": ["21326066", "21340840"]
+    },
+    {
+      "finished_article_id": "21311277",
+      "recipe_group_id": "21311277-additive-1",
+      "recipe_mode": "ADDITIVE",
+      "raw_article_ids": ["21326011", "21342370"]
+    },
+    {
+      "finished_article_id": "21317910",
+      "recipe_group_id": "21317910-additive-1",
+      "recipe_mode": "ADDITIVE",
+      "raw_article_ids": ["21317941", "21317989"]
+    },
+    {
+      "finished_article_id": "20057978",
+      "recipe_group_id": "20057978-alternative-raw-20856762",
+      "recipe_mode": "ALTERNATIVE",
+      "raw_article_ids": ["20856762"]
+    },
+    {
+      "finished_article_id": "20057978",
+      "recipe_group_id": "20057978-alternative-raw-20038175",
+      "recipe_mode": "ALTERNATIVE",
+      "raw_article_ids": ["20038175"]
+    }
+  ]
+}

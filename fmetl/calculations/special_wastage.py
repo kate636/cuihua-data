@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 
+import numpy as np
 import pandas as pd
+
+
+@dataclass(frozen=True)
+class SpecialLossCoverage:
+    activities: pd.DataFrame
+    audit: pd.DataFrame
 
 
 def build_wastage_trace(wastage: pd.DataFrame) -> pd.DataFrame:
@@ -25,6 +33,11 @@ def build_wastage_trace(wastage: pd.DataFrame) -> pd.DataFrame:
     source["article_id"] = source["sku_code"].astype(str)
     source["waste_money"] = pd.to_numeric(source["waste_money"], errors="raise")
     source["waste_num"] = pd.to_numeric(source["waste_num"], errors="raise")
+    if (
+        not np.isfinite(source[["waste_money", "waste_num"]].to_numpy(dtype=float)).all()
+        or source["waste_num"].lt(0).any()
+    ):
+        raise ValueError("special wastage quantity must be finite and nonnegative; amount must be finite")
     source["store_id"] = "A3XV"
     source["reason_code"] = source["reason"].map({"炒菜机成本": "ccj", "生熟联动": "ssls"})
     hash_columns = sorted(wastage.columns)
@@ -49,84 +62,88 @@ def build_wastage_trace(wastage: pd.DataFrame) -> pd.DataFrame:
     return source
 
 
-def adjust_sku_wastage(accounting: pd.DataFrame, wastage: pd.DataFrame) -> pd.DataFrame:
-    """Apply v1.5 CCJ/SSLS display adjustments while retaining accounting values."""
-    required_accounting = {
-        "store_id", "business_date", "article_id", "day_clear",
-        "accounting_lost_amt", "accounting_lost_qty", "accounting_known_lost_amt",
-        "accounting_profit", "accounting_full_profit",
-    }
-    missing = sorted(required_accounting - set(accounting.columns))
+def merge_special_loss_quantity(
+    activities: pd.DataFrame,
+    wastage_trace: pd.DataFrame,
+) -> SpecialLossCoverage:
+    """Merge general and special loss totals without adding both totals in full.
+
+    The general loss source has no reason or record id, so row-level overlap
+    cannot be proved.  The declared rule assumes its quantity covers special
+    loss first, then adds only the special quantity above that total.  The
+    audit output states this unproved overlap assumption explicitly.
+    """
+    keys = ["store_id", "business_date", "article_id"]
+    required_activity = {*keys, "known_lost_qty"}
+    missing = sorted(required_activity - set(activities.columns))
     if missing:
-        raise KeyError(f"accounting frame missing columns: {missing}")
-    if set(accounting["store_id"].dropna().astype(str)) - {"A3XV"}:
-        raise ValueError("special wastage is scoped to A3XV")
-    if accounting.duplicated(["store_id", "business_date", "article_id"]).any():
-        raise ValueError("special wastage input must have one row per store/date/article")
-    source = build_wastage_trace(wastage)
-    if source.empty:
-        wide = pd.DataFrame(columns=[
-            "store_id", "business_date", "article_id", "ccj_amt", "ccj_qty", "ssls_amt", "ssls_qty",
-        ])
-    else:
-        wide = source.pivot_table(
-            index=["store_id", "business_date", "article_id"],
-            columns="reason_code",
-            values=["waste_money", "waste_num"],
-            aggfunc="sum",
-            fill_value=0.0,
+        raise KeyError(f"activities missing special-loss columns: {missing}")
+    if activities.duplicated(keys).any():
+        raise ValueError("activities must be unique per SKU-day before special-loss merge")
+    output = activities.copy()
+    output["known_lost_qty"] = pd.to_numeric(output["known_lost_qty"], errors="raise")
+    if wastage_trace.empty:
+        output["known_lost_qty_before_special"] = output["known_lost_qty"]
+        output["special_loss_supplement_qty"] = 0.0
+        return SpecialLossCoverage(output, pd.DataFrame(columns=[
+            *keys, "general_known_lost_qty", "ccj_qty", "ssls_qty",
+            "special_loss_qty", "covered_by_general_loss_qty",
+            "supplemented_from_special_source_qty", "effective_known_lost_qty",
+            "coverage_rule", "overlap_evidence_status",
+        ]))
+    required_wastage = {*keys, "reason_code", "waste_num"}
+    missing = sorted(required_wastage - set(wastage_trace.columns))
+    if missing:
+        raise KeyError(f"wastage trace missing special-loss columns: {missing}")
+    special = wastage_trace.loc[
+        wastage_trace["reason_code"].isin({"ccj", "ssls"}),
+        [*keys, "reason_code", "waste_num"],
+    ].copy()
+    special["waste_num"] = pd.to_numeric(special["waste_num"], errors="raise")
+    special = special.pivot_table(
+        index=keys,
+        columns="reason_code",
+        values="waste_num",
+        aggfunc="sum",
+        fill_value=0.0,
+    ).reset_index()
+    special = special.rename(columns={"ccj": "ccj_qty", "ssls": "ssls_qty"})
+    for column in ("ccj_qty", "ssls_qty"):
+        if column not in special:
+            special[column] = 0.0
+    general = output[keys + ["known_lost_qty"]].rename(
+        columns={"known_lost_qty": "general_known_lost_qty"}
+    )
+    audit = special.merge(general, on=keys, how="left", validate="one_to_one")
+    if audit["general_known_lost_qty"].isna().any():
+        sample = audit.loc[audit["general_known_lost_qty"].isna(), keys].head(20)
+        raise ValueError(
+            "special-loss SKU-day is outside the activity ledger: "
+            f"{sample.to_dict('records')}"
         )
-        wide.columns = [
-            f"{reason}_{'amt' if metric == 'waste_money' else 'qty'}"
-            for metric, reason in wide.columns
-        ]
-        wide = wide.reset_index()
-    out = accounting.copy()
-    out["business_date"] = out["business_date"].astype(str)
-    out["article_id"] = out["article_id"].astype(str)
-    out = out.merge(wide, on=["store_id", "business_date", "article_id"], how="left", validate="many_to_one")
-    for column in ("ccj_amt", "ccj_qty", "ssls_amt", "ssls_qty"):
-        if column not in out:
-            out[column] = 0.0
-        out[column] = out[column].fillna(0.0)
-    out["adjusted_lost_amt"] = out["accounting_lost_amt"] - out["ccj_amt"] - out["ssls_amt"]
-    out["adjusted_lost_qty"] = out["accounting_lost_qty"] - out["ccj_qty"] - out["ssls_qty"]
-    out["adjusted_known_lost_amt"] = (
-        out["accounting_known_lost_amt"] - out["ccj_amt"] - out["ssls_amt"]
+    audit["special_loss_qty"] = audit["ccj_qty"] + audit["ssls_qty"]
+    audit["covered_by_general_loss_qty"] = audit[[
+        "general_known_lost_qty", "special_loss_qty",
+    ]].min(axis=1)
+    audit["supplemented_from_special_source_qty"] = (
+        audit["special_loss_qty"] - audit["general_known_lost_qty"]
+    ).clip(lower=0.0)
+    audit["effective_known_lost_qty"] = (
+        audit["general_known_lost_qty"]
+        + audit["supplemented_from_special_source_qty"]
     )
-    out["adjusted_profit_before_ssls"] = out["accounting_profit"] + out["ccj_amt"]
-    out["adjusted_full_profit_before_ssls"] = out["accounting_full_profit"] + out["ccj_amt"]
-    return out
-
-
-def apply_ssls_category_transfer(levels: pd.DataFrame) -> pd.DataFrame:
-    """Reproduce v1.5 SSLS transfer: source credit and date-level cooked debit."""
-    required = {
-        "store_id", "business_date", "day_clear", "report_category_name",
-        "level_description", "adjusted_profit_before_ssls",
-        "adjusted_full_profit_before_ssls", "ssls_amt",
-    }
-    missing = sorted(required - set(levels.columns))
-    if missing:
-        raise KeyError(f"category levels missing columns: {missing}")
-    if not levels["level_description"].eq("大分类").all():
-        raise ValueError("SSLS transfer accepts only 大分类 rows")
-    row_key = ["store_id", "business_date", "day_clear", "report_category_name"]
-    if levels.duplicated(row_key).any():
-        raise ValueError("SSLS transfer requires one row per store/date/day_clear/category")
-    # Exact v1.5 semantics: total_ssls is grouped only by business_date. A3XV
-    # is the only store, but the same total is intentionally reused for each
-    # day_clear aggregation to preserve compatibility.
-    total_key = ["store_id", "business_date"]
-    totals = levels.groupby(total_key, as_index=False)["ssls_amt"].sum().rename(
-        columns={"ssls_amt": "total_ssls_amt"}
+    audit["coverage_rule"] = np.where(
+        audit["supplemented_from_special_source_qty"].gt(0.000001),
+        "GENERAL_LOSS_PLUS_UNCOVERED_SPECIAL_QUANTITY",
+        "GENERAL_LOSS_AGGREGATE_COVERS_SPECIAL_QUANTITY",
     )
-    out = levels.merge(totals, on=total_key, how="left", validate="many_to_one")
-    source_credit = out["ssls_amt"]
-    cooked_debit = out["total_ssls_amt"].where(out["report_category_name"].eq("熟食类"), 0.0)
-    out["adjusted_profit"] = out["adjusted_profit_before_ssls"] + source_credit - cooked_debit
-    out["adjusted_full_profit"] = (
-        out["adjusted_full_profit_before_ssls"] + source_credit - cooked_debit
-    )
-    out["ssls_transfer_delta"] = source_credit - cooked_debit
-    return out
+    audit["overlap_evidence_status"] = "OVERLAP_ASSUMPTION_UNPROVEN"
+    supplement = audit[keys + ["supplemented_from_special_source_qty"]]
+    output = output.merge(supplement, on=keys, how="left", validate="one_to_one")
+    output["known_lost_qty_before_special"] = output["known_lost_qty"]
+    output["special_loss_supplement_qty"] = output[
+        "supplemented_from_special_source_qty"
+    ].fillna(0.0)
+    output["known_lost_qty"] += output["special_loss_supplement_qty"]
+    output = output.drop(columns="supplemented_from_special_source_qty")
+    return SpecialLossCoverage(output, audit)

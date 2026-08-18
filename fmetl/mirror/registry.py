@@ -36,7 +36,7 @@ SYNC_MIRROR_TABLES: tuple[str, ...] = (
 )
 
 # Upstream lineage is frozen from
-# docs/references/strategy_fm_v1_5_字段手册.md §3. v0.14 reads the
+# docs/references/strategy_fm_v1_5_字段手册.md §3. The v0.18 engine reads the
 # StarRocks mirror for connectivity, but its field meaning comes from the
 # corresponding Hive table(s), never from a v1.5 calculated result.
 HIVE_SOURCE_BY_MIRROR: dict[str, tuple[str, ...]] = {
@@ -152,8 +152,9 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         shard_key="sale_article_id",
         shards=16,
         note=(
-            "Only external store-receipt pool source. Use sale_article_qty and "
-            "sale_article_purchase_amt; avg_inbound_price/inventory_cost are reference only."
+            "purchase_di provides startup opening quantity and amount plus the "
+            "article_id to sale_article_id conversion direction. Its allocated "
+            "receipt quantity and amount do not enter daily receipt or conversion posting."
         ),
     ),
     "supply_chain": MirrorContract(
@@ -351,7 +352,7 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
             "business_date", "inc_day", "store_id", "order_id", "serial_id",
             "root_order_id", "afs_order_id", "je_order_id", "rje_order_id",
             "pay_at", "abi_article_id", "order_status", "jielong_flag",
-            "sales_amt", "qty", "thirdparty_user_identity",
+            "sales_amt", "qty", "thirdparty_user_identity", "first_buy_flag",
         ),
         expected_grain=("source_row_hash", "duplicate_ordinal"),
         shard_key="order_id",
@@ -369,7 +370,7 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
             "business_date", "inc_day", "store_id", "order_id", "serial_id",
             "root_order_id", "afs_order_id", "je_order_id", "rje_order_id",
             "pay_at", "abi_article_id", "order_status", "jielong_flag",
-            "sales_amt", "qty", "thirdparty_user_identity",
+            "sales_amt", "qty", "thirdparty_user_identity", "first_buy_flag",
         ),
         expected_grain=("source_row_hash", "duplicate_ordinal"),
         shard_key="order_id",
@@ -405,7 +406,7 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
     ),
     "receive_sale": MirrorContract(
         name="strategy_fm_receive_sale_di",
-        authority=MirrorAuthority.DERIVED_BRIDGE,
+        authority=MirrorAuthority.OBSERVATION,
         partition_column="inc_day",
         store_column="store_id",
         projection=(
@@ -419,7 +420,10 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         shard_key="article_id",
         shards=8,
         allow_empty=True,
-        note="Compatibility plan from upstream DAL; not an original event truth.",
+        note=(
+            "Authoritative accepted A quantity and amount. Repeated A values across B rows "
+            "must agree and are posted once; child quantities support BOM only."
+        ),
     ),
     "bom_relation": MirrorContract(
         name="strategy_dim_store_article_bom_relation",
@@ -555,10 +559,11 @@ EXTRACTION_CONTRACTS: dict[str, MirrorContract] = {
         # shard 键 sku_code 只有 ~3031 个去重值、每值自带全部日期，分桶偏斜明显
         # （32 shard 实测最大桶 20276 行超线）；64 shard 平均 ~7900 行/桶，留足偏斜余量。
         shards=64,
+        partition_mode=PartitionMode.LATEST_SNAPSHOT,
         allow_empty=True,
         note=(
             "Hive inventory-pool snapshot. cost_price is an external observation only; "
-            "v0.14 must calculate weighted unit cost from its own ledger."
+            "v0.18 must calculate weighted unit cost from its own ledger."
         ),
     ),
     "purchase_order_snapshot": MirrorContract(

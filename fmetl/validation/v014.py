@@ -12,7 +12,8 @@ def validate_v014_ledger(
     *,
     source_activities: pd.DataFrame | None = None,
     reserved_raw_loss: pd.DataFrame | None = None,
-    receipt_backed_processing: pd.DataFrame | None = None,
+    processing_trace: pd.DataFrame | None = None,
+    special_loss_coverage: pd.DataFrame | None = None,
     qty_tolerance: float = 0.001,
     amount_tolerance: float = 0.01,
 ) -> pd.DataFrame:
@@ -28,12 +29,12 @@ def validate_v014_ledger(
 
     negative_qty = int(sku_daily["end_qty"].lt(-qty_tolerance).sum())
     negative_amt = int(sku_daily["end_amt"].lt(-amount_tolerance).sum())
-    record("NO_NEGATIVE_END_QTY", negative_qty == 0, "end_qty >= 0", negative_qty)
-    record("NO_NEGATIVE_END_AMT", negative_amt == 0, "end_amt >= 0", negative_amt)
+    record("NO_NEGATIVE_END_QTY", negative_qty == 0, "每个 SKU 日期的期末数量必须大于等于 0", negative_qty)
+    record("NO_NEGATIVE_END_AMT", negative_amt == 0, "每个 SKU 日期的期末金额必须大于等于 0", negative_amt)
     qty_residual = int(sku_daily["qty_balance_residual"].abs().gt(qty_tolerance).sum())
     amt_residual = int(sku_daily["amount_balance_residual"].abs().gt(amount_tolerance).sum())
-    record("SKU_QTY_BALANCE", qty_residual == 0, "abs residual <= tolerance", qty_residual)
-    record("SKU_AMOUNT_BALANCE", amt_residual == 0, "abs residual <= tolerance", amt_residual)
+    record("SKU_QTY_BALANCE", qty_residual == 0, "每个 SKU 日期的数量方程残差绝对值必须不超过 0.001", qty_residual)
+    record("SKU_AMOUNT_BALANCE", amt_residual == 0, "每个 SKU 日期的金额方程残差绝对值必须不超过 0.01 元", amt_residual)
 
     observation_failures = 0
     if source_activities is not None:
@@ -70,7 +71,7 @@ def validate_v014_ledger(
     record(
         "EXTERNAL_OBSERVATION_CONSERVATION",
         observation_failures == 0,
-        "sales, returns, receipts and known loss equal normalized source activities",
+        "账本中的销售、退货、实际验收和已知报损必须与标准化源数据逐 SKU 日期一致",
         observation_failures,
     )
 
@@ -86,7 +87,7 @@ def validate_v014_ledger(
                 | group.loc[mask, "init_stock_amt"].sub(previous_amt.loc[mask]).abs().gt(amount_tolerance)
             ).sum()
         )
-    record("D1_EXACT_ROLL_FORWARD", continuity_failures == 0, "D+1 opening equals D ending", continuity_failures)
+    record("D1_EXACT_ROLL_FORWARD", continuity_failures == 0, "每个 SKU 的下一日期初数量和金额必须等于上一日期末", continuity_failures)
 
     posting_failures = 0
     if not internal_postings.empty:
@@ -95,7 +96,7 @@ def validate_v014_ledger(
             columns="posting_role", values="amt", aggfunc="sum", fill_value=0.0,
         )
         posting_failures = int(pivot.get("OUT", 0.0).sub(pivot.get("IN", 0.0)).abs().gt(amount_tolerance).sum())
-    record("INTERNAL_AMOUNT_CONSERVATION", posting_failures == 0, "OUT amount equals IN amount", posting_failures)
+    record("INTERNAL_AMOUNT_CONSERVATION", posting_failures == 0, "每个内部事件的来源转出金额必须等于目标转入金额", posting_failures)
 
     raw_loss_priority_failures = 0
     if reserved_raw_loss is not None and not reserved_raw_loss.empty:
@@ -105,11 +106,26 @@ def validate_v014_ledger(
         missing = sorted(required_reserved - set(reserved_raw_loss.columns))
         if missing:
             raise KeyError(f"reserved raw loss missing validation columns: {missing}")
-        processing_out = internal_postings.loc[
-            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
-            & internal_postings["posting_role"].eq("OUT"),
-            ["store_id", "business_date", "article_id"],
-        ].drop_duplicates()
+        processing_out = pd.DataFrame(
+            columns=["store_id", "business_date", "article_id"]
+        )
+        if processing_trace is not None and not processing_trace.empty:
+            trace_required = {
+                "store_id", "business_date", "source_article_id",
+                "relation_type", "source_out_qty",
+            }
+            missing_trace = sorted(trace_required - set(processing_trace.columns))
+            if missing_trace:
+                raise KeyError(
+                    f"processing trace missing validation columns: {missing_trace}"
+                )
+            processing_out = processing_trace.loc[
+                processing_trace["relation_type"].eq("PROCESSING")
+                & pd.to_numeric(
+                    processing_trace["source_out_qty"], errors="raise"
+                ).gt(qty_tolerance),
+                ["store_id", "business_date", "source_article_id"],
+            ].rename(columns={"source_article_id": "article_id"}).drop_duplicates()
         reserved = reserved_raw_loss.loc[
             pd.to_numeric(
                 reserved_raw_loss["reserved_loss_qty"], errors="raise"
@@ -125,85 +141,40 @@ def validate_v014_ledger(
     record(
         "PROCESSING_RAW_LOSS_PRIORITY",
         raw_loss_priority_failures == 0,
-        "SSLS raw loss excludes the same raw SKU/day from inferred processing",
+        "原料当天已有熟食联动报损时，同一原料同一天不得再由加工计算扣减",
         raw_loss_priority_failures,
     )
-
-    external_receipt_priority_failures = 0
-    if receipt_backed_processing is not None and not receipt_backed_processing.empty:
-        required_receipt = {
-            "store_id", "business_date", "raw_article_id", "finished_article_id",
-            "external_finished_receipt_qty", "external_finished_receipt_amt",
+    special_loss_failures = 0
+    if special_loss_coverage is not None and not special_loss_coverage.empty:
+        keys = ["store_id", "business_date", "article_id"]
+        required_special = {
+            *keys, "special_loss_qty", "effective_known_lost_qty",
         }
-        missing = sorted(required_receipt - set(receipt_backed_processing.columns))
+        missing = sorted(required_special - set(special_loss_coverage.columns))
         if missing:
-            raise KeyError(
-                f"receipt-backed processing missing validation columns: {missing}"
+            raise KeyError(f"special loss coverage missing validation columns: {missing}")
+        expected = special_loss_coverage[
+            keys + ["special_loss_qty", "effective_known_lost_qty"]
+        ].copy()
+        actual = sku_daily[keys + ["known_lost_qty"]].copy()
+        compared = expected.merge(
+            actual, on=keys, how="left", validate="one_to_one"
+        )
+        mismatch = (
+            compared["known_lost_qty"].isna()
+            | compared["known_lost_qty"].sub(
+                compared["effective_known_lost_qty"]
+            ).abs().gt(qty_tolerance)
+            | compared["known_lost_qty"].add(qty_tolerance).lt(
+                compared["special_loss_qty"]
             )
-        receipt_pairs = receipt_backed_processing.loc[
-            pd.to_numeric(
-                receipt_backed_processing["external_finished_receipt_qty"],
-                errors="raise",
-            ).gt(qty_tolerance),
-            [
-                "store_id", "business_date", "raw_article_id",
-                "finished_article_id",
-            ],
-        ].drop_duplicates()
-        posting_keys = ["store_id", "business_date", "event_group_id"]
-        processing_out = internal_postings.loc[
-            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
-            & internal_postings["posting_role"].eq("OUT"),
-            posting_keys + ["article_id"],
-        ].rename(columns={"article_id": "raw_article_id"})
-        processing_in = internal_postings.loc[
-            internal_postings["relation_type"].eq("RECIPE_COMPOSE")
-            & internal_postings["posting_role"].eq("IN"),
-            posting_keys + ["article_id"],
-        ].rename(columns={"article_id": "finished_article_id"})
-        processing_pairs = processing_out.merge(
-            processing_in, on=posting_keys, how="inner", validate="many_to_one"
-        )[[
-            "store_id", "business_date", "raw_article_id",
-            "finished_article_id",
-        ]].drop_duplicates()
-        if not processing_pairs.empty and not receipt_pairs.empty:
-            external_receipt_priority_failures = len(processing_pairs.merge(
-                receipt_pairs,
-                on=[
-                    "store_id", "business_date", "raw_article_id",
-                    "finished_article_id",
-                ],
-                how="inner",
-            ))
+        )
+        special_loss_failures = int(mismatch.sum())
     record(
-        "PROCESSING_EXTERNAL_RECEIPT_PRIORITY",
-        external_receipt_priority_failures == 0,
-        "an A-to-B external receipt excludes the same processing outflow",
-        external_receipt_priority_failures,
-    )
-
-    bom_parent_failures = 0
-    if not internal_postings.empty:
-        bom_sources = internal_postings.loc[
-            internal_postings["relation_type"].eq("DISASSEMBLY_BOM")
-            & internal_postings["posting_role"].eq("OUT"),
-            ["store_id", "business_date", "article_id"],
-        ].drop_duplicates()
-        if not bom_sources.empty:
-            parent_ends = bom_sources.merge(
-                sku_daily[["store_id", "business_date", "article_id", "end_qty"]],
-                on=["store_id", "business_date", "article_id"],
-                how="left", validate="one_to_one",
-            )
-            bom_parent_failures = int(
-                (parent_ends["end_qty"].isna() | parent_ends["end_qty"].abs().gt(qty_tolerance)).sum()
-            )
-    record(
-        "BOM_PARENT_FULLY_TRANSFERRED",
-        bom_parent_failures == 0,
-        "formal BOM parent ending quantity equals zero",
-        bom_parent_failures,
+        "SPECIAL_LOSS_LEDGER_COVERAGE",
+        special_loss_failures == 0,
+        "已知报损量取通用报损量与炒菜机加熟食联动数量中的较大值；通用报损没有原因和记录号，因此只能声明该覆盖假设，不能证明逐笔重合",
+        special_loss_failures,
     )
     return pd.DataFrame(rows)
 
@@ -211,27 +182,57 @@ def validate_v014_ledger(
 def validate_publishability(
     sku_daily: pd.DataFrame,
     *,
+    ssls_covered_targets: pd.DataFrame | None = None,
     qty_tolerance: float = 0.001,
     cost_tolerance: float = 0.000001,
 ) -> pd.DataFrame:
     """Return release gates that may fail without discarding diagnostics."""
-    outflow_qty = (
+    regular_issue_qty = (
         sku_daily["gross_sale_qty"]
         + sku_daily["known_lost_qty"]
-        + sku_daily["bom_out_qty"]
         + sku_daily["pack_out_qty"]
         + sku_daily["compose_out_qty"]
         + sku_daily["residual_transfer_out_qty"]
     )
-    missing_cost = sku_daily["issue_unit_cost"].le(cost_tolerance) & outflow_qty.gt(
-        qty_tolerance
+    missing_issue_cost = (
+        sku_daily["issue_unit_cost"].le(cost_tolerance)
+        & regular_issue_qty.gt(qty_tolerance)
     )
+    if ssls_covered_targets is not None and not ssls_covered_targets.empty:
+        key_columns = ["store_id", "business_date", "article_id"]
+        missing = sorted(set(key_columns) - set(ssls_covered_targets.columns))
+        if missing:
+            raise KeyError(f"SSLS target coverage missing columns: {missing}")
+        covered = set(map(
+            tuple, ssls_covered_targets[key_columns].astype(str).to_numpy()
+        ))
+        row_keys = list(zip(
+            sku_daily["store_id"].astype(str),
+            sku_daily["business_date"].astype(str),
+            sku_daily["article_id"].astype(str),
+        ))
+        missing_issue_cost &= ~pd.Series(
+            [key in covered for key in row_keys], index=sku_daily.index
+        )
+    missing_return_cost = (
+        sku_daily["sale_return_qty"].gt(qty_tolerance)
+        & sku_daily["sale_return_cost_basis"].le(cost_tolerance)
+    )
+    missing_bom_cost = (
+        sku_daily["bom_out_qty"].gt(qty_tolerance)
+        & sku_daily["bom_out_amt"].le(cost_tolerance)
+    )
+    missing_cost = missing_issue_cost | missing_return_cost | missing_bom_cost
     failures = int(missing_cost.sum())
     return pd.DataFrame([{
         "check_name": "ISSUE_COST_EVIDENCE",
         "passed": failures == 0,
         "failure_count": failures,
-        "detail": "every sale, loss and internal outflow has a positive issue unit cost",
+        "detail": (
+            "销售、普通报损和非 BOM 内部转出必须有正的当日单位成本；"
+            "BOM 转出必须有正的本次验收分配金额；销售退货必须有正的退货成本。"
+            "任一条件不满足均阻止发布"
+        ),
         "gate_type": "PUBLISH",
     }])
 
@@ -265,11 +266,10 @@ def validate_category_evidence(
         "passed": failures == 0,
         "failure_count": failures,
         "detail": (
-            "category mapping must be either a dated snapshot covering the run "
-            "or the monitoring platform's latest healthy snapshot uniformly "
-            f"applied to the run; run={start_date}..{end_date}, "
-            f"status={mapper.evidence_status}, "
-            f"snapshot={mapper.snapshot_start or '-'}..{mapper.snapshot_end or '-'}"
+            "分类必须使用覆盖完整计算区间的固定历史快照，或统一使用监控平台最新健康快照；"
+            f"计算区间={start_date}..{end_date}；证据状态={mapper.evidence_status}；"
+            f"分类快照区间={mapper.snapshot_start or '-'}..{mapper.snapshot_end or '-'}。"
+            "不满足时阻止发布"
         ),
         "gate_type": "PUBLISH",
     }])

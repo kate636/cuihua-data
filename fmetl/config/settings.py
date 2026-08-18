@@ -14,7 +14,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 @dataclass(frozen=True)
 class Settings:
-    """Runtime settings for the A3XV-only v0.14 pipeline."""
+    """Runtime settings for the A3XV-only v0.18 engine."""
 
     store_id: str
     duckdb_path: Path
@@ -32,7 +32,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         store_id = os.getenv("FM_STORE_ID", "A3XV").upper()
         if store_id != "A3XV":
-            raise ValueError(f"v0.14 is scoped to A3XV, got {store_id!r}")
+            raise ValueError(f"v0.18 is scoped to A3XV, got {store_id!r}")
         return cls(
             store_id=store_id,
             duckdb_path=Path(

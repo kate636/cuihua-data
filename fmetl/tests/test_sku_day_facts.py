@@ -190,6 +190,8 @@ class SkuDayFactTests(unittest.TestCase):
         self.assertEqual(attach_authoritative_day_clear(sales, label).loc[0, "day_clear"], "1")
         with self.assertRaises(ValueError):
             attach_authoritative_day_clear(sales, label.assign(day_clear="0"))
+        with self.assertRaises(ValueError):
+            attach_authoritative_day_clear(sales, label.iloc[:0])
 
 
 if __name__ == "__main__":

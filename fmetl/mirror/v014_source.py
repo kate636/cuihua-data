@@ -23,6 +23,7 @@ DAILY_SOURCE_KEYS: tuple[str, ...] = (
     "supply_chain_adjust",
     "known_loss",
     "inventory_detail",
+    "chdj_day_clear",
     "day_clear",
     "store_daily",
     "order_offline",
@@ -36,11 +37,33 @@ DAILY_SOURCE_KEYS: tuple[str, ...] = (
     "allowance",
     "promotion",
     "price",
-    "inventory_pool",
     "product_group",
 )
 
-LATEST_SOURCE_KEYS: tuple[str, ...] = ("goods", "store_profile", "purchase_wastage")
+LATEST_SOURCE_KEYS: tuple[str, ...] = (
+    "goods", "store_profile", "purchase_wastage", "inventory_pool",
+)
+
+SOURCE_TIERS: dict[str, str] = {
+    **{name: "CORE_CALCULATION" for name in (
+        "sales", "store_receipt", "known_loss", "inventory_detail",
+        "chdj_day_clear", "receive_sale", "bom_relation", "article_convert",
+        "order_saleability", "inventory_pool", "product_group", "goods",
+        "store_profile", "purchase_wastage",
+    )},
+    **{name: "PUBLIC_REPORTING" for name in (
+        "supply_chain", "order_offline", "order_online",
+        "article_sale", "price",
+    )},
+    **{name: "AUDIT_ONLY" for name in (
+        "supply_chain_adjust", "day_clear", "store_daily", "compose",
+        "allowance", "promotion",
+    )},
+}
+
+REQUIRED_CALCULATION_SOURCE_KEYS = frozenset(
+    name for name, tier in SOURCE_TIERS.items() if tier != "AUDIT_ONLY"
+)
 
 
 class DayExtractor(Protocol):
@@ -54,6 +77,40 @@ class MirrorSourceBundle:
     frames: Mapping[str, pd.DataFrame]
     manifest: pd.DataFrame
     completeness: pd.DataFrame
+
+
+def _latest_snapshot_day_coverage(
+    source_name: str,
+    frame: pd.DataFrame,
+    requested_days: Sequence[str],
+) -> list[tuple[str, bool, int, str]]:
+    """Return actual business-day coverage for one latest-snapshot source."""
+    snapshot_day = str(frame.attrs.get("source_snapshot_day", ""))
+    if not snapshot_day and "inc_day" in frame and not frame.empty:
+        values = frame["inc_day"].dropna().astype(str)
+        snapshot_day = values.max() if not values.empty else ""
+    snapshot_is_current = bool(
+        len(frame) > 0
+        and snapshot_day
+        and snapshot_day >= max(map(str, requested_days))
+    )
+    if source_name != "inventory_pool":
+        return [
+            (str(day), snapshot_is_current, len(frame), snapshot_day)
+            for day in requested_days
+        ]
+    if "inventory_date" not in frame:
+        return [(str(day), False, 0, snapshot_day) for day in requested_days]
+    counts = frame["inventory_date"].dropna().astype(str).value_counts()
+    return [
+        (
+            str(day),
+            snapshot_is_current and int(counts.get(str(day), 0)) > 0,
+            int(counts.get(str(day), 0)),
+            snapshot_day,
+        )
+        for day in requested_days
+    ]
 
 
 def _write_mirror_frame(
@@ -107,7 +164,7 @@ def shadow_source_days_between(start: str | date, end: str | date) -> tuple[str,
     start_day = date.fromisoformat(start) if isinstance(start, str) else start
     end_day = date.fromisoformat(end) if isinstance(end, str) else end
     if start_day > end_day:
-        raise ValueError(f"v0.14 shadow start must not exceed end: {start_day} > {end_day}")
+        raise ValueError(f"v0.18 local run start must not exceed end: {start_day} > {end_day}")
     warmup_day = start_day - timedelta(days=1)
     return tuple(
         (warmup_day + timedelta(days=offset)).isoformat()
@@ -124,7 +181,14 @@ def discover_latest_mirror_day(
     """Find a common upper partition without mixing dates across sources."""
     maxima: list[date] = []
     ceiling = date.today() - timedelta(days=1) if end == "auto" else date.fromisoformat(end)
-    for source_key in DAILY_SOURCE_KEYS:
+    # Audit-only mirrors cannot move the calculation window.  They are still
+    # extracted and reported, but the latest runnable date is determined only
+    # by sources used by calculation or public output.
+    required_daily_sources = tuple(
+        key for key in DAILY_SOURCE_KEYS
+        if key in REQUIRED_CALCULATION_SOURCE_KEYS
+    )
+    for source_key in required_daily_sources:
         contract = EXTRACTION_CONTRACTS[source_key]
         clauses = list(contract.base_predicates)
         if contract.store_column:
@@ -141,7 +205,7 @@ def discover_latest_mirror_day(
             raise RuntimeError(f"{contract.name}: no source partition at or before {ceiling}")
         maxima.append(date.fromisoformat(str(result.iloc[0]["source_day"])))
     if not maxima:
-        raise RuntimeError("no required v0.14 mirror exposes a usable partition")
+        raise RuntimeError("no required v0.18 mirror exposes a usable partition")
     return min(maxima).isoformat()
 
 
@@ -151,7 +215,7 @@ def extract_v014_mirror_sources(
     days: Sequence[str],
     extractor: DayExtractor | None = None,
 ) -> MirrorSourceBundle:
-    """Read the v0.14 source boundary from Hive-backed mirrors.
+    """Read the v0.18 source boundary from Hive-backed mirrors.
 
     Every requested daily partition is fetched independently and checked by
     :class:`MirrorExtractor`.  Latest-snapshot dimensions are fetched once and
@@ -160,9 +224,9 @@ def extract_v014_mirror_sources(
     """
     requested_days = tuple(map(str, days))
     if not requested_days:
-        raise ValueError("v0.14 mirror extraction requires at least one business day")
+        raise ValueError("v0.18 mirror extraction requires at least one business day")
     if requested_days != tuple(sorted(set(requested_days))):
-        raise ValueError("v0.14 mirror extraction days must be unique and sorted")
+        raise ValueError("v0.18 mirror extraction days must be unique and sorted")
     active_extractor = extractor or MirrorExtractor(QdmApi(), store_id=store_id)
     frames: dict[str, pd.DataFrame] = {}
     manifest_rows: list[dict[str, object]] = []
@@ -181,6 +245,8 @@ def extract_v014_mirror_sources(
                 "is_complete": True,
                 "row_count": len(frame),
                 "source_table": contract.full_name,
+                "source_tier": SOURCE_TIERS[source_key],
+                "source_snapshot_day": business_day,
             })
         combined = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(
             columns=contract.projection
@@ -200,6 +266,7 @@ def extract_v014_mirror_sources(
                 else "AUXILIARY_RELATION_EVIDENCE"
             ),
             "hive_source_tables": " + ".join(HIVE_SOURCE_BY_MIRROR.get(contract.name, ())),
+            "source_tier": SOURCE_TIERS[source_key],
         })
 
     for source_key in LATEST_SOURCE_KEYS:
@@ -221,15 +288,22 @@ def extract_v014_mirror_sources(
                 else "AUXILIARY_RELATION_EVIDENCE"
             ),
             "hive_source_tables": " + ".join(HIVE_SOURCE_BY_MIRROR.get(contract.name, ())),
+            "source_tier": SOURCE_TIERS[source_key],
         })
-        for business_day in requested_days:
+        for (
+            business_day, is_complete, row_count, snapshot_day,
+        ) in _latest_snapshot_day_coverage(
+            source_key, frame, requested_days
+        ):
             complete_rows.append({
                 "store_id": store_id,
                 "business_date": business_day,
                 "source_name": source_key,
-                "is_complete": True,
-                "row_count": len(frame),
+                "is_complete": is_complete,
+                "row_count": row_count,
                 "source_table": contract.full_name,
+                "source_tier": SOURCE_TIERS[source_key],
+                "source_snapshot_day": snapshot_day,
             })
 
     return MirrorSourceBundle(
@@ -279,6 +353,7 @@ def extract_and_persist_v014_mirror_sources(
     days: Sequence[str],
     path: Path | str,
     extractor: DayExtractor | None = None,
+    reuse_completed: bool = True,
 ) -> MirrorSourceBundle:
     """Extract a resumable local mirror cache one source partition at a time.
 
@@ -288,7 +363,7 @@ def extract_and_persist_v014_mirror_sources(
     """
     requested_days = tuple(map(str, days))
     if not requested_days or requested_days != tuple(sorted(set(requested_days))):
-        raise ValueError("v0.14 mirror extraction days must be non-empty, unique and sorted")
+        raise ValueError("v0.18 mirror extraction days must be non-empty, unique and sorted")
     target = Path(path).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     active_extractor = extractor or MirrorExtractor(QdmApi(), store_id=store_id)
@@ -297,7 +372,12 @@ def extract_and_persist_v014_mirror_sources(
         conn.execute(
             "CREATE TABLE IF NOT EXISTS v014_mirror_source_completeness ("
             "store_id VARCHAR, business_date VARCHAR, source_name VARCHAR, "
-            "is_complete BOOLEAN, row_count BIGINT, source_table VARCHAR)"
+            "is_complete BOOLEAN, row_count BIGINT, source_table VARCHAR, "
+            "source_tier VARCHAR, source_snapshot_day VARCHAR)"
+        )
+        conn.execute(
+            "ALTER TABLE v014_mirror_source_completeness "
+            "ADD COLUMN IF NOT EXISTS source_snapshot_day VARCHAR"
         )
         existing_days = {
             str(row[0]) for row in conn.execute(
@@ -308,7 +388,7 @@ def extract_and_persist_v014_mirror_sources(
         unexpected_days = existing_days - set(requested_days)
         if unexpected_days:
             raise ValueError(
-                "existing v0.14 mirror cache contains dates outside the requested set; "
+                "existing v0.18 mirror cache contains dates outside the requested set; "
                 f"existing={sorted(existing_days)}, requested={list(requested_days)}"
             )
 
@@ -319,28 +399,30 @@ def extract_and_persist_v014_mirror_sources(
             ).fetchone()[0])
 
         def is_complete(source_name: str, business_day: str) -> bool:
+            minimum_rows = 1 if source_name == "inventory_pool" else 0
             return bool(conn.execute(
                 "SELECT COUNT(*) FROM v014_mirror_source_completeness "
-                "WHERE store_id=? AND business_date=? AND source_name=? AND is_complete",
-                [store_id, business_day, source_name],
+                "WHERE store_id=? AND business_date=? AND source_name=? "
+                "AND is_complete AND row_count>=?",
+                [store_id, business_day, source_name, minimum_rows],
             ).fetchone()[0])
 
         for source_name in DAILY_SOURCE_KEYS:
             contract = EXTRACTION_CONTRACTS[source_name]
             for business_day in requested_days:
-                if is_complete(source_name, business_day) and table_exists(
+                if reuse_completed and is_complete(source_name, business_day) and table_exists(
                     f"v014_mirror_{source_name}"
                 ):
                     continue
                 print(
-                    f"[v014-mirror] {source_name} {business_day}",
+                    f"[v018-mirror] {source_name} {business_day}",
                     flush=True,
                 )
                 try:
                     frame = active_extractor.extract_day(contract, business_day)
                 except Exception as exc:
                     raise RuntimeError(
-                        f"v0.14 mirror extraction failed: "
+                        f"v0.18 mirror extraction failed: "
                         f"source={source_name}, day={business_day}"
                     ) from exc
                 conn.execute("BEGIN TRANSACTION")
@@ -352,10 +434,12 @@ def extract_and_persist_v014_mirror_sources(
                         [store_id, business_day, source_name],
                     )
                     conn.execute(
-                        "INSERT INTO v014_mirror_source_completeness VALUES (?, ?, ?, TRUE, ?, ?)",
+                        "INSERT INTO v014_mirror_source_completeness VALUES (?, ?, ?, TRUE, ?, ?, ?, ?)",
                         [
                             store_id, business_day, source_name, len(frame),
                             contract.full_name,
+                            SOURCE_TIERS[source_name],
+                            business_day,
                         ],
                     )
                     conn.execute("COMMIT")
@@ -365,16 +449,18 @@ def extract_and_persist_v014_mirror_sources(
 
         for source_name in LATEST_SOURCE_KEYS:
             contract = EXTRACTION_CONTRACTS[source_name]
-            if all(is_complete(source_name, day) for day in requested_days) and table_exists(
+            if reuse_completed and all(
+                is_complete(source_name, day) for day in requested_days
+            ) and table_exists(
                 f"v014_mirror_{source_name}"
             ):
                 continue
-            print(f"[v014-mirror] {source_name} latest", flush=True)
+            print(f"[v018-mirror] {source_name} latest", flush=True)
             try:
                 frame = active_extractor.extract_day(contract, requested_days[-1])
             except Exception as exc:
                 raise RuntimeError(
-                    f"v0.14 latest mirror extraction failed: source={source_name}"
+                    f"v0.18 latest mirror extraction failed: source={source_name}"
                 ) from exc
             conn.execute("BEGIN TRANSACTION")
             try:
@@ -389,12 +475,18 @@ def extract_and_persist_v014_mirror_sources(
                     "WHERE store_id=? AND source_name=?",
                     [store_id, source_name],
                 )
-                for business_day in requested_days:
+                for (
+                    business_day, complete, row_count, snapshot_day,
+                ) in _latest_snapshot_day_coverage(
+                    source_name, frame, requested_days
+                ):
                     conn.execute(
-                        "INSERT INTO v014_mirror_source_completeness VALUES (?, ?, ?, TRUE, ?, ?)",
+                        "INSERT INTO v014_mirror_source_completeness VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         [
-                            store_id, business_day, source_name, len(frame),
+                            store_id, business_day, source_name, complete, row_count,
                             contract.full_name,
+                            SOURCE_TIERS[source_name],
+                            snapshot_day,
                         ],
                     )
                 conn.execute("COMMIT")
@@ -428,6 +520,7 @@ def extract_and_persist_v014_mirror_sources(
                 "hive_source_tables": " + ".join(
                     HIVE_SOURCE_BY_MIRROR.get(contract.name, ())
                 ),
+                "source_tier": SOURCE_TIERS[source_name],
             })
         manifest = pd.DataFrame(manifest_rows)
         conn.register("_v014_manifest", manifest)
@@ -450,7 +543,7 @@ def load_mirror_source_bundle(
     """Load the exact local cache written by :func:`persist_mirror_source_bundle`."""
     source = Path(path).resolve()
     if not source.exists():
-        raise FileNotFoundError(f"v0.14 mirror source cache not found: {source}")
+        raise FileNotFoundError(f"v0.18 mirror source cache not found: {source}")
     conn = duckdb.connect(str(source), read_only=True)
     try:
         existing = {
@@ -464,7 +557,7 @@ def load_mirror_source_bundle(
         }
         missing = sorted(required_tables - existing)
         if missing:
-            raise KeyError(f"v0.14 mirror source cache missing tables: {missing}")
+            raise KeyError(f"v0.18 mirror source cache missing tables: {missing}")
         frames = {
             name: conn.execute(f'SELECT * FROM "v014_mirror_{name}"').df()
             for name in (*DAILY_SOURCE_KEYS, *LATEST_SOURCE_KEYS)
@@ -475,7 +568,7 @@ def load_mirror_source_bundle(
         conn.close()
     scoped = completeness.loc[completeness["store_id"].astype(str).eq(store_id)]
     if scoped.empty:
-        raise ValueError(f"v0.14 mirror source cache has no completeness rows for {store_id}")
+        raise ValueError(f"v0.18 mirror source cache has no completeness rows for {store_id}")
     days = tuple(sorted(scoped["business_date"].astype(str).unique()))
     return MirrorSourceBundle(
         store_id=store_id,

@@ -2,9 +2,9 @@
 
 > 状态说明：本文记录 2026-08-12、v0.17 改动前的 v0.16 工作区快照。文中的“当前”、
 > `pack_inference.py`、`v014_stage_raw_available`、159 项测试和 v0.16 版本号只描述该次盘点，
-> 不代表 v0.17 活跃实现。当前公式与运行状态以
-> [`fmetl/README.md`](../../README.md)、[DESIGN-008](../designs/DESIGN-008-v0.17-processing-evidence-and-profit-correction.md)
-> 和 [v0.17 发布审核](../reviews/V0.17_RELEASE_REVIEW.md) 为准。
+> 不代表 v0.18 活跃实现。当前公式与运行状态以
+> [`fmetl/README.md`](../../README.md)、[DESIGN-009](../designs/DESIGN-009-v0.18-evidence-led-inventory-conversion-cost-profit.md)
+> 和 [v0.18 发布审核](../reviews/V0.18_RELEASE_REVIEW.md) 为准。
 
 > 盘点日期：2026-08-12
 > 盘点范围：`/Users/zhukate/Desktop/Projects/qdm/fm/翠花数据` 本地工作区（含隐藏文件、忽略文件和未跟踪文件；不含 `.git` 内部对象的逐项解释）

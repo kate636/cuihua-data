@@ -108,7 +108,7 @@ class ProcessingRelationSource:
 
         The legacy ``/export`` endpoint deliberately omits database timestamps.
         The read-only ``/list`` endpoint exposes ``created_at`` and ``updated_at``
-        for the same active rows.  v0.14 uses the later timestamp as the earliest
+        for the same active rows. The v0.18 engine uses the later timestamp as the earliest
         date on which the *current* relation version is proven to exist.  This
         avoids applying a modified ratio to dates before that modification and
         does not pretend that the API contains a full history table.

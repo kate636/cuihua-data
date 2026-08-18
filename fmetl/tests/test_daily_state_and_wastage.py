@@ -6,11 +6,7 @@ import pandas as pd
 
 from fmetl.calculations.daily_cost_stock import DailyFlow, roll_forward_days, transition_day
 from fmetl.calculations.profit import calculate_accounting_profit
-from fmetl.calculations.special_wastage import (
-    adjust_sku_wastage,
-    apply_ssls_category_transfer,
-    build_wastage_trace,
-)
+from fmetl.calculations.special_wastage import build_wastage_trace
 
 
 class DailyStateTests(unittest.TestCase):
@@ -38,48 +34,51 @@ class DailyStateTests(unittest.TestCase):
         self.assertAlmostEqual(0.0, state.qty_balance_residual)
         self.assertAlmostEqual(0.0, state.amount_balance_residual)
 
-    def test_signed_purchase_return_cannot_exceed_the_available_pool(self) -> None:
-        with self.assertRaisesRegex(ValueError, "exceeds the available inventory pool"):
-            transition_day(DailyFlow(
-                init_qty=1,
-                init_amt=10,
-                store_receive_qty=-2,
-                store_receive_amt=-20,
-            ))
+    def test_signed_purchase_return_can_exceed_book_stock_and_is_exposed(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=1,
+            init_amt=10,
+            store_receive_qty=-2,
+            store_receive_amt=-20,
+        ))
+        self.assertEqual("negative_clamp", state.branch)
+        self.assertEqual(-1.0, state.unknown_lost_qty)
+        self.assertEqual(1.0, state.neg_clamp_qty)
 
-    def test_machine_epsilon_negative_opening_is_normalized_but_real_negative_is_blocked(self) -> None:
+    def test_negative_opening_is_retained_as_source_evidence(self) -> None:
         state = transition_day(DailyFlow(init_qty=0, init_amt=-8.88e-16))
         self.assertEqual(state.end_amt, 0)
-        with self.assertRaises(ValueError):
-            transition_day(DailyFlow(init_qty=0, init_amt=-0.01))
+        real = transition_day(DailyFlow(init_qty=-1, init_amt=-10))
+        self.assertEqual("negative_clamp", real.branch)
+        self.assertEqual(1.0, real.neg_clamp_qty)
 
     def test_negative_clamp_cost_is_explicit(self) -> None:
         state = transition_day(DailyFlow(init_qty=1, init_amt=10, sale_qty=2))
         self.assertEqual(state.branch, "negative_clamp")
         self.assertEqual(state.end_qty, 0)
-        self.assertEqual(state.unknown_lost_qty, 0)
+        self.assertEqual(state.unknown_lost_qty, -1)
         self.assertEqual(state.balance_unknown_qty, -1)
         self.assertEqual(state.neg_clamp_cost_amt, 10)
 
-    def test_day_clear_is_only_a_label_and_uses_the_inventory_equation(self) -> None:
+    def test_day_clear_consumes_opening_when_today_net_change_is_negative(self) -> None:
         state = transition_day(DailyFlow(
             init_qty=5, init_amt=50, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
-        self.assertEqual(state.branch, "normal")
-        self.assertEqual(state.unknown_lost_qty, 0)
+        self.assertEqual(state.branch, "day_clear_negative")
+        self.assertEqual(state.unknown_lost_qty, -2)
         self.assertEqual(state.balance_unknown_qty, 0)
         self.assertEqual(state.end_qty, 3)
         self.assertAlmostEqual(state.qty_balance_residual, 0)
 
-    def test_day_clear_shortage_is_overdraft_not_unknown_loss(self) -> None:
+    def test_day_clear_records_net_change_and_separate_overdraft(self) -> None:
         state = transition_day(DailyFlow(
             init_qty=1, init_amt=10, store_receive_qty=1, store_receive_amt=10,
             sale_qty=3, day_clear="0",
         ))
-        self.assertEqual(state.branch, "negative_clamp")
+        self.assertEqual(state.branch, "day_clear_overdraft")
         self.assertEqual(state.end_qty, 0)
-        self.assertEqual(state.unknown_lost_qty, 0)
+        self.assertEqual(state.unknown_lost_qty, -2)
         self.assertEqual(state.balance_unknown_qty, -1)
         self.assertEqual(state.neg_clamp_qty, 1)
         self.assertAlmostEqual(state.qty_balance_residual, 0)
@@ -92,13 +91,13 @@ class DailyStateTests(unittest.TestCase):
         )
         self.assertEqual(profit, 49)
 
-    def test_negative_count_and_overdrawn_internal_amount_are_blocked(self) -> None:
+    def test_negative_count_and_conflicting_internal_amount_are_blocked(self) -> None:
         with self.assertRaises(ValueError):
             transition_day(DailyFlow(init_qty=2, init_amt=20, actual_stock_qty=-1, is_counted=True))
         with self.assertRaises(ValueError):
             transition_day(DailyFlow(init_qty=10, init_amt=100, bom_out_qty=1, bom_out_amt=200))
-        with self.assertRaises(ValueError):
-            transition_day(DailyFlow(init_qty=0, init_amt=100))
+        amount_only = transition_day(DailyFlow(init_qty=0, init_amt=100))
+        self.assertEqual(100.0, amount_only.balance_unknown_amt)
 
     def test_system_end_balance_example_derives_unknown_loss_instead_of_copying_it(self) -> None:
         # A3XV / 2026-07-14 / 21279829: receive 10, sale 2, observed end balance 0.
@@ -150,6 +149,34 @@ class DailyStateTests(unittest.TestCase):
         self.assertEqual(state.end_qty, 1.5)
         self.assertEqual(state.end_amt, 22.5)
 
+    def test_fixed_bom_transfers_only_same_day_receipt_amount(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=10, init_amt=50,
+            store_receive_qty=10, store_receive_amt=100,
+            bom_out_qty=10, bom_out_fixed_amt=100,
+        ))
+        self.assertEqual(5.0, state.issue_unit_cost)
+        self.assertEqual(100.0, state.bom_out_amt)
+        self.assertEqual(10.0, state.end_qty)
+        self.assertEqual(50.0, state.end_amt)
+
+    def test_fixed_bom_allows_negative_opening_but_not_extra_receipt_qty(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=-1, init_amt=-5,
+            store_receive_qty=10, store_receive_amt=100,
+            bom_out_qty=10, bom_out_fixed_amt=100,
+            fallback_cost=5,
+        ))
+        self.assertEqual("negative_clamp", state.branch)
+        self.assertEqual(100.0, state.bom_out_amt)
+        self.assertEqual(1.0, state.neg_clamp_qty)
+        self.assertEqual(5.0, state.neg_clamp_cost_amt)
+        with self.assertRaisesRegex(ValueError, "same-day actual receipt"):
+            transition_day(DailyFlow(
+                store_receive_qty=9, store_receive_amt=90,
+                bom_out_qty=10, bom_out_fixed_amt=100,
+            ))
+
     def test_confirmed_processing_can_overdraw_raw_and_records_clamp_cost(self) -> None:
         state = transition_day(DailyFlow(
             init_qty=1, init_amt=10, compose_out_qty=2,
@@ -160,8 +187,8 @@ class DailyStateTests(unittest.TestCase):
         self.assertEqual(10.0, state.neg_clamp_cost_amt)
         self.assertEqual(0.0, state.end_qty)
 
-    def test_non_processing_internal_out_cannot_overdraw_inventory(self) -> None:
-        for field in ("bom_out_qty", "pack_out_qty", "residual_transfer_out_qty"):
+    def test_bom_and_residual_internal_out_cannot_overdraw_inventory(self) -> None:
+        for field in ("bom_out_qty", "residual_transfer_out_qty"):
             with self.subTest(field=field), self.assertRaisesRegex(
                 ValueError, "non-processing internal out"
             ):
@@ -169,20 +196,34 @@ class DailyStateTests(unittest.TestCase):
                     init_qty=1, init_amt=10, **{field: 2},
                 ))
 
-    def test_inventory_count_and_explicit_gain_cannot_both_post(self) -> None:
-        with self.assertRaises(ValueError):
-            transition_day(DailyFlow(
-                init_qty=1, init_amt=10, actual_stock_qty=2, is_counted=True,
-                inventory_gain_qty=1, inventory_gain_amt=10,
-            ))
+    def test_pack_conversion_can_overdraw_and_uses_current_reference_cost(self) -> None:
+        state = transition_day(DailyFlow(pack_out_qty=2, fallback_cost=5))
 
-    def test_v15_wastage_and_ssls_conservation(self) -> None:
-        accounting = pd.DataFrame([
-            {"store_id": "A3XV", "business_date": "2026-07-01", "article_id": "source",
-             "day_clear": "1", "accounting_lost_amt": 15.0, "accounting_lost_qty": 3.0,
-             "accounting_known_lost_amt": 15.0, "accounting_profit": 100.0,
-             "accounting_full_profit": 110.0},
-        ])
+        self.assertEqual("negative_clamp", state.branch)
+        self.assertEqual(10.0, state.pack_out_amt)
+        self.assertEqual(2.0, state.neg_clamp_qty)
+        self.assertEqual(10.0, state.neg_clamp_cost_amt)
+
+    def test_pack_conversion_without_cost_still_records_quantity_overdraft(self) -> None:
+        state = transition_day(DailyFlow(pack_out_qty=2))
+
+        self.assertEqual("negative_clamp", state.branch)
+        self.assertEqual(2.0, state.neg_clamp_qty)
+        self.assertEqual(0.0, state.pack_out_amt)
+        self.assertEqual(0.0, state.neg_clamp_cost_amt)
+
+    def test_inventory_count_only_overrides_ending_quantity(self) -> None:
+        state = transition_day(DailyFlow(
+            init_qty=1, init_amt=10, actual_stock_qty=2, is_counted=True,
+        ))
+
+        self.assertEqual("counted", state.branch)
+        self.assertEqual(10.0, state.issue_unit_cost)
+        self.assertEqual(2.0, state.end_qty)
+        self.assertEqual(20.0, state.end_amt)
+        self.assertEqual(-1.0, state.unknown_lost_qty)
+
+    def test_special_wastage_uses_latest_active_snapshot(self) -> None:
         wastage = pd.DataFrame([
             {"inc_day": "2026-07-02", "sku_code": "source", "created_at": "2026-07-01 10:00:00", "reason": "炒菜机成本",
              "waste_money": 5.0, "waste_num": 1.0, "is_deleted": 0},
@@ -191,26 +232,12 @@ class DailyStateTests(unittest.TestCase):
             {"inc_day": "2026-07-01", "sku_code": "source", "created_at": "2026-07-01 11:00:00", "reason": "生熟联动",
              "waste_money": 999.0, "waste_num": 999.0, "is_deleted": 0},
         ])
-        adjusted = adjust_sku_wastage(accounting, wastage)
+
         trace = build_wastage_trace(wastage)
-        self.assertEqual(len(trace), 2)
+
+        self.assertEqual(2, len(trace))
         self.assertTrue(trace["source_record_id"].is_unique)
-        self.assertEqual(adjusted.loc[0, "adjusted_lost_amt"], 8)
-        self.assertEqual(adjusted.loc[0, "adjusted_profit_before_ssls"], 105)
-        levels = pd.DataFrame([
-            {"store_id": "A3XV", "business_date": "2026-07-01", "day_clear": "1",
-             "report_category_name": "蔬菜类", "adjusted_profit_before_ssls": 105.0,
-             "adjusted_full_profit_before_ssls": 115.0, "ssls_amt": 2.0,
-             "level_description": "大分类"},
-            {"store_id": "A3XV", "business_date": "2026-07-01", "day_clear": "1",
-             "report_category_name": "熟食类", "adjusted_profit_before_ssls": 20.0,
-             "adjusted_full_profit_before_ssls": 22.0, "ssls_amt": 0.0,
-             "level_description": "大分类"},
-        ])
-        transferred = apply_ssls_category_transfer(levels)
-        self.assertEqual(transferred["adjusted_profit"].sum(), 125)
-        self.assertEqual(transferred.loc[0, "adjusted_profit"], 107)
-        self.assertEqual(transferred.loc[1, "adjusted_profit"], 18)
+        self.assertEqual({"ccj", "ssls"}, set(trace["reason_code"]))
 
 
 if __name__ == "__main__":

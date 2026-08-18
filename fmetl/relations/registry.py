@@ -22,7 +22,7 @@ def _truthy(value: object) -> bool:
 def freeze_product_group_snapshot(raw: pd.DataFrame) -> pd.DataFrame:
     """Return the shadow-only, date-specific generic product-group mapping.
 
-    `area_name IS NULL` is an explicit v0.14 shadow assumption.  The function
+    `area_name IS NULL` is an explicit v0.18 local-run assumption. The function
     rejects duplicate article/day mappings instead of selecting an arbitrary
     group and never forward-fills a current mapping into historical dates.
     """
@@ -110,6 +110,24 @@ def build_product_group_candidates(
     if {"source_unit_weight", "target_unit_weight"}.issubset(pairs.columns):
         source_weight = pd.to_numeric(pairs["source_unit_weight"], errors="coerce")
         target_weight = pd.to_numeric(pairs["target_unit_weight"], errors="coerce")
+        source_weight = source_weight.where(
+            ~pairs["source_sale_unit"].astype(str).eq("千克"), 1.0
+        )
+        target_weight = target_weight.where(
+            ~pairs["target_sale_unit"].astype(str).eq("千克"), 1.0
+        )
+        pairs["source_normalized_weight"] = source_weight
+        pairs["target_normalized_weight"] = target_weight
+        pairs["source_qty_per_target_qty"] = np.where(
+            source_weight.gt(0) & target_weight.gt(0),
+            target_weight / source_weight,
+            np.nan,
+        )
+        pairs["target_qty_per_source_qty"] = np.where(
+            source_weight.gt(0) & target_weight.gt(0),
+            source_weight / target_weight,
+            np.nan,
+        )
         pairs["product_weight_quantity_rate"] = np.where(
             source_weight.gt(0) & target_weight.gt(0),
             source_weight / target_weight,
@@ -163,7 +181,7 @@ def _build_pair_lookup(
             column: tuple(group[column].dropna().drop_duplicates().tolist())
             for column in values
         }
-    # Normalized v0.14 stage evidence is already dated. Filter it once instead
+    # Normalized v0.18 stage evidence is already dated. Filter it once instead
     # of copying and regrouping the complete relation frame for every day.
     if {"store_id", "business_date"}.issubset(frame.columns):
         mask = pd.Series(True, index=frame.index)
@@ -236,13 +254,11 @@ def resolve_relation_registry(
     product_group_pairs: pd.DataFrame | None = None,
     relation_version: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Resolve pair/date evidence into a single formal path or quarantine.
+    """Choose one relation for each source, target and date.
 
-    BOM and processing create internal flows.  A valid article-convert relation
-    confirms the A->B ratio, while the dated B quantity and amount in
-    ``purchase_di`` are posted once as an allocated external receipt; no
-    separate convert-detail event is required.  If more than one internal type
-    hits the same pair/day, no priority is silently chosen.
+    The registry records direction and ratio only. Quantity is calculated later
+    from the target SKU's remaining demand. If different relation types identify
+    the same pair on the same day, the pair is isolated instead of posted.
     """
     required = {"store_id", "business_date", "source_article_id", "target_article_id"}
     missing = sorted(required - set(candidates.columns))
@@ -267,46 +283,49 @@ def resolve_relation_registry(
         source_col="parent_article_id", target_col="sub_article_id",
         value_columns=(
             "category_level1_description", "disassembly_allowed",
-            "quantity_rate", "convert_rate", "dressing_rate", "yield_rate",
+            "source_qty_per_target_qty", "target_qty_per_source_qty",
             "cost_rate", "amount_convert_rate",
         ),
     )
     processing_lookup = _build_pair_lookup(
         processing, store_days=store_days,
         source_col="raw_article_id", target_col="finished_article_id",
-        value_columns=("raw_qty", "yield_qty", "relation_source"),
+        value_columns=(
+            "raw_qty", "yield_qty", "relation_source",
+            "recipe_group_id", "recipe_mode",
+        ),
     )
     convert_lookup = _build_pair_lookup(
         explicit_convert, store_days=store_days,
         source_col="source_article_id", target_col="target_article_id",
         value_columns=(
             "actual_event", "fixed_rule", "quantity_rate", "convert_rate",
+            "source_qty_per_target_qty", "target_qty_per_source_qty",
             "dressing_rate", "yield_rate", "cost_rate", "amount_convert_rate",
         ),
     )
-    pg_lookup: set[tuple[str, str, str, str]] = set()
+    pg_lookup: dict[tuple[str, str, str, str], dict[str, float]] = {}
     if product_group_pairs is not None and not product_group_pairs.empty:
         pg = product_group_pairs.loc[product_group_pairs["same_product_group"].map(_truthy)]
-        pg_lookup = set(pg[keys].astype(str).itertuples(index=False, name=None))
+        for row in pg.itertuples(index=False):
+            key = (
+                str(row.store_id), str(row.business_date),
+                str(row.source_article_id), str(row.target_article_id),
+            )
+            pg_lookup[key] = {
+                "source_qty_per_target_qty": float(
+                    getattr(row, "source_qty_per_target_qty", np.nan)
+                ),
+                "target_qty_per_source_qty": float(
+                    getattr(row, "target_qty_per_source_qty", np.nan)
+                ),
+            }
 
     rows: list[dict[str, object]] = []
     quarantine: list[dict[str, object]] = []
     for item in work.itertuples(index=False):
         store, day = str(item.store_id), str(item.business_date)
         source, target = str(item.source_article_id), str(item.target_article_id)
-        external_target_qty = pd.to_numeric(
-            getattr(item, "external_receipt_target_qty", np.nan), errors="coerce"
-        )
-        external_target_amt = pd.to_numeric(
-            getattr(item, "external_receipt_target_amt", np.nan), errors="coerce"
-        )
-        has_external_receipt = (
-            pd.notna(external_target_qty)
-            and abs(float(external_target_qty)) > 0.000001
-        ) or (
-            pd.notna(external_target_amt)
-            and abs(float(external_target_amt)) > 0.01
-        )
         convert_hit: Mapping[str, tuple[object, ...]] | None = None
         formal: list[
             tuple[RelationType, Mapping[str, tuple[object, ...]], str]
@@ -319,21 +338,10 @@ def resolve_relation_registry(
             proc_hit = processing_lookup.get(lookup_key)
             convert_hit = convert_lookup.get(lookup_key)
             if bom_hit is not None:
-                category = {
-                    str(value)
-                    for value in bom_hit.get("category_level1_description", ())
-                }
-                allowed = bool(category & {"猪肉类", "牛肉类"})
-                if "disassembly_allowed" in bom_hit:
-                    allowed = allowed or any(
-                        _truthy(value)
-                        for value in bom_hit["disassembly_allowed"]
-                    )
-                if allowed:
-                    formal.append((RelationType.BOM, bom_hit, "official_pork_beef_bom"))
+                formal.append((RelationType.BOM, bom_hit, "official_bom_relation"))
             if proc_hit is not None:
                 formal.append((RelationType.PROCESSING, proc_hit, "approved_processing_relation"))
-            if convert_hit is not None and not has_external_receipt:
+            if convert_hit is not None:
                 event = any(
                     _truthy(value)
                     for value in convert_hit.get("actual_event", ())
@@ -344,12 +352,21 @@ def resolve_relation_registry(
                 )
                 if event or fixed:
                     formal.append((RelationType.EXPLICIT_CONVERT, convert_hit, "actual_or_fixed_convert"))
+            if not formal and lookup_key in pg_lookup:
+                formal.append((
+                    RelationType.PRODUCT_GROUP_CONVERT,
+                    {},
+                    "purchase_di_direction_plus_latest_product_weight",
+                ))
 
         pair_key = (store, day, source, target)
         if len(formal) > 1:
             relation_type = RelationType.CONFLICT
             evidence = ",".join(hit[2] for hit in formal)
             quantity_rate = cost_rate = None
+            source_per_target = target_per_source = None
+            direction_source = ratio_source = "CONFLICT"
+            recipe_group_id = recipe_mode = ""
             status = "QUARANTINED"
             quarantine.append({
                 "store_id": store, "business_date": day,
@@ -358,19 +375,48 @@ def resolve_relation_registry(
             })
         elif len(formal) == 1:
             relation_type, hit, evidence = formal[0]
+            recipe_group_id = recipe_mode = ""
             if relation_type is RelationType.SAME_SKU:
-                quantity_rate = cost_rate = 1.0
+                source_per_target = target_per_source = 1.0
+                cost_rate = 1.0
+                direction_source = "SAME_ARTICLE_ID"
+                ratio_source = "IDENTITY"
             elif relation_type is RelationType.PROCESSING:
                 raw_qty = _positive_rate(hit, ("raw_qty",))
                 yield_qty = _positive_rate(hit, ("yield_qty",))
-                quantity_rate = raw_qty / yield_qty if raw_qty and yield_qty else None
+                source_per_target = raw_qty / yield_qty if raw_qty and yield_qty else None
+                target_per_source = yield_qty / raw_qty if raw_qty and yield_qty else None
                 cost_rate = 1.0
+                direction_source = "PROCESSING_RELATION_RAW_TO_FINISHED"
+                ratio_source = "RAW_QTY_DIVIDED_BY_YIELD_QTY"
+                recipe_group_values = tuple(map(str, hit.get("recipe_group_id", ())))
+                recipe_mode_values = tuple(map(str, hit.get("recipe_mode", ())))
+                recipe_group_id = recipe_group_values[0] if len(set(recipe_group_values)) == 1 else ""
+                recipe_mode = recipe_mode_values[0] if len(set(recipe_mode_values)) == 1 else ""
                 sources = tuple(map(str, hit.get("relation_source", ())))
                 if len(set(sources)) == 1:
                     evidence = f"{evidence}:{sources[0]}"
+            elif relation_type is RelationType.EXPLICIT_CONVERT:
+                target_per_source = _positive_rate(
+                    hit, ("target_qty_per_source_qty", "convert_rate")
+                )
+                source_per_target = 1.0 / target_per_source if target_per_source else None
+                cost_rate = 1.0
+                direction_source = "ARTICLE_CONVERT_PARENT_TO_SUB"
+                ratio_source = "ONE_DIVIDED_BY_PARENT_RATE"
+            elif relation_type is RelationType.PRODUCT_GROUP_CONVERT:
+                ratio = pg_lookup[pair_key]
+                source_per_target = ratio["source_qty_per_target_qty"]
+                target_per_source = ratio["target_qty_per_source_qty"]
+                cost_rate = 1.0
+                direction_source = "PURCHASE_DI_ARTICLE_TO_SALE_ARTICLE"
+                ratio_source = "TARGET_WEIGHT_DIVIDED_BY_SOURCE_WEIGHT"
             else:
-                quantity_rate = _positive_rate(
-                    hit, ("quantity_rate", "convert_rate", "dressing_rate", "yield_rate")
+                source_per_target = _positive_rate(
+                    hit, ("source_qty_per_target_qty",)
+                )
+                target_per_source = _positive_rate(
+                    hit, ("target_qty_per_source_qty",)
                 )
                 cost_rate = _positive_rate(
                     hit, ("cost_rate", "amount_convert_rate"),
@@ -378,53 +424,39 @@ def resolve_relation_registry(
                         RelationType.BOM, RelationType.EXPLICIT_CONVERT,
                     } else None,
                 )
-            status = "ACTIVE" if quantity_rate and cost_rate else "QUARANTINED"
-            if status != "ACTIVE":
+                direction_source = "OFFICIAL_BOM_PARENT_TO_SUB"
+                ratio_source = "RECEIVE_SALE_ACTUAL_PARENT_CHILD_QTY"
+            quantity_rate = source_per_target
+            reciprocal_ok = bool(
+                source_per_target and target_per_source
+                and abs(source_per_target * target_per_source - 1.0) <= 0.000001
+            )
+            if relation_type is RelationType.BOM and not reciprocal_ok:
+                # The official direction is known, but this date has no
+                # receive_sale child quantities from which a unit ratio can be
+                # measured.  Keep it in the audit without allowing posting.
+                status = "EVIDENCE_ONLY"
+                ratio_source = "NO_OBSERVED_RECEIVE_SALE_BOM_EVENT"
+            else:
+                status = "ACTIVE" if reciprocal_ok and cost_rate else "QUARANTINED"
+            if status == "QUARANTINED":
                 quarantine.append({
                     "store_id": store, "business_date": day,
                     "source_article_id": source, "target_article_id": target,
                     "reason_code": "RELATION_RATIO_MISSING", "detail": evidence,
                 })
-        elif has_external_receipt:
-            observed_rate = pd.to_numeric(
-                getattr(item, "external_receipt_quantity_rate", np.nan), errors="coerce"
-            )
-            relation_type = RelationType.ALLOCATED_RECEIPT
-            relation_rate = (
-                _positive_rate(convert_hit, ("convert_rate", "quantity_rate"))
-                if convert_hit is not None else None
-            )
-            evidence = (
-                "purchase_di_allocated_target_qty_and_amount+article_convert_ratio"
-                if relation_rate is not None
-                else "purchase_di_allocated_target_qty_and_amount"
-            )
-            quantity_rate = relation_rate or (
-                float(observed_rate)
-                if pd.notna(observed_rate) and float(observed_rate) > 0 else None
-            )
-            cost_rate = 1.0
-            status = "ACTIVE"
-        elif pair_key in pg_lookup:
-            relation_type = RelationType.PRODUCT_GROUP_CANDIDATE
-            evidence = "same_product_group_only"
-            quantity_rate = cost_rate = None
-            status = "CANDIDATE"
-            quarantine.append({
-                "store_id": store, "business_date": day,
-                "source_article_id": source, "target_article_id": target,
-                "reason_code": "PRODUCT_GROUP_CONVERSION_EVIDENCE_MISSING",
-                "detail": "same product group without dated quantity or approved fixed rule",
-            })
         else:
             relation_type = RelationType.UNRESOLVED
             evidence = "none"
             quantity_rate = cost_rate = None
+            source_per_target = target_per_source = None
+            direction_source = ratio_source = "MISSING"
+            recipe_group_id = recipe_mode = ""
             status = "QUARANTINED"
             quarantine.append({
                 "store_id": store, "business_date": day,
                 "source_article_id": source, "target_article_id": target,
-                "reason_code": "UNRESOLVED_RELATION", "detail": "no formal evidence",
+                "reason_code": "UNRESOLVED_RELATION", "detail": "没有正式关系表、有效比例或可核对的数量证据，因此不允许生成内部流",
             })
         digest = hashlib.sha256(
             f"{store}|{day}|{source}|{target}|{relation_type.value}|{relation_version}".encode()
@@ -436,12 +468,18 @@ def resolve_relation_registry(
             "target_article_id": target,
             "relation_type": relation_type.value,
             "quantity_rate": quantity_rate,
+            "source_qty_per_target_qty": source_per_target,
+            "target_qty_per_source_qty": target_per_source,
             "cost_rate": cost_rate,
             "posting_mode": (
-                "DIRECT" if relation_type is RelationType.SAME_SKU
-                else "EXTERNAL_DIRECT" if relation_type is RelationType.ALLOCATED_RECEIPT
-                else "INTERNAL_TRANSFER"
+                "EVIDENCE_ONLY" if status == "EVIDENCE_ONLY"
+                else "DIRECT" if relation_type is RelationType.SAME_SKU
+                else "INTERNAL_DEMAND_BACKFLUSH"
             ),
+            "direction_source": direction_source,
+            "ratio_source": ratio_source,
+            "recipe_group_id": recipe_group_id,
+            "recipe_mode": recipe_mode,
             "effective_from": day,
             "effective_to": day,
             "evidence_source": evidence,
@@ -449,7 +487,7 @@ def resolve_relation_registry(
             "status": status,
             "relation_id": digest,
             "formal_flow_allowed": (
-                status == "ACTIVE" and relation_type is not RelationType.ALLOCATED_RECEIPT
+                status == "ACTIVE" and relation_type is not RelationType.SAME_SKU
             ),
         })
     return pd.DataFrame(rows), pd.DataFrame(quarantine)

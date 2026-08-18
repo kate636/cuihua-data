@@ -146,7 +146,7 @@ def load_v014_relation_category_effects(path: Path | str) -> pd.DataFrame:
             SELECT c.category_level1_description,
                    SUM(
                        CASE WHEN p.posting_role='OUT' THEN p.amt ELSE -p.amt END
-                   ) AS expected_internal_relation_delta
+                   ) AS internal_posting_category_effect
             FROM v014_internal_posting p
             INNER JOIN categories c USING (article_id)
             GROUP BY c.category_level1_description
@@ -383,7 +383,8 @@ def compare_v014_to_v15(
     v014: pd.DataFrame,
     v15: pd.DataFrame,
     *,
-    profit_tolerance: float = 0.02,
+    profit_tolerance: float = 0.03,
+    low_base_amount: float = 100.0,
     money_tolerance: float = 0.01,
     quantity_tolerance: float = 1e-6,
     relation_article_ids: Iterable[str] = (),
@@ -425,9 +426,23 @@ def compare_v014_to_v15(
     exact["tolerance"] = exact["metric"].map(
         lambda metric: money_tolerance if metric.endswith("amount") else quantity_tolerance
     )
+    empty_zero_row = (
+        exact["_merge"].ne("both")
+        & exact["v014_value"].abs().le(exact["tolerance"])
+        & exact["v15_value"].abs().le(exact["tolerance"])
+    )
     exact["status"] = np.where(
-        exact["diff_amount"].abs().le(exact["tolerance"]), "PASS",
-        np.where(exact["_merge"].ne("both"), "MISSING_SIDE", "FAIL"),
+        empty_zero_row,
+        "EMPTY_ZERO_ROW",
+        np.where(
+            exact["_merge"].ne("both"),
+            "MISSING_SIDE",
+            np.where(
+                exact["diff_amount"].abs().le(exact["tolerance"]),
+                "PASS",
+                "FAIL",
+            ),
+        ),
     )
 
     level_keys = ["business_date", "level_description", "category_level1_description"]
@@ -442,7 +457,9 @@ def compare_v014_to_v15(
         new.loc[new["level_description"].eq("门店")][
             level_keys + list(comparison_metrics)
         ],
-        new_category[level_keys + list(comparison_metrics)],
+        new.loc[new["level_description"].eq("大分类")][
+            level_keys + list(comparison_metrics)
+        ],
     ], ignore_index=True)
     old_levels = pd.concat([
         old.loc[old["level_description"].eq("门店")][
@@ -457,17 +474,38 @@ def compare_v014_to_v15(
     daily_profit["comparison_basis"] = np.where(
         daily_profit["level_description"].eq("门店"),
         "STORE_TOTAL",
-        "CURRENT_ENGINE_CATEGORY_NORMALIZED",
+        "CURRENT_ENGINE_OUTPUT_CATEGORY_VS_V15_SKU_REAGGREGATED_LATEST_MAPPING",
     )
-    daily_profit["is_gate_metric"] = (
-        daily_profit["level_description"].eq("门店")
-        & daily_profit["metric"].isin(PROFIT_GATE_METRICS)
+    daily_profit["is_gate_metric"] = daily_profit["metric"].isin(
+        PROFIT_GATE_METRICS
+    )
+    daily_profit["low_base"] = (
+        daily_profit["is_gate_metric"]
+        & daily_profit["v15_value"].abs().lt(low_base_amount)
+    )
+    daily_profit["review_reason"] = np.where(
+        daily_profit["_merge"].ne("both"),
+        "one side has no row",
+        np.where(
+            daily_profit["diff_pct"].isna(),
+            "v1.5 value is zero and the absolute difference is not zero",
+            np.where(
+                daily_profit["diff_pct"].abs().gt(profit_tolerance),
+                "absolute percentage difference exceeds 3%",
+                "",
+            ),
+        ),
     )
     daily_profit["status"] = np.where(
-        daily_profit["is_gate_metric"]
-        & daily_profit["diff_pct"].abs().le(profit_tolerance),
-        "WITHIN_TOLERANCE",
+        ~daily_profit["is_gate_metric"],
         "DIAGNOSTIC",
+        np.where(
+            daily_profit["_merge"].eq("both")
+            & daily_profit["diff_pct"].notna()
+            & daily_profit["diff_pct"].abs().le(profit_tolerance),
+            "WITHIN_3_PERCENT",
+            "REVIEW_REQUIRED",
+        ),
     )
     weekly_profit = _long_metric_compare(
         new_levels, old_levels, keys=level_keys,
@@ -476,17 +514,14 @@ def compare_v014_to_v15(
     weekly_profit["comparison_basis"] = np.where(
         weekly_profit["level_description"].eq("门店"),
         "STORE_TOTAL",
-        "CURRENT_ENGINE_CATEGORY_NORMALIZED",
+        "CURRENT_ENGINE_OUTPUT_CATEGORY_VS_V15_SKU_REAGGREGATED_LATEST_MAPPING",
     )
-    weekly_profit["is_gate_metric"] = (
-        weekly_profit["level_description"].eq("门店")
-        & weekly_profit["metric"].isin(PROFIT_GATE_METRICS)
-    )
+    weekly_profit["is_gate_metric"] = False
     relation_ids = set(map(str, relation_article_ids))
     expected_relation = pd.DataFrame(
         columns=[
             "level_description", "category_level1_description", "metric",
-            "expected_relation_delta",
+            "relation_sku_difference_subtotal",
         ]
     )
     if relation_ids:
@@ -510,12 +545,12 @@ def compare_v014_to_v15(
             ],
             metrics=PROFIT_GATE_METRICS,
             aggregate_week=True,
-        ).rename(columns={"diff_amount": "expected_relation_delta"})
+        ).rename(columns={"diff_amount": "relation_sku_difference_subtotal"})
         expected_relation["level_description"] = "大分类"
         expected_relation = expected_relation[
             [
                 "level_description", "category_level1_description", "metric",
-                "expected_relation_delta",
+                "relation_sku_difference_subtotal",
             ]
         ]
     weekly_profit = weekly_profit.merge(
@@ -524,13 +559,13 @@ def compare_v014_to_v15(
         how="left",
         validate="one_to_one",
     )
-    weekly_profit["expected_relation_delta"] = pd.to_numeric(
-        weekly_profit["expected_relation_delta"], errors="coerce"
+    weekly_profit["relation_sku_difference_subtotal"] = pd.to_numeric(
+        weekly_profit["relation_sku_difference_subtotal"], errors="coerce"
     ).fillna(0.0)
     if relation_category_effects is not None and not relation_category_effects.empty:
         required_effect = {
             "category_level1_description",
-            "expected_internal_relation_delta",
+            "internal_posting_category_effect",
         }
         missing_effect = sorted(required_effect - set(relation_category_effects.columns))
         if missing_effect:
@@ -547,32 +582,39 @@ def compare_v014_to_v15(
             validate="many_to_one",
         )
     else:
-        weekly_profit["expected_internal_relation_delta"] = 0.0
-    weekly_profit["expected_internal_relation_delta"] = pd.to_numeric(
-        weekly_profit["expected_internal_relation_delta"], errors="coerce"
+        weekly_profit["internal_posting_category_effect"] = 0.0
+    weekly_profit["internal_posting_category_effect"] = pd.to_numeric(
+        weekly_profit["internal_posting_category_effect"], errors="coerce"
     ).fillna(0.0)
     matches_relation_sku_delta = (
         weekly_profit["diff_amount"]
-        .sub(weekly_profit["expected_relation_delta"])
+        .sub(weekly_profit["relation_sku_difference_subtotal"])
         .abs()
         .le(money_tolerance)
-        & weekly_profit["expected_relation_delta"].abs().gt(money_tolerance)
+        & weekly_profit["relation_sku_difference_subtotal"].abs().gt(money_tolerance)
     )
     matches_internal_category_effect = (
         weekly_profit["diff_amount"]
-        .sub(weekly_profit["expected_internal_relation_delta"])
+        .sub(weekly_profit["internal_posting_category_effect"])
         .abs()
         .le(money_tolerance)
-        & weekly_profit["expected_internal_relation_delta"].abs().gt(
+        & weekly_profit["internal_posting_category_effect"].abs().gt(
             money_tolerance
         )
     )
-    relation_explains_diff = (
+    relation_sku_subtotal_locates_diff = (
         weekly_profit["level_description"].eq("大分类")
         & weekly_profit["metric"].isin(
             {"store_profit_amount", "full_link_profit_amount"}
         )
-        & (matches_relation_sku_delta | matches_internal_category_effect)
+        & matches_relation_sku_delta
+    )
+    internal_posting_reconciles_diff = (
+        weekly_profit["level_description"].eq("大分类")
+        & weekly_profit["metric"].isin(
+            {"store_profit_amount", "full_link_profit_amount"}
+        )
+        & matches_internal_category_effect
     )
     empty_category = (
         weekly_profit["_merge"].ne("both")
@@ -580,30 +622,71 @@ def compare_v014_to_v15(
         & weekly_profit["v15_value"].abs().le(money_tolerance)
     )
     weekly_profit["status"] = np.where(
-        ~weekly_profit["is_gate_metric"],
-        "DIAGNOSTIC",
+        empty_category,
+        "EMPTY_CATEGORY",
         np.where(
-            empty_category,
-            "EMPTY_CATEGORY",
+            internal_posting_reconciles_diff,
+            "INTERNAL_POSTING_EFFECT_RECONCILES_DIFF",
             np.where(
-                weekly_profit["diff_pct"].abs().le(profit_tolerance),
-                "PASS",
-                np.where(
-                    relation_explains_diff,
-                    "EXPECTED_RELATION_DELTA",
-                    np.where(
-                        weekly_profit["_merge"].ne("both"),
-                        "MISSING_SIDE",
-                        "FAIL",
-                    ),
-                ),
+                relation_sku_subtotal_locates_diff,
+                "DIFFERENCE_FULLY_WITHIN_RELATION_SKUS",
+                "DIAGNOSTIC",
             ),
         ),
     )
     sku_profit = _long_metric_compare(
-        new_sku, old_sku, keys=sku_keys, metrics=("store_profit_amount",), aggregate_week=True,
-    ).sort_values("diff_amount", key=lambda values: values.abs(), ascending=False)
-    sku_profit["status"] = "LOCATE_ONLY"
+        new_sku,
+        old_sku,
+        keys=sku_keys,
+        metrics=("store_profit_amount",),
+        aggregate_week=False,
+    )
+    current_category = new_sku[
+        sku_keys + ["category_level1_description"]
+    ].drop_duplicates(sku_keys)
+    reference_category = old_sku[
+        sku_keys + ["category_level1_description"]
+    ].drop_duplicates(sku_keys).rename(columns={
+        "category_level1_description": "reference_category_level1_description",
+    })
+    sku_profit = sku_profit.merge(
+        current_category, on=sku_keys, how="left", validate="many_to_one"
+    ).merge(
+        reference_category, on=sku_keys, how="left", validate="many_to_one"
+    )
+    sku_profit["category_level1_description"] = sku_profit[
+        "category_level1_description"
+    ].fillna(sku_profit["reference_category_level1_description"])
+    review_categories = daily_profit.loc[
+        daily_profit["level_description"].eq("大分类")
+        & daily_profit["metric"].eq("store_profit_amount")
+        & daily_profit["status"].eq("REVIEW_REQUIRED"),
+        [
+            "business_date", "category_level1_description", "diff_amount",
+            "diff_pct", "low_base", "review_reason",
+        ],
+    ].rename(columns={
+        "diff_amount": "category_diff_amount",
+        "diff_pct": "category_diff_pct",
+        "low_base": "category_low_base",
+        "review_reason": "category_review_reason",
+    })
+    sku_profit = sku_profit.merge(
+        review_categories,
+        on=["business_date", "category_level1_description"],
+        how="left",
+        validate="many_to_one",
+    )
+    sku_profit["status"] = np.where(
+        sku_profit["category_review_reason"].notna(),
+        "CATEGORY_REVIEW_REQUIRED",
+        "LOCATE_ONLY",
+    )
+    sku_profit = sku_profit.sort_values(
+        ["business_date", "category_level1_description", "diff_amount"],
+        key=lambda values: values.abs() if values.name == "diff_amount" else values,
+        ascending=[True, True, False],
+    )
 
     # Category parity is meaningful only for selling SKUs. Receipt-only source
     # codes are intentionally reallocated to a target sales code by v1.5, while
@@ -657,11 +740,16 @@ def compare_v014_to_v15(
         {
             "check": "v15_sku_sales_parity",
             "failed_rows": int(
-                exact.loc[exact["comparison_scope"].eq("SKU_SALES"), "status"]
-                .ne("PASS")
+                exact.loc[
+                    exact["comparison_scope"].eq("SKU_SALES"), "status"
+                ].isin({"MISSING_SIDE", "FAIL"})
                 .sum()
             ),
-            "diagnostic_rows": 0,
+            "diagnostic_rows": int(
+                exact.loc[
+                    exact["comparison_scope"].eq("SKU_SALES"), "status"
+                ].eq("EMPTY_ZERO_ROW").sum()
+            ),
         },
         {
             "check": "v15_store_day_inbound_parity",
@@ -669,27 +757,35 @@ def compare_v014_to_v15(
                 exact.loc[
                     exact["comparison_scope"].eq("STORE_DAY_INBOUND_AMOUNT"),
                     "status",
-                ].ne("PASS").sum()
+                ].isin({"MISSING_SIDE", "FAIL"}).sum()
             ),
-            "diagnostic_rows": 0,
+            "diagnostic_rows": int(
+                exact.loc[
+                    exact["comparison_scope"].eq("STORE_DAY_INBOUND_AMOUNT"),
+                    "status",
+                ].eq("EMPTY_ZERO_ROW").sum()
+            ),
         },
         {
-            "check": "weekly_store_profit_within_2pct",
+            "check": "daily_store_and_large_category_profit_within_3pct",
             "failed_rows": int(
-                weekly_profit.loc[weekly_profit["is_gate_metric"], "status"]
-                .isin({"FAIL", "MISSING_SIDE"})
+                daily_profit.loc[daily_profit["is_gate_metric"], "status"]
+                .eq("REVIEW_REQUIRED")
                 .sum()
             ),
-            "diagnostic_rows": 0,
+            "diagnostic_rows": int(
+                daily_profit.loc[
+                    daily_profit["is_gate_metric"]
+                    & daily_profit["low_base"],
+                    "status",
+                ].eq("REVIEW_REQUIRED").sum()
+            ),
         },
         {
-            "check": "normalized_category_profit_diagnostic",
+            "check": "weekly_profit_diagnostic",
             "failed_rows": 0,
             "diagnostic_rows": int(
-                weekly_profit.loc[
-                    weekly_profit["level_description"].eq("大分类"),
-                    "diff_amount",
-                ].abs().gt(money_tolerance).sum()
+                weekly_profit["diff_amount"].abs().gt(money_tolerance).sum()
             ),
         },
         {

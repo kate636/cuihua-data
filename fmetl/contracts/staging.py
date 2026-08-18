@@ -23,7 +23,14 @@ STAGE_CONTRACTS = (
     ),
     StageTableContract(
         "v014_stage_source_completeness",
-        ("store_id", "business_date", "source_name", "is_complete"),
+        ("store_id", "business_date", "source_name", "is_complete", "source_tier"),
+    ),
+    StageTableContract(
+        "v014_stage_day_clear_audit",
+        (
+            "store_id", "business_date", "article_id", "day_clear",
+            "day_clear_source",
+        ),
     ),
     StageTableContract(
         "v014_stage_product_group",
@@ -48,6 +55,8 @@ STAGE_CONTRACTS = (
             "store_id", "business_date", "relation_id", "raw_article_id",
             "finished_article_id", "raw_qty", "yield_qty", "effective_from",
             "effective_to", "approved", "relation_source",
+            "recipe_group_id", "recipe_mode", "source_qty_per_target_qty",
+            "target_qty_per_source_qty",
             "external_finished_receipt_qty", "external_finished_receipt_amt",
         ),
     ),
@@ -56,7 +65,8 @@ STAGE_CONTRACTS = (
         (
             "store_id", "business_date", "source_article_id", "target_article_id",
             "effective_from", "effective_to", "actual_event", "fixed_rule",
-            "convert_rate", "cost_rate", "approved",
+            "convert_rate", "source_qty_per_target_qty",
+            "target_qty_per_source_qty", "cost_rate", "approved",
         ),
     ),
     StageTableContract(
@@ -70,17 +80,39 @@ STAGE_CONTRACTS = (
         ),
     ),
     StageTableContract(
+        "v014_stage_inventory_count_audit",
+        (
+            "store_id", "business_date", "article_id",
+            "source_actual_stock_qty", "actual_stock_qty",
+            "source_sale_stock_qty", "source_profit_loss_qty",
+            "created_by", "updated_by", "created_at", "updated_at",
+            "is_counted", "is_explicit_operator_count",
+            "count_status", "count_evidence",
+        ),
+    ),
+    StageTableContract(
+        "v014_stage_special_loss_coverage",
+        (
+            "store_id", "business_date", "article_id",
+            "general_known_lost_qty", "ccj_qty", "ssls_qty",
+            "special_loss_qty", "covered_by_general_loss_qty",
+            "supplemented_from_special_source_qty", "effective_known_lost_qty",
+            "coverage_rule",
+        ),
+    ),
+    StageTableContract(
         "v014_stage_openings",
         (
             "store_id", "article_id", "opening_qty", "opening_amt",
-            "opening_source", "opening_source_day",
+            "opening_source", "opening_source_day", "opening_warning", "opening_status",
         ),
     ),
     StageTableContract(
         "v014_stage_conversion_events",
         (
             "store_id", "business_date", "event_group_id",
-            "source_article_id", "target_article_id", "source_qty", "target_qty",
+            "source_article_id", "target_article_id", "source_qty", "source_amount",
+            "target_qty",
             "source_common_qty", "target_common_qty", "amount_allocation_ratio",
             "quantity_source",
         ),
@@ -149,5 +181,7 @@ def validate_stage_database(
                 "v014_stage_bom", "v014_stage_processing",
                 "v014_stage_explicit_convert", "v014_stage_conversion_events",
                 "v014_stage_finished_processing_daily",
+                "v014_stage_special_loss_coverage",
+                "v014_stage_inventory_count_audit",
             }:
                 raise ValueError(f"{contract.name} has no rows for store {store_id}")

@@ -9,8 +9,7 @@ class RelationType(str, Enum):
     BOM = "BOM"
     PROCESSING = "PROCESSING"
     EXPLICIT_CONVERT = "EXPLICIT_CONVERT"
-    ALLOCATED_RECEIPT = "ALLOCATED_RECEIPT"
-    PRODUCT_GROUP_CANDIDATE = "PRODUCT_GROUP_CANDIDATE"
+    PRODUCT_GROUP_CONVERT = "PRODUCT_GROUP_CONVERT"
     UNRESOLVED = "UNRESOLVED"
     CONFLICT = "CONFLICT"
 
@@ -24,7 +23,7 @@ class OutputField:
 
 # Frozen from SHOW FULL COLUMNS on the v1.5 result table used by the isolated
 # 2026-07-27 product-group experiment.  The first 123 fields are the v1.5
-# compatibility contract; the final two are the v0.14 parallel group level.
+# compatibility contract; the final two are the v0.18 product-group extension.
 _CONTRACT_TEXT = """
 store_flag|VARCHAR|标签
 store_no|VARCHAR|门店号
@@ -161,12 +160,14 @@ V15_COMPATIBLE_FIELDS = OUTPUT_CONTRACT[:123]
 V014_EXTENSION_FIELDS = OUTPUT_CONTRACT[123:]
 
 if len(V15_COMPATIBLE_FIELDS) != 123 or len(OUTPUT_CONTRACT) != 125:
-    raise RuntimeError("v0.14 result contract must be 123 compatible + 2 extension fields")
+    raise RuntimeError("v0.18 result contract must be 123 compatible + 2 extension fields")
 
 
 RELATION_REGISTRY_COLUMNS = (
     "store_id", "business_date", "source_article_id", "target_article_id",
-    "relation_type", "quantity_rate", "cost_rate", "posting_mode",
+    "relation_type", "quantity_rate", "source_qty_per_target_qty",
+    "target_qty_per_source_qty", "cost_rate", "posting_mode",
+    "direction_source", "ratio_source", "recipe_group_id", "recipe_mode",
     "effective_from", "effective_to", "evidence_source", "relation_version", "status",
     "relation_id", "formal_flow_allowed",
 )

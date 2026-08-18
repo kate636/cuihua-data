@@ -32,6 +32,9 @@ SOURCE_COLUMNS = (
     "store_id", "business_date", "event_group_id", "relation_type",
     "source_article_id", "source_out_qty", "quantity_source", "relation_snapshot_id",
 )
+SOURCE_OPTIONAL_COLUMNS = (
+    "specified_source_out_amt", "specified_cost_source",
+)
 TARGET_COLUMNS = (
     "store_id", "business_date", "event_group_id", "relation_type",
     "target_article_id", "target_in_qty", "amount_allocation_ratio",
@@ -87,7 +90,14 @@ def _validate_internal(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     _require(sources, SOURCE_COLUMNS, "internal_sources")
     _require(targets, TARGET_COLUMNS, "internal_targets")
-    source = sources[list(SOURCE_COLUMNS)].copy()
+    source_optional = [
+        column for column in SOURCE_OPTIONAL_COLUMNS if column in sources.columns
+    ]
+    source = sources[[*SOURCE_COLUMNS, *source_optional]].copy()
+    if "specified_source_out_amt" not in source:
+        source["specified_source_out_amt"] = np.nan
+    if "specified_cost_source" not in source:
+        source["specified_cost_source"] = ""
     target = targets[list(TARGET_COLUMNS)].copy()
     source_keys = ["store_id", "business_date", "event_group_id", "source_article_id"]
     target_keys = ["store_id", "business_date", "event_group_id", "target_article_id"]
@@ -122,6 +132,19 @@ def _validate_internal(
             f"duplicate_targets={duplicate_targets.head(20).to_dict('records')}"
         )
     _required_numeric(source, ("source_out_qty",), "internal_sources")
+    source["specified_source_out_amt"] = pd.to_numeric(
+        source["specified_source_out_amt"], errors="raise"
+    )
+    specified = source["specified_source_out_amt"].notna()
+    if (
+        ~np.isfinite(
+            source.loc[specified, "specified_source_out_amt"].to_numpy(dtype=float)
+        ).all()
+        or source.loc[specified, "specified_source_out_amt"].lt(-0.01).any()
+    ):
+        raise ValueError("specified_source_out_amt must be finite and nonnegative")
+    if source.loc[specified, "specified_cost_source"].astype(str).str.strip().eq("").any():
+        raise ValueError("specified source amounts require a cost source")
     _required_numeric(
         target, ("target_in_qty", "amount_allocation_ratio"), "internal_targets"
     )
@@ -221,9 +244,9 @@ def run_weighted_ledger(
         raise ValueError("activities.actual_stock_qty cannot be negative")
     if (activity["is_counted"] & ~present_actual).any():
         raise ValueError("is_counted requires actual_stock_qty")
-    _required_numeric(opening, ("opening_qty", "opening_amt"), "openings")
-    if (opening["opening_qty"].le(0.001) & opening["opening_amt"].abs().gt(0.01)).any():
-        raise ValueError("opening amount requires positive opening quantity")
+    _required_numeric(
+        opening, ("opening_qty", "opening_amt"), "openings", nonnegative=False
+    )
 
     activity_domain = set(activity[activity_keys].itertuples(index=False, name=None))
     source_domain = set(
@@ -252,13 +275,6 @@ def run_weighted_ledger(
 
     current = {
         (row.store_id, row.article_id): (float(row.opening_qty), float(row.opening_amt))
-        for row in opening.itertuples(index=False)
-    }
-    last_unit_cost = {
-        (row.store_id, row.article_id): (
-            float(row.opening_amt) / float(row.opening_qty)
-            if float(row.opening_qty) > 0.001 else np.nan
-        )
         for row in opening.itertuples(index=False)
     }
     opening_meta = {
@@ -336,50 +352,48 @@ def run_weighted_ledger(
                     incoming_amt[flow_name] += event_amt * float(leg.amount_allocation_ratio)
 
                 outgoing_qty = {flow: 0.0 for flow in RELATION_FLOW.values()}
+                outgoing_fixed_amt = {flow: 0.0 for flow in RELATION_FLOW.values()}
+                outgoing_has_fixed_amt = {flow: False for flow in RELATION_FLOW.values()}
                 outgoing_legs = source_by_article.get(article_id, empty_source)
                 for leg in outgoing_legs.itertuples(index=False):
-                    outgoing_qty[RELATION_FLOW[str(leg.relation_type)]] += float(leg.source_out_qty)
+                    flow_name = RELATION_FLOW[str(leg.relation_type)]
+                    outgoing_qty[flow_name] += float(leg.source_out_qty)
+                    specified_amt = getattr(leg, "specified_source_out_amt", np.nan)
+                    if not pd.isna(specified_amt):
+                        outgoing_fixed_amt[flow_name] += float(specified_amt)
+                        outgoing_has_fixed_amt[flow_name] = True
 
                 return_qty = float(row.sale_return_qty)
                 if return_qty > 0:
+                    fixed_bom_qty = (
+                        outgoing_qty["bom"]
+                        if outgoing_has_fixed_amt["bom"] else 0.0
+                    )
+                    fixed_bom_amt = (
+                        outgoing_fixed_amt["bom"]
+                        if outgoing_has_fixed_amt["bom"] else 0.0
+                    )
                     pre_return_qty = (
                         init_qty + float(row.store_receive_qty) + sum(incoming_qty.values())
+                        - fixed_bom_qty
                     )
                     pre_return_amt = (
                         init_amt + float(row.store_receive_amt) + sum(incoming_amt.values())
+                        - fixed_bom_amt
                     )
-                    if pre_return_qty > 0.001:
+                    if pre_return_qty > 0.001 and pre_return_amt > 0.01:
                         return_cost_basis = pre_return_amt / pre_return_qty
                     else:
-                        prior_cost = float(last_unit_cost[(store, article_id)])
-                        if np.isfinite(prior_cost) and prior_cost > 0:
-                            return_cost_basis = prior_cost
-                        elif (
-                            float(row.gross_sale_qty) + 0.001 >= return_qty
-                            and float(row.net_sale_qty) >= -0.001
-                        ):
-                            # A same-day return that is fully offset by gross
-                            # sales can be netted physically even when this SKU
-                            # has no cost pool yet. The zero basis is explicit;
-                            # the runner quarantines the resulting cost gap.
-                            return_cost_basis = 0.0
-                        else:
-                            raise ValueError(
-                                "sale return has no inventory cost evidence: "
-                                f"{store}/{day}/{article_id}"
-                            )
+                        reference_cost = float(row.fallback_cost)
+                        return_cost_basis = reference_cost if reference_cost > 0 else 0.0
                     sale_return_amt = return_qty * return_cost_basis
                 else:
                     return_cost_basis = 0.0
                     sale_return_amt = 0.0
 
                 actual = None if pd.isna(row.actual_stock_qty) else float(row.actual_stock_qty)
-                prior_cost = float(last_unit_cost[(store, article_id)])
                 reference_cost = float(row.fallback_cost)
-                if np.isfinite(prior_cost) and prior_cost > 0:
-                    fallback_cost = prior_cost
-                    fallback_cost_source = "LAST_POSITIVE_ISSUE_COST"
-                elif reference_cost > 0:
+                if reference_cost > 0:
                     fallback_cost = reference_cost
                     fallback_cost_source = "INVENTORY_POOL_DAILY_COST_PRICE"
                 else:
@@ -393,6 +407,10 @@ def run_weighted_ledger(
                     bom_in_qty=incoming_qty["bom"],
                     bom_in_amt=incoming_amt["bom"],
                     bom_out_qty=outgoing_qty["bom"],
+                    bom_out_fixed_amt=(
+                        outgoing_fixed_amt["bom"]
+                        if outgoing_has_fixed_amt["bom"] else None
+                    ),
                     pack_in_qty=incoming_qty["pack"],
                     pack_in_amt=incoming_amt["pack"],
                     pack_out_qty=outgoing_qty["pack"],
@@ -430,7 +448,12 @@ def run_weighted_ledger(
                     "residual_transfer": state.residual_transfer_out_amt,
                 }
                 for leg in outgoing_legs.itertuples(index=False):
-                    leg_amt = float(leg.source_out_qty) * state.issue_unit_cost
+                    specified_amt = getattr(leg, "specified_source_out_amt", np.nan)
+                    leg_amt = (
+                        float(specified_amt)
+                        if not pd.isna(specified_amt)
+                        else float(leg.source_out_qty) * state.issue_unit_cost
+                    )
                     event_source_amounts.setdefault(str(leg.event_group_id), {})[article_id] = leg_amt
                     posting_rows.append({
                         "posting_id": f"{store}|{day}|{leg.event_group_id}|OUT|{article_id}",
@@ -444,7 +467,11 @@ def run_weighted_ledger(
                         "qty": float(leg.source_out_qty),
                         "amt": leg_amt,
                         "quantity_source": str(leg.quantity_source),
-                        "cost_source": "DAILY_WEIGHTED_ISSUE_COST",
+                        "cost_source": (
+                            str(getattr(leg, "specified_cost_source", ""))
+                            if not pd.isna(specified_amt)
+                            else "DAILY_WEIGHTED_ISSUE_COST"
+                        ),
                         "formal_flow_allowed": True,
                     })
 
@@ -524,9 +551,6 @@ def run_weighted_ledger(
             state_rows.extend(day_results.values())
             for article_id, row in day_results.items():
                 current[(store, article_id)] = (float(row["end_qty"]), float(row["end_amt"]))
-                issue_cost = float(row["issue_unit_cost"])
-                if np.isfinite(issue_cost) and issue_cost > 0:
-                    last_unit_cost[(store, article_id)] = issue_cost
 
     postings = pd.DataFrame(posting_rows, columns=POSTING_COLUMNS)
     if not postings.empty:

@@ -109,6 +109,7 @@ class CategoryMapper:
         if missing:
             raise KeyError(f"category input missing columns: {missing}")
         out = df.copy()
+        out["category_authoritative_level1_description"] = ""
         if self.latest_categories:
             latest = out["article_id"].astype(str).map(self.latest_categories)
             matched = latest.notna()
@@ -120,23 +121,30 @@ class CategoryMapper:
                 out.loc[matched, column] = latest.loc[matched].map(
                     lambda values: values[position]
                 )
+            out.loc[
+                matched, "category_authoritative_level1_description"
+            ] = latest.loc[matched].map(lambda values: values[0])
             out["category_mapping_source"] = "LATEST_DIM_GOODS_FALLBACK"
             out.loc[matched, "category_mapping_source"] = "MONITORING_PLATFORM_LATEST"
         else:
             out["category_mapping_source"] = "STATIC_RULE_INPUT"
-        decisions = [
-            self.decide(
-                row.article_id,
-                row.category_level1_description,
-                row.category_level2_description,
-                row.category_level3_description,
-                row.sale_unit,
-                getattr(row, "business_date", None),
-                use_static_sku_overrides=not bool(matched.iloc[index])
-                if self.latest_categories else True,
-            )
-            for index, row in enumerate(out.itertuples(index=False))
-        ]
+        decisions = []
+        for index, row in enumerate(out.itertuples(index=False)):
+            platform_matched = bool(matched.iloc[index]) if self.latest_categories else False
+            if platform_matched:
+                decisions.append(CategoryDecision(
+                    str(row.category_level1_description),
+                    "monitoring_platform_latest_level1",
+                ))
+            else:
+                decisions.append(self.decide(
+                    row.article_id,
+                    row.category_level1_description,
+                    row.category_level2_description,
+                    row.category_level3_description,
+                    row.sale_unit,
+                    getattr(row, "business_date", None),
+                ))
         out["report_category_name"] = [decision.name for decision in decisions]
         out["report_category_code"] = out["report_category_name"]
         out["category_rule_reason"] = [decision.reason for decision in decisions]

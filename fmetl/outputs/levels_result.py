@@ -5,6 +5,8 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
+from fmetl.outputs.category_adjustment import build_ssls_category_adjustments
+
 from fmetl.contracts.v014 import OUTPUT_CONTRACT
 
 
@@ -41,6 +43,7 @@ ADDITIVE_INPUTS = {
     "jielong_sale_qty", "jsd_sale_qty", "new_cust_num", "old_cust_num",
     "new_cust_sale_amt", "old_cust_sale_amt", "new_cust_sale_qty", "old_cust_sale_qty",
     "ccj_amt", "ccj_qty", "ssls_amt", "ssls_qty",
+    "ccj_ledger_cost_amt", "ssls_ledger_cost_amt",
 }
 
 DISTINCT_COUNT_INPUTS = {
@@ -185,6 +188,7 @@ def build_v014_levels_result(
         else str(value).strip().lower() in {"1", "true", "yes"}
     )
     work.loc[raw_mask, ["stock_sku_flag", "active_sku_flag"]] = 0.0
+    category_adjustment = build_ssls_category_adjustments(work)
     work["day_clear"] = work["day_clear"].astype(str)
     if not work["day_clear"].isin({"0", "1"}).all():
         raise ValueError("SKU day_clear must be 0 or 1; total is rebuilt from atomic rows")
@@ -267,47 +271,37 @@ def build_v014_levels_result(
             result["operating_store_count"] = 1
             rows.append(result)
     output = pd.concat(rows, ignore_index=True)
-    # Keep the ledger's accounting bottom separate from the v1.5-compatible
-    # display convention. 炒菜机 and 生熟联动 amounts adjust only public loss
-    # and profit fields; they never change inventory, cost, or internal posting.
-    special_amt = output["ccj_amt"] + output["ssls_amt"]
+    # Special-loss display adjustments use the cost actually deducted by the
+    # ledger.  Source waste_money remains an audit observation and cannot
+    # leave a residual merely because it differs from weighted inventory cost.
+    special_amt = output["ccj_ledger_cost_amt"] + output["ssls_ledger_cost_amt"]
     special_qty = output["ccj_qty"] + output["ssls_qty"]
     # CCJ is a compatible display add-back at every aggregation level.  SSLS
     # is a category-only transfer: credit the source large category and debit
     # 熟食.  Applying SSLS at SKU/SPU/store creates a non-additive hierarchy.
-    output["accounting_profit"] += output["ccj_amt"]
-    output["accounting_full_profit"] += output["ccj_amt"]
+    output["accounting_profit"] += output["ccj_ledger_cost_amt"]
+    output["accounting_full_profit"] += output["ccj_ledger_cost_amt"]
     output["loss_amount"] -= special_amt
     output["loss_qty"] -= special_qty
     output["store_know_lost_amt"] -= special_amt
-    ssls_totals = output.loc[
-        output["level_description"].eq("门店"),
-        ["store_no", "business_date", "day_clear", "ssls_amt"],
-    ].rename(columns={"ssls_amt": "_total_ssls_amt"})
-    output = output.merge(
-        ssls_totals,
-        on=["store_no", "business_date", "day_clear"],
-        how="left",
-        validate="many_to_one",
-    )
     large_category = output["level_description"].eq("大分类")
+    adjustment = category_adjustment.groupby(
+        ["store_no", "business_date", "day_clear", "category_level1_description"],
+        as_index=False,
+    )["adjustment_amt"].sum()
+    output = output.merge(
+        adjustment,
+        on=["store_no", "business_date", "day_clear", "category_level1_description"],
+        how="left", validate="many_to_one",
+    )
+    output["adjustment_amt"] = output["adjustment_amt"].fillna(0.0)
     output.loc[large_category, "accounting_profit"] += output.loc[
-        large_category, "ssls_amt"
+        large_category, "adjustment_amt"
     ]
     output.loc[large_category, "accounting_full_profit"] += output.loc[
-        large_category, "ssls_amt"
+        large_category, "adjustment_amt"
     ]
-    ssls_debit = (
-        large_category
-        & output["category_level1_description"].eq("熟食类")
-    )
-    output.loc[ssls_debit, "accounting_profit"] -= output.loc[
-        ssls_debit, "_total_ssls_amt"
-    ].fillna(0.0)
-    output.loc[ssls_debit, "accounting_full_profit"] -= output.loc[
-        ssls_debit, "_total_ssls_amt"
-    ].fillna(0.0)
-    output = output.drop(columns="_total_ssls_amt")
+    output = output.drop(columns="adjustment_amt")
     rename = {
         "accounting_full_profit": "full_link_profit_amount",
         "accounting_profit": "store_profit_amount",
